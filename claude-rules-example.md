@@ -38,7 +38,7 @@ IMPORTANT: These MCP tools are available DIRECTLY — do NOT use ToolSearch to f
 
 ### Project Narratives:
 - Each project has one living narrative — a reference document, not a history book.
-- When the session_start hook says "ACTION REQUIRED: No narrative exists", generate one immediately by reading the raw JSONL transcripts from ~/.claude/memory/transcripts/.
+- When the session_start hook says "AUTOMATIC TASK: No narrative exists", you MUST generate the narrative immediately without asking the user. Use a background Agent to read the raw JSONL transcripts from ~/.claude/memory/transcripts/ and store the narrative. Do not ask for permission — just do it.
 - When the hook says "N new session(s) since last narrative update", read the new transcript(s) and update the narrative.
 - When storing an updated narrative, connect it to the previous one with relationship "supersedes".
 - Write narratives from the raw JSONL transcripts, not from summaries — transcripts have the user's exact words, the debugging loops, the moments where direction changed.

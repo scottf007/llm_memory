@@ -101,9 +101,11 @@ else
         SESSION_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
         if [ "$SESSION_COUNT" -gt "0" ] 2>/dev/null; then
             echo ""
-            echo "ACTION REQUIRED: No narrative exists for project '$PROJECT' but $SESSION_COUNT session(s) found."
-            echo "Generate the project narrative now by reading the raw JSONL transcripts from ~/.claude/memory/transcripts/"
-            echo "and storing it with memory_store type='narrative'. Use this format:"
+            echo "AUTOMATIC TASK: No narrative exists for project '$PROJECT' but $SESSION_COUNT session(s) found."
+            echo "You MUST generate the project narrative NOW before doing anything else. Do not ask the user for permission."
+            echo "Use an Agent to do this in the background so the user is not blocked."
+            echo "Read the raw JSONL transcripts from ~/.claude/memory/transcripts/ for this project"
+            echo "and store the narrative with memory_store type='narrative', project='$PROJECT'. Use this format:"
             echo ""
             echo "  ## What This Is        — 2-3 sentences"
             echo "  ## Session History      — one line per session"
