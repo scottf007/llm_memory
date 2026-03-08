@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 DB_PATH = Path.home() / ".claude" / "memory" / "memory.db"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-app = FastAPI(title="LLM Memory Dashboard", version="1.0.0")
+app = FastAPI(title="LLM Memory Dashboard", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,7 +87,6 @@ async def api_memories(
         params: list[Any] = []
 
         if search:
-            # FTS5 search path
             fts_query = " ".join(f'"{token}"' for token in search.split() if token)
             count_sql = (
                 "SELECT COUNT(*) as cnt FROM memories_fts f "
@@ -96,7 +95,7 @@ async def api_memories(
             )
             data_sql = (
                 "SELECT m.id, m.type, m.content, m.project, m.session_id, "
-                "m.created_at, m.importance, m.transcript_ref "
+                "m.created_at, m.importance, m.transcript_ref, m.tags "
                 "FROM memories_fts f "
                 "JOIN memories m ON m.id = f.rowid "
                 "WHERE memories_fts MATCH ?"
@@ -114,11 +113,10 @@ async def api_memories(
 
             data_sql += " ORDER BY rank LIMIT ? OFFSET ?"
         else:
-            # Standard query path
             count_sql = "SELECT COUNT(*) as cnt FROM memories WHERE 1=1"
             data_sql = (
                 "SELECT id, type, content, project, session_id, "
-                "created_at, importance, transcript_ref FROM memories WHERE 1=1"
+                "created_at, importance, transcript_ref, tags FROM memories WHERE 1=1"
             )
 
             if project:
@@ -132,10 +130,8 @@ async def api_memories(
 
             data_sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
 
-        # Count query uses params without limit/offset
         total = conn.execute(count_sql, params).fetchone()["cnt"]
 
-        # Data query adds limit and offset
         params.extend([limit, offset])
         rows = conn.execute(data_sql, params).fetchall()
 
@@ -173,7 +169,6 @@ async def api_stats():
         ).fetchall()
         types = {r["type"]: r["cnt"] for r in type_rows}
 
-        # Recent activity: count of memories per day for the last 7 days
         recent_activity = []
         for days_ago in range(6, -1, -1):
             day = (datetime.utcnow() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
@@ -206,7 +201,6 @@ async def api_graph(
 
     try:
         if memory_id is not None:
-            # Center graph on a specific memory, traverse depth 2
             visited: set[int] = set()
             nodes: list[dict[str, Any]] = []
             edges: list[dict[str, Any]] = []
@@ -254,7 +248,6 @@ async def api_graph(
             return {"nodes": nodes, "edges": edges}
 
         else:
-            # Return all connected nodes (optionally filtered by project)
             if project:
                 mem_rows = conn.execute(
                     "SELECT id, type, content, project, importance "
@@ -310,7 +303,7 @@ async def api_memory_detail(memory_id: int):
 
     try:
         row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref "
+            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref, tags "
             "FROM memories WHERE id = ?",
             (memory_id,),
         ).fetchone()

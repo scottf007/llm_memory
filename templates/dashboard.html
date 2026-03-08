@@ -160,13 +160,9 @@
     border-radius: 12px;
     color: #0d1117;
   }
-  .badge-type.decision        { background: #f0883e; }
-  .badge-type.insight         { background: #a371f7; }
-  .badge-type.progress        { background: #3fb950; }
-  .badge-type.correction      { background: #f85149; }
-  .badge-type.session_summary { background: #58a6ff; }
-  .badge-type.chunk_summary   { background: #39d353; }
-  .badge-type.note            { background: #8b949e; }
+  .badge-type.narrative   { background: #d2a8ff; }
+  .badge-type.note        { background: #58a6ff; }
+  .badge-type.session_log { background: #3fb950; }
 
   .badge-project {
     font-size: 11px;
@@ -376,13 +372,9 @@
       <label>Type</label>
       <select id="filter-type">
         <option value="">All Types</option>
-        <option value="decision">Decision</option>
-        <option value="insight">Insight</option>
-        <option value="progress">Progress</option>
-        <option value="correction">Correction</option>
-        <option value="session_summary">Session Summary</option>
-        <option value="chunk_summary">Chunk Summary</option>
+        <option value="narrative">Narrative</option>
         <option value="note">Note</option>
+        <option value="session_log">Session Log</option>
       </select>
     </div>
     <div>
@@ -432,13 +424,9 @@
 (function() {
   // --- Constants ---
   const TYPE_COLORS = {
-    decision: '#f0883e',
-    insight: '#a371f7',
-    progress: '#3fb950',
-    correction: '#f85149',
-    session_summary: '#58a6ff',
-    chunk_summary: '#39d353',
-    note: '#8b949e'
+    narrative: '#d2a8ff',
+    note: '#58a6ff',
+    session_log: '#3fb950'
   };
   const PAGE_SIZE = 20;
 
@@ -657,21 +645,31 @@
         (mem.updated_at ? '<span><strong>Updated:</strong> ' + esc(mem.updated_at) + '</span>' : '') +
         (mem.transcript_ref ? '<span><strong>Transcript:</strong> <code style="font-size:12px;background:#21262d;padding:2px 6px;border-radius:3px;">' + esc(mem.transcript_ref) + '</code></span>' : '');
 
-      // Connections
-      const conns = mem.connections || [];
+      // Connections — API returns {outgoing: [...], incoming: [...]}
+      const connData = mem.connections || {};
+      const outgoing = connData.outgoing || [];
+      const incoming = connData.incoming || [];
       detailConnections.innerHTML = '';
-      if (conns.length > 0) {
+      if (outgoing.length > 0 || incoming.length > 0) {
         detailConnTitle.style.display = 'block';
-        conns.forEach(c => {
+        outgoing.forEach(c => {
           const item = document.createElement('div');
           item.className = 'conn-item';
+          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory #' + c.to_id);
           item.innerHTML =
-            '<div class="conn-rel">' + esc(c.relationship || c.type || 'related') + '</div>' +
-            '<div>' + esc(c.content || c.target_content || ('Memory #' + (c.target_id || c.to_id || '?'))) + '</div>';
-          item.addEventListener('click', () => {
-            const targetId = c.target_id || c.to_id;
-            if (targetId) openDetail(targetId);
-          });
+            '<div class="conn-rel">' + esc(c.relationship) + ' → #' + c.to_id + '</div>' +
+            '<div>' + esc(preview) + '</div>';
+          item.addEventListener('click', () => openDetail(c.to_id));
+          detailConnections.appendChild(item);
+        });
+        incoming.forEach(c => {
+          const item = document.createElement('div');
+          item.className = 'conn-item';
+          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory #' + c.from_id);
+          item.innerHTML =
+            '<div class="conn-rel">#' + c.from_id + ' ' + esc(c.relationship) + ' → this</div>' +
+            '<div>' + esc(preview) + '</div>';
+          item.addEventListener('click', () => openDetail(c.from_id));
           detailConnections.appendChild(item);
         });
       } else {

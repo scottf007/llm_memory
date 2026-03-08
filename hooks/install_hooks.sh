@@ -4,7 +4,10 @@ set -e
 SETTINGS_FILE="$HOME/.claude/settings.json"
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== LLM Memory — Install Hooks ==="
+# When called standalone, show header. When called from install.sh, parent handles it.
+if [ -z "$LLM_MEMORY_INSTALLING" ]; then
+    echo "=== LLM Memory — Install Hooks ==="
+fi
 
 if [ ! -f "$SETTINGS_FILE" ]; then
     echo '{}' > "$SETTINGS_FILE"

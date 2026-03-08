@@ -18,54 +18,41 @@ Or if you already have a `~/.claude/CLAUDE.md`, merge the sections below into it
 - Always use Write/Edit tools for large content. Never output large content in conversation.
 
 ## Memory Protocol (MCP tools via llm_memory server)
-You have access to persistent memory tools provided by the "llm_memory" MCP server. These are your primary tools for cross-session memory. The tool names are prefixed with mcp__llm_memory__ (e.g., mcp__llm_memory__memory_store).
+You have access to persistent memory tools provided by the "llm_memory" MCP server. The tool names are prefixed with mcp__llm_memory__ (e.g., mcp__llm_memory__memory_store).
 
 Available tools: memory_store, memory_search, memory_recent, memory_get, memory_connect, memory_explore, memory_delete.
 
-IMPORTANT: These MCP tools are available DIRECTLY — do NOT use ToolSearch to find them. Call them by their full name, e.g., mcp__llm_memory__memory_store, mcp__llm_memory__memory_search, etc.
+IMPORTANT: These MCP tools are available DIRECTLY — do NOT use ToolSearch to find them. Call them by their full name.
 
-- At session start, call memory_recent to load context from previous sessions.
-- At task boundaries (completing a subtask, key decision, resolving an issue), call memory_store.
+### Memory types (3):
+- **narrative**: Per-project living document — the full story of a project. One per project, updated over time. New versions supersede old ones.
+- **note**: Atomic fact, decision, correction, preference, or insight. Keep it short and self-contained. Use tags for searchability.
+- **session_log**: Lightweight record that a session happened. Created automatically by hooks.
+
+### When to use memory tools:
 - Before starting work on a topic, call memory_search to check for relevant past context.
-- When corrected on something, call memory_store with type "correction" and importance 8+.
-- When finishing a session or asked to save progress, call memory_store with type "session_summary".
+- When corrected on something, store a note with importance 8+ and tag "correction".
+- When a key decision is made, store a note with the decision and rationale.
+- When asked to save progress or update the narrative, read the raw JSONL transcript(s) and write a comprehensive narrative.
 - Include the project name in every memory_store call.
-- Use memory_connect to link related memories (supports, contradicts, supersedes, implements, depends_on, related_to).
 
-## Chunk Summaries
-At natural breakpoints during a session (topic change, subtask completion, before compaction, or when context is getting long), store a chunk_summary memory capturing the work just completed.
-
-### When to create chunk summaries:
-- After completing a distinct subtask or feature
-- When switching topics or projects within a session
-- Before compaction (in addition to session_summary)
-- After resolving a complex debugging session
-- Every ~20-30 minutes of active work
-
-### What to include:
-- Decisions made and their rationale
-- Key learnings and insights discovered
-- Outcomes (what worked, what was built/changed)
-- File paths modified and why
-- Current state / what comes next
-
-### What to filter out:
-- Circular debugging loops (just record the resolution)
-- Wrong assumptions that were immediately corrected
-- Dead-end research paths (unless the dead-end itself is informative)
-- Verbatim code blocks (summarize the change instead)
-- Routine operations (file reads, directory listings)
-
-### How to create them:
-- Use type "chunk_summary" with importance 5-7 (raise to 8+ for critical decisions)
-- Number chunks per session in the content: "Chunk 1: ..."
-- Include the project name
-- Set transcript_ref to the archived transcript path if known (e.g. "~/.claude/memory/transcripts/SESSION_ID.jsonl")
-- Link sequential chunks with memory_connect using "related_to"
-- Link the final chunk to the session_summary with "supports"
+### Project Narratives:
+- Each project has one living narrative — a reference document, not a history book.
+- When the session_start hook says "ACTION REQUIRED: No narrative exists", generate one immediately by reading the raw JSONL transcripts from ~/.claude/memory/transcripts/.
+- When the hook says "N new session(s) since last narrative update", read the new transcript(s) and update the narrative.
+- When storing an updated narrative, connect it to the previous one with relationship "supersedes".
+- Write narratives from the raw JSONL transcripts, not from summaries — transcripts have the user's exact words, the debugging loops, the moments where direction changed.
+- Narrative format (all sections required):
+  - **What This Is**: 2-3 sentences describing the project
+  - **Session History**: One line per session — date, what happened, outcome
+  - **Decisions Made**: Table format — decision | rationale (with user's own words where possible)
+  - **Gotchas & Lessons**: Bullet points of things that bit us, so future sessions don't repeat mistakes
+  - **Current State**: What exists, what works, what's deployed
+  - **Outstanding Items**: Action items not started, half-finished work, unsolved problems, deferred ideas — nothing gets lost here
+  - **Direction**: Where we're headed, numbered next steps
+  - **Source Transcripts**: List of JSONL files used
 
 ## Context Management
-- After every ~10 tool calls, assess whether important unsaved decisions exist. If so, memory_store them.
 - Prefer reading files on-demand over loading everything upfront.
 - Use summary/index files to navigate large projects rather than reading full files.
 - Never read files larger than 256KB in one call. Use offset/limit for large files.

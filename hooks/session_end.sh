@@ -1,6 +1,5 @@
 #!/bin/bash
-# SessionEnd hook: auto-saves a session summary from the transcript.
-# Extracts the last few substantial assistant messages as a rough summary.
+# SessionEnd hook: archives transcript and creates a session_log entry.
 
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
@@ -10,7 +9,7 @@ if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
     exit 0
 fi
 
-# Archive raw transcript before anything else
+# Archive raw transcript
 TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
 mkdir -p "$TRANSCRIPT_DIR"
 ARCHIVE_NAME="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)}.jsonl"
@@ -21,26 +20,26 @@ if [ ! -f "$DB" ]; then
     exit 0
 fi
 
-# Skip if PreCompact or Claude already saved a summary for this session
-EXISTING=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE session_id='$SESSION_ID' AND type='session_summary';" 2>/dev/null)
+# Skip if we already logged this session
+EXISTING=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE session_id='$SESSION_ID' AND type='session_log';" 2>/dev/null)
 if [ "$EXISTING" -gt "0" ]; then
     exit 0
 fi
 
-# Extract project name and last few assistant text blocks as a rough summary
-read -r PROJECT SUMMARY < <(/home/scott/projects/llm_memory/.venv/bin/python3 -c "
+# Extract project name, turn count, and brief summary from transcript
+read -r PROJECT TURN_COUNT SUMMARY < <(/home/scott/projects/llm_memory/.venv/bin/python3 -c "
 import json, sys
 from pathlib import Path
 
 transcript_path = '$TRANSCRIPT'
 messages = []
 project = ''
+turn_count = 0
 try:
     with open(transcript_path, 'r') as f:
         for line in f:
             try:
                 entry = json.loads(line.strip())
-                # Derive project from cwd
                 if not project:
                     cwd = entry.get('cwd', '')
                     if cwd:
@@ -49,6 +48,8 @@ try:
                             if part == 'projects' and i + 1 < len(parts):
                                 project = parts[i + 1]
                                 break
+                if entry.get('type') == 'user':
+                    turn_count += 1
                 if entry.get('type') == 'assistant':
                     msg = entry.get('message', {})
                     content = msg.get('content', [])
@@ -57,27 +58,25 @@ try:
                             if isinstance(block, dict) and block.get('type') == 'text':
                                 text = block['text'].strip()
                                 if len(text) > 50:
-                                    messages.append(text[:500])
+                                    messages.append(text[:200])
                     elif isinstance(content, str) and len(content) > 50:
-                        messages.append(content[:500])
+                        messages.append(content[:200])
             except:
                 continue
 except:
     sys.exit(0)
 
 if messages:
-    recent = messages[-3:]
-    summary = ' | '.join(recent)[:1500]
-    summary = summary.replace(\"'\", \"''\")
-    # Output: PROJECT<tab>SUMMARY (project may be empty)
-    print(f'{project}\t{summary}')
+    summary = messages[-1][:300].replace(\"'\", \"''\")
+    print(f'{project}\t{turn_count}\t{summary}')
 " 2>/dev/null)
 
 if [ -n "$SUMMARY" ]; then
+    CONTENT="Session $SESSION_ID for ${PROJECT:-unknown}, $TURN_COUNT turns. $SUMMARY"
     if [ -n "$PROJECT" ]; then
-        sqlite3 "$DB" "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) VALUES ('session_summary', 'Auto-saved session summary: $SUMMARY', '$PROJECT', '$SESSION_ID', 6, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
+        sqlite3 "$DB" "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) VALUES ('session_log', '$CONTENT', '$PROJECT', '$SESSION_ID', 3, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
     else
-        sqlite3 "$DB" "INSERT INTO memories (type, content, session_id, importance, transcript_ref) VALUES ('session_summary', 'Auto-saved session summary: $SUMMARY', '$SESSION_ID', 6, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
+        sqlite3 "$DB" "INSERT INTO memories (type, content, session_id, importance, transcript_ref) VALUES ('session_log', '$CONTENT', '$SESSION_ID', 3, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
     fi
 fi
 

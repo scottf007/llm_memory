@@ -1,9 +1,8 @@
 """
 Batch processor for Claude Code JSONL transcripts.
 
-Discovers all session transcripts in ~/.claude/projects/, extracts
-summaries, archives transcripts, and stores session_summary memories
-in the LLM Memory database.
+Discovers all session transcripts in ~/.claude/projects/, archives them,
+and creates session_log entries in the LLM Memory database.
 
 Usage:
     python process_transcripts.py
@@ -17,7 +16,6 @@ import json
 import re
 import shutil
 import sqlite3
-from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -31,17 +29,11 @@ DB_PATH = DB_DIR / "memory.db"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 ARCHIVE_DIR = DB_DIR / "transcripts"
 
-MAX_USER_PROMPTS = 5       # first N user prompts to include
-MAX_ASSISTANT_BLOCKS = 5   # last N assistant text blocks to include
-MAX_BLOCK_CHARS = 500      # truncate individual blocks
-MAX_SUMMARY_CHARS = 2000   # overall summary limit
-MIN_TURNS = 2              # skip trivial sessions
-CHUNK_SIZE = 25            # turns per chunk
-MIN_CHUNK_TURNS = 3        # skip chunks with fewer turns than this
+MIN_TURNS = 2  # skip trivial sessions
 
 
 # ---------------------------------------------------------------------------
-# Database helpers (matches server.py pattern)
+# Database helpers
 # ---------------------------------------------------------------------------
 
 def get_db() -> sqlite3.Connection:
@@ -53,11 +45,10 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
-def get_processed_sessions(conn: sqlite3.Connection, mem_type: str = "session_summary") -> set[str]:
+def get_processed_sessions(conn: sqlite3.Connection) -> set[str]:
     rows = conn.execute(
         "SELECT DISTINCT session_id FROM memories "
-        "WHERE type=? AND session_id IS NOT NULL",
-        (mem_type,),
+        "WHERE type='session_log' AND session_id IS NOT NULL",
     ).fetchall()
     return {r["session_id"] for r in rows}
 
@@ -94,16 +85,13 @@ def find_transcripts(project_filter: Optional[str] = None) -> list[tuple[Path, s
 def derive_project_from_dir(dir_path: Path) -> str:
     """Extract project name from directory like '-home-scott-projects-finance-nexus'."""
     name = dir_path.name
-    # Strip the common prefix pattern: -home-USER-projects-PROJECTNAME
-    # or -home-USER-projects (the bare projects dir)
     parts = name.split("-")
-    # Find 'projects' in parts, take everything after it
     try:
         idx = parts.index("projects")
         after = parts[idx + 1:]
         if after:
             return "-".join(after)
-        return ""  # bare projects dir, no project name
+        return ""
     except ValueError:
         pass
     return name
@@ -120,7 +108,6 @@ def _project_from_cwd(cwd: str) -> Optional[str]:
 
 def derive_project(cwds: list[str], dir_path: Path) -> str:
     """Derive project name from collected cwds, falling back to directory name."""
-    # Try each cwd, prefer the first one that has a project name
     for cwd in cwds:
         project = _project_from_cwd(cwd)
         if project:
@@ -130,217 +117,8 @@ def derive_project(cwds: list[str], dir_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Transcript extraction
+# Text extraction helpers
 # ---------------------------------------------------------------------------
-
-def extract_session_data(path: Path) -> dict[str, Any]:
-    """Stream a JSONL transcript and extract key data."""
-    user_prompts: list[str] = []
-    assistant_texts: deque[str] = deque(maxlen=MAX_ASSISTANT_BLOCKS)
-    cwds: list[str] = []
-    cwd_seen: set[str] = set()
-    session_id = None
-    first_ts = None
-    last_ts = None
-    turn_count = 0
-
-    with open(path, "r", errors="replace") as f:
-        for line in f:
-            try:
-                entry = json.loads(line.strip())
-            except (json.JSONDecodeError, ValueError):
-                continue
-
-            entry_type = entry.get("type")
-            ts = entry.get("timestamp")
-
-            if ts:
-                if first_ts is None:
-                    first_ts = ts
-                last_ts = ts
-
-            entry_cwd = entry.get("cwd")
-            if entry_cwd and entry_cwd not in cwd_seen:
-                cwd_seen.add(entry_cwd)
-                cwds.append(entry_cwd)
-            if not session_id and entry.get("sessionId"):
-                session_id = entry["sessionId"]
-
-            if entry_type == "user":
-                turn_count += 1
-                if len(user_prompts) < MAX_USER_PROMPTS:
-                    text = _extract_user_text(entry)
-                    if text and len(text) > 10:
-                        user_prompts.append(text[:MAX_BLOCK_CHARS])
-
-            elif entry_type == "assistant":
-                text = _extract_assistant_text(entry)
-                if text and len(text) > 20:
-                    assistant_texts.append(text[:MAX_BLOCK_CHARS])
-
-    return {
-        "session_id": session_id or path.stem,
-        "cwd": cwds[0] if cwds else None,
-        "project": derive_project(cwds, path.parent),
-        "user_prompts": user_prompts,
-        "assistant_texts": list(assistant_texts),
-        "turn_count": turn_count,
-        "first_timestamp": first_ts,
-        "last_timestamp": last_ts,
-    }
-
-
-def extract_chunks(path: Path) -> list[dict[str, Any]]:
-    """Stream a JSONL transcript and split into chunks of ~CHUNK_SIZE turns."""
-    chunks: list[dict[str, Any]] = []
-    # Current chunk accumulator
-    user_prompts: list[str] = []
-    assistant_texts: list[str] = []
-    cwds: list[str] = []
-    cwd_seen: set[str] = set()
-    session_id = None
-    chunk_first_ts = None
-    chunk_last_ts = None
-    turn_count = 0
-    chunk_turn_count = 0
-
-    def flush_chunk():
-        nonlocal user_prompts, assistant_texts, chunk_first_ts, chunk_last_ts, chunk_turn_count
-        if chunk_turn_count < MIN_CHUNK_TURNS:
-            # Too small, skip
-            user_prompts = []
-            assistant_texts = []
-            chunk_first_ts = None
-            chunk_last_ts = None
-            chunk_turn_count = 0
-            return
-        chunks.append({
-            "user_prompts": user_prompts[:MAX_USER_PROMPTS],
-            "assistant_texts": assistant_texts[-MAX_ASSISTANT_BLOCKS:],
-            "first_timestamp": chunk_first_ts,
-            "last_timestamp": chunk_last_ts,
-            "turn_count": chunk_turn_count,
-        })
-        user_prompts = []
-        assistant_texts = []
-        chunk_first_ts = None
-        chunk_last_ts = None
-        chunk_turn_count = 0
-
-    with open(path, "r", errors="replace") as f:
-        for line in f:
-            try:
-                entry = json.loads(line.strip())
-            except (json.JSONDecodeError, ValueError):
-                continue
-
-            entry_type = entry.get("type")
-            ts = entry.get("timestamp")
-
-            if ts:
-                if chunk_first_ts is None:
-                    chunk_first_ts = ts
-                chunk_last_ts = ts
-
-            entry_cwd = entry.get("cwd")
-            if entry_cwd and entry_cwd not in cwd_seen:
-                cwd_seen.add(entry_cwd)
-                cwds.append(entry_cwd)
-            if not session_id and entry.get("sessionId"):
-                session_id = entry["sessionId"]
-
-            if entry_type == "user":
-                turn_count += 1
-                chunk_turn_count += 1
-                text = _extract_user_text(entry)
-                if text and len(text) > 10:
-                    user_prompts.append(text[:MAX_BLOCK_CHARS])
-
-                # Flush chunk at boundary
-                if chunk_turn_count >= CHUNK_SIZE:
-                    flush_chunk()
-
-            elif entry_type == "assistant":
-                text = _extract_assistant_text(entry)
-                if text and len(text) > 20:
-                    assistant_texts.append(text[:MAX_BLOCK_CHARS])
-
-    # Flush remaining
-    flush_chunk()
-
-    return chunks, derive_project(cwds, path.parent), session_id or path.stem
-
-
-def build_chunk_summary(chunk: dict[str, Any], chunk_num: int, total_chunks: int, project: str) -> str:
-    """Build a chunk summary string."""
-    turns = chunk["turn_count"]
-
-    date_range = ""
-    if chunk["first_timestamp"]:
-        try:
-            start = datetime.fromisoformat(chunk["first_timestamp"].replace("Z", "+00:00"))
-            date_range = start.strftime("%Y-%m-%d %H:%M")
-            if chunk["last_timestamp"]:
-                end = datetime.fromisoformat(chunk["last_timestamp"].replace("Z", "+00:00"))
-                if start.date() == end.date():
-                    date_range += f" - {end.strftime('%H:%M')}"
-                else:
-                    date_range += f" to {end.strftime('%Y-%m-%d %H:%M')}"
-        except (ValueError, TypeError):
-            pass
-
-    lines = [f"Chunk {chunk_num}/{total_chunks}: {project} ({date_range}, {turns} turns)"]
-
-    if chunk["user_prompts"]:
-        lines.append("")
-        lines.append("Topics:")
-        for prompt in chunk["user_prompts"]:
-            short = prompt[:150].replace("\n", " ").strip()
-            if len(prompt) > 150:
-                short += "..."
-            lines.append(f"- {short}")
-
-    if chunk["assistant_texts"]:
-        lines.append("")
-        lines.append("Outcomes:")
-        for text in chunk["assistant_texts"]:
-            short = text[:150].replace("\n", " ").strip()
-            if len(text) > 150:
-                short += "..."
-            lines.append(f"- {short}")
-
-    summary = "\n".join(lines)
-    if len(summary) > MAX_SUMMARY_CHARS:
-        summary = summary[:MAX_SUMMARY_CHARS] + "\n..."
-    return summary
-
-
-def store_chunk(
-    conn: sqlite3.Connection,
-    session_id: str,
-    project: str,
-    content: str,
-    transcript_ref: str,
-    prev_chunk_id: Optional[int] = None,
-) -> int:
-    """Insert a chunk_summary memory and link to previous chunk. Returns new ID."""
-    cursor = conn.execute(
-        "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        ("chunk_summary", content, project, session_id, 5, transcript_ref),
-    )
-    chunk_id = cursor.lastrowid
-
-    if prev_chunk_id is not None:
-        conn.execute(
-            "INSERT OR IGNORE INTO connections (from_id, to_id, relationship) "
-            "VALUES (?, ?, ?)",
-            (chunk_id, prev_chunk_id, "related_to"),
-        )
-
-    conn.commit()
-    return chunk_id
-
 
 # Regex to strip noisy XML-like tags injected by hooks and IDE
 _NOISE_TAG_RE = re.compile(
@@ -351,13 +129,10 @@ _NOISE_TAG_RE = re.compile(
     r"local-command-stdout|user-prompt-submit-hook|available-deferred-tools|fast_mode_info)>",
     re.DOTALL,
 )
-# Also strip self-closing / unclosed tags of the same types
 _NOISE_TAG_OPEN_RE = re.compile(
     r"<(?:ide_opened_file|local-command-caveat|command-me|system-reminder|"
     r"user-prompt-submit-hook|available-deferred-tools|fast_mode_info)[^>]*>[^<]*"
 )
-
-
 _HTML_TAG_RE = re.compile(r"</?(?:h[1-6]|p|div|span|br|ul|ol|li|a|strong|em|code|pre|table|tr|td|th)[^>]*>")
 
 
@@ -366,7 +141,6 @@ def _clean_text(text: str) -> str:
     text = _NOISE_TAG_RE.sub("", text)
     text = _NOISE_TAG_OPEN_RE.sub("", text)
     text = _HTML_TAG_RE.sub("", text)
-    # Collapse multiple whitespace/newlines
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
@@ -412,54 +186,57 @@ def _extract_assistant_text(entry: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Summary building
+# Transcript extraction
 # ---------------------------------------------------------------------------
 
-def build_summary(data: dict[str, Any]) -> str:
-    """Build a readable session summary from extracted data."""
-    project = data["project"]
-    turns = data["turn_count"]
+def extract_session_data(path: Path) -> dict[str, Any]:
+    """Stream a JSONL transcript and extract key data for a session_log."""
+    cwds: list[str] = []
+    cwd_seen: set[str] = set()
+    session_id = None
+    first_ts = None
+    last_ts = None
+    turn_count = 0
+    last_assistant_text = ""
 
-    # Date range
-    date_range = ""
-    if data["first_timestamp"]:
-        try:
-            start = datetime.fromisoformat(data["first_timestamp"].replace("Z", "+00:00"))
-            date_range = start.strftime("%Y-%m-%d %H:%M")
-            if data["last_timestamp"]:
-                end = datetime.fromisoformat(data["last_timestamp"].replace("Z", "+00:00"))
-                if start.date() == end.date():
-                    date_range += f" - {end.strftime('%H:%M')}"
-                else:
-                    date_range += f" to {end.strftime('%Y-%m-%d %H:%M')}"
-        except (ValueError, TypeError):
-            pass
+    with open(path, "r", errors="replace") as f:
+        for line in f:
+            try:
+                entry = json.loads(line.strip())
+            except (json.JSONDecodeError, ValueError):
+                continue
 
-    lines = [f"Session for {project} ({date_range}, {turns} turns)"]
+            entry_type = entry.get("type")
+            ts = entry.get("timestamp")
 
-    if data["user_prompts"]:
-        lines.append("")
-        lines.append("User goals:")
-        for prompt in data["user_prompts"]:
-            # Truncate for summary
-            short = prompt[:200].replace("\n", " ").strip()
-            if len(prompt) > 200:
-                short += "..."
-            lines.append(f"- {short}")
+            if ts:
+                if first_ts is None:
+                    first_ts = ts
+                last_ts = ts
 
-    if data["assistant_texts"]:
-        lines.append("")
-        lines.append("Key outcomes:")
-        for text in data["assistant_texts"]:
-            short = text[:200].replace("\n", " ").strip()
-            if len(text) > 200:
-                short += "..."
-            lines.append(f"- {short}")
+            entry_cwd = entry.get("cwd")
+            if entry_cwd and entry_cwd not in cwd_seen:
+                cwd_seen.add(entry_cwd)
+                cwds.append(entry_cwd)
+            if not session_id and entry.get("sessionId"):
+                session_id = entry["sessionId"]
 
-    summary = "\n".join(lines)
-    if len(summary) > MAX_SUMMARY_CHARS:
-        summary = summary[:MAX_SUMMARY_CHARS] + "\n..."
-    return summary
+            if entry_type == "user":
+                turn_count += 1
+
+            elif entry_type == "assistant":
+                text = _extract_assistant_text(entry)
+                if text and len(text) > 50:
+                    last_assistant_text = text[:300]
+
+    return {
+        "session_id": session_id or path.stem,
+        "project": derive_project(cwds, path.parent),
+        "turn_count": turn_count,
+        "first_timestamp": first_ts,
+        "last_timestamp": last_ts,
+        "summary": last_assistant_text,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -475,20 +252,19 @@ def archive_transcript(path: Path, session_id: str) -> Path:
     return dest
 
 
-def store_summary(
+def store_session_log(
     conn: sqlite3.Connection,
     session_id: str,
     project: str,
-    summary: str,
+    content: str,
     transcript_ref: str,
 ) -> int:
-    """Insert a session_summary memory. Returns the new memory ID."""
+    """Insert a session_log memory. Returns the new memory ID."""
     cursor = conn.execute(
         "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        ("session_summary", summary, project, session_id, 6, transcript_ref),
+        ("session_log", content, project, session_id, 3, transcript_ref),
     )
-    # Keep FTS in sync (triggers handle this if they exist, but be safe)
     conn.commit()
     return cursor.lastrowid
 
@@ -497,38 +273,11 @@ def store_summary(
 # Main
 # ---------------------------------------------------------------------------
 
-def _session_belongs_to_project(conn: sqlite3.Connection, session_id: str, project: str) -> bool:
-    """Check if a session_id has any memories for the given project (or had before deletion)."""
-    # After deletion, no rows will match — so we check the transcript path instead
-    transcripts = find_transcripts(project_filter=project)
-    return any(sid == session_id for _, sid in transcripts)
-
-
-def delete_project_memories(conn: sqlite3.Connection, project: str, mem_type: str) -> int:
-    """Delete all memories of a given type for a project. Returns count deleted."""
-    # Delete connections first
-    conn.execute(
-        "DELETE FROM connections WHERE from_id IN "
-        "(SELECT id FROM memories WHERE project=? AND type=?) "
-        "OR to_id IN (SELECT id FROM memories WHERE project=? AND type=?)",
-        (project, mem_type, project, mem_type),
-    )
-    cursor = conn.execute(
-        "DELETE FROM memories WHERE project=? AND type=?",
-        (project, mem_type),
-    )
-    conn.commit()
-    return cursor.rowcount
-
-
-def process_summaries(args, conn, transcripts) -> tuple[int, int]:
-    """Process transcripts into session_summary memories."""
-    processed = get_processed_sessions(conn, "session_summary") if conn else set()
-    # If reprocessing, don't skip the target project's sessions
-    if args.reprocess and args.project:
-        processed = {s for s in processed if not _session_belongs_to_project(conn, s, args.project)}
+def process_transcripts(args, conn, transcripts) -> tuple[int, int]:
+    """Process transcripts into session_log memories."""
+    processed = get_processed_sessions(conn) if conn else set()
     if not args.quiet:
-        print(f"Found {len(transcripts)} transcripts, {len(processed)} session summaries already exist")
+        print(f"Found {len(transcripts)} transcripts, {len(processed)} session_logs already exist")
 
     new_count = 0
     skipped_count = 0
@@ -546,74 +295,27 @@ def process_summaries(args, conn, transcripts) -> tuple[int, int]:
             skipped_count += 1
             continue
 
-        summary = build_summary(data)
+        content = f"Session {session_id} for {data['project']}, {data['turn_count']} turns."
+        if data["summary"]:
+            content += f" {data['summary']}"
+
         transcript_ref = f"~/.claude/memory/transcripts/{session_id}.jsonl"
 
         if args.dry_run:
             if not args.quiet:
-                print(f"\n[DRY RUN] Would create summary: {session_id}")
+                print(f"\n[DRY RUN] Would create session_log: {session_id}")
                 print(f"  Project: {data['project']}")
                 print(f"  Turns: {data['turn_count']}")
                 print(f"  File: {path} ({path.stat().st_size / 1024:.0f} KB)")
-                if args.verbose:
-                    print(f"  Summary preview:\n    {summary[:300]}...")
         else:
             archive_transcript(path, session_id)
-            memory_id = store_summary(conn, session_id, data["project"], summary, transcript_ref)
+            memory_id = store_session_log(conn, session_id, data["project"], content, transcript_ref)
             if not args.quiet:
-                print(f"  Summary: {session_id} → #{memory_id} ({data['project']}, {data['turn_count']} turns)")
+                print(f"  session_log: {session_id} → #{memory_id} ({data['project']}, {data['turn_count']} turns)")
 
         new_count += 1
 
     return new_count, skipped_count
-
-
-def process_chunks(args, conn, transcripts) -> tuple[int, int]:
-    """Process transcripts into chunk_summary memories."""
-    processed = get_processed_sessions(conn, "chunk_summary") if conn else set()
-    if args.reprocess and args.project:
-        processed = {s for s in processed if not _session_belongs_to_project(conn, s, args.project)}
-    if not args.quiet:
-        print(f"Found {len(transcripts)} transcripts, {len(processed)} already chunked")
-
-    new_chunks = 0
-    skipped_count = 0
-
-    for path, session_id in transcripts:
-        if session_id in processed:
-            skipped_count += 1
-            continue
-
-        chunks, project, _ = extract_chunks(path)
-
-        if not chunks:
-            if args.verbose:
-                print(f"  Skip (no chunks): {session_id}")
-            skipped_count += 1
-            continue
-
-        transcript_ref = f"~/.claude/memory/transcripts/{session_id}.jsonl"
-
-        if args.dry_run:
-            if not args.quiet:
-                print(f"\n[DRY RUN] Would create {len(chunks)} chunks: {session_id} ({project})")
-                if args.verbose:
-                    for i, chunk in enumerate(chunks, 1):
-                        summary = build_chunk_summary(chunk, i, len(chunks), project)
-                        print(f"  Chunk {i}: {chunk['turn_count']} turns")
-                        print(f"    {summary[:200]}...")
-        else:
-            archive_transcript(path, session_id)
-            prev_id = None
-            for i, chunk in enumerate(chunks, 1):
-                content = build_chunk_summary(chunk, i, len(chunks), project)
-                chunk_id = store_chunk(conn, session_id, project, content, transcript_ref, prev_id)
-                prev_id = chunk_id
-                new_chunks += 1
-            if not args.quiet:
-                print(f"  Chunks: {session_id} → {len(chunks)} chunks ({project})")
-
-    return new_chunks, skipped_count
 
 
 def main() -> None:
@@ -622,9 +324,6 @@ def main() -> None:
     parser.add_argument("--verbose", action="store_true", help="Print detailed output per transcript")
     parser.add_argument("--quiet", action="store_true", help="Minimal output (for use from hooks)")
     parser.add_argument("--project", type=str, help="Only process transcripts for this project")
-    parser.add_argument("--chunks-only", action="store_true", help="Only generate chunk summaries, skip session summaries")
-    parser.add_argument("--summaries-only", action="store_true", help="Only generate session summaries, skip chunks")
-    parser.add_argument("--reprocess", action="store_true", help="Delete existing memories for the project and regenerate")
     args = parser.parse_args()
 
     if not DB_PATH.exists() and not args.dry_run:
@@ -635,32 +334,11 @@ def main() -> None:
     conn = get_db() if not args.dry_run else None
     transcripts = find_transcripts(project_filter=args.project)
 
-    # Reprocess: delete existing memories for the filtered project first
-    if args.reprocess and conn and args.project:
-        if not args.chunks_only:
-            deleted = delete_project_memories(conn, args.project, "session_summary")
-            if not args.quiet:
-                print(f"Deleted {deleted} session summaries for {args.project}")
-        if not args.summaries_only:
-            deleted = delete_project_memories(conn, args.project, "chunk_summary")
-            if not args.quiet:
-                print(f"Deleted {deleted} chunk summaries for {args.project}")
-
-    summary_new = summary_skip = chunk_new = chunk_skip = 0
-
-    if not args.chunks_only:
-        if not args.quiet:
-            print("--- Session Summaries ---")
-        summary_new, summary_skip = process_summaries(args, conn, transcripts)
-        if not args.quiet:
-            print(f"Summaries: {summary_new} new, {summary_skip} skipped.\n")
-
-    if not args.summaries_only:
-        if not args.quiet:
-            print("--- Chunk Summaries ---")
-        chunk_new, chunk_skip = process_chunks(args, conn, transcripts)
-        if not args.quiet:
-            print(f"Chunks: {chunk_new} new, {chunk_skip} skipped.")
+    if not args.quiet:
+        print("--- Processing Transcripts ---")
+    new_count, skipped = process_transcripts(args, conn, transcripts)
+    if not args.quiet:
+        print(f"Done: {new_count} new session_logs, {skipped} skipped.")
 
     if conn:
         conn.close()

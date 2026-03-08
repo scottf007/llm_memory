@@ -1,5 +1,5 @@
 #!/bin/bash
-# SessionStart hook: auto-loads recent memories into Claude's context.
+# SessionStart hook: auto-loads memories into Claude's context.
 # Fires on startup, resume, and after compaction.
 
 INPUT=$(cat)
@@ -11,10 +11,9 @@ if [ ! -f "$DB" ]; then
     exit 0
 fi
 
-# Derive project name from cwd (e.g. /home/scott/projects/finance_nexus → finance_nexus)
+# Derive project name from cwd
 PROJECT=""
 if [ -n "$CWD" ]; then
-    # Extract the directory name after "projects/"
     PROJECT=$(echo "$CWD" | sed -n 's|.*/projects/\([^/]*\).*|\1|p')
 fi
 
@@ -34,61 +33,94 @@ if [ -n "$PROJECT" ] && [ "$SOURCE" != "compact" ]; then
 fi
 
 if [ "$SOURCE" = "compact" ]; then
-    # After compaction: reload the most recent session summary + chunk summaries
+    # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
-        SUMMARY=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
     else
-        SUMMARY=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+        NARRATIVE=""
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
     fi
-    if [ -n "$SUMMARY" ] || [ -n "$CHUNKS" ]; then
+    if [ -n "$NARRATIVE" ] || [ -n "$NOTES" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
         if [ -n "$PROJECT" ]; then
             echo "## Active project: $PROJECT"
         fi
-        if [ -n "$SUMMARY" ]; then
-            echo "$SUMMARY"
+        if [ -n "$NARRATIVE" ]; then
+            echo "$NARRATIVE"
         fi
-        if [ -n "$CHUNKS" ]; then
-            echo "## Recent Chunk Summaries:"
-            echo "$CHUNKS"
+        if [ -n "$NOTES" ]; then
+            echo "## Important Notes:"
+            echo "$NOTES"
         fi
         echo "=== END POST-COMPACTION CONTEXT ==="
     fi
 else
-    # Fresh startup or resume: load memories, prioritizing current project
+    # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
-        # Project-specific: load this project's summaries and chunks first
-        SUMMARIES=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
-        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
-        IMPORTANT=$(sqlite3 -separator '|' "$DB" "SELECT id, type, project, substr(content, 1, 300), importance FROM memories WHERE importance >= 7 AND type != 'session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 10;" 2>/dev/null)
+        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+
+        # Check if narrative needs updating (new session_logs since last narrative)
+        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        if [ -n "$NARRATIVE_DATE" ]; then
+            NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
+        else
+            NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
+        fi
     else
-        SUMMARIES=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
-        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
-        IMPORTANT=$(sqlite3 -separator '|' "$DB" "SELECT id, type, project, substr(content, 1, 300), importance FROM memories WHERE importance >= 7 AND type != 'session_summary' ORDER BY created_at DESC LIMIT 10;" 2>/dev/null)
+        NARRATIVE=""
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 200) FROM memories WHERE type='session_log' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        NEW_SESSIONS="0"
     fi
 
-    if [ -n "$SUMMARIES" ] || [ -n "$IMPORTANT" ] || [ -n "$CHUNKS" ]; then
-        echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
-        if [ -n "$PROJECT" ]; then
-            echo "## Active project: $PROJECT"
-        fi
-        if [ -n "$SUMMARIES" ]; then
-            echo "## Recent Session Summaries:"
-            echo "$SUMMARIES"
-        fi
-        if [ -n "$CHUNKS" ]; then
-            echo "## Recent Chunk Summaries:"
-            echo "$CHUNKS"
-        fi
-        if [ -n "$IMPORTANT" ]; then
-            echo "## High-Importance Memories:"
-            echo "$IMPORTANT"
-        fi
-        echo "Use memory_search/memory_recent for more context. Use memory_store to save new memories."
-        echo "=== END LOADED MEMORIES ==="
+    echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
+    if [ -n "$PROJECT" ]; then
+        echo "## Active project: $PROJECT"
     fi
+
+    if [ -n "$NARRATIVE" ]; then
+        echo "## Project Narrative:"
+        echo "$NARRATIVE"
+    fi
+    if [ -n "$LOGS" ]; then
+        echo "## Recent Sessions:"
+        echo "$LOGS"
+    fi
+    if [ -n "$NOTES" ]; then
+        echo "## Important Notes:"
+        echo "$NOTES"
+    fi
+
+    # Determine what action is needed
+    if [ -z "$NARRATIVE" ] && [ -n "$PROJECT" ]; then
+        # No narrative exists — count available transcripts
+        TRANSCRIPT_COUNT=$(ls "$HOME/.claude/memory/transcripts/"*.jsonl 2>/dev/null | wc -l)
+        SESSION_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
+        if [ "$SESSION_COUNT" -gt "0" ] 2>/dev/null; then
+            echo ""
+            echo "ACTION REQUIRED: No narrative exists for project '$PROJECT' but $SESSION_COUNT session(s) found."
+            echo "Generate the project narrative now by reading the raw JSONL transcripts from ~/.claude/memory/transcripts/"
+            echo "and storing it with memory_store type='narrative'. Use this format:"
+            echo ""
+            echo "  ## What This Is        — 2-3 sentences"
+            echo "  ## Session History      — one line per session"
+            echo "  ## Decisions Made       — table: decision | rationale"
+            echo "  ## Gotchas & Lessons    — bullet points"
+            echo "  ## Current State        — what exists now"
+            echo "  ## Outstanding Items    — action items, unsolved problems, deferred ideas"
+            echo "  ## Direction            — where we're headed"
+            echo "  ## Source Transcripts   — list of JSONL files"
+        fi
+    elif [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
+        echo ""
+        echo "NOTE: $NEW_SESSIONS new session(s) since last narrative update. Consider reading the new transcript(s) and updating the narrative."
+    fi
+
+    echo "Use memory_search/memory_get for more context. Use memory_store to save new memories."
+    echo "=== END LOADED MEMORIES ==="
 fi
 
 exit 0

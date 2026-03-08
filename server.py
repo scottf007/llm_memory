@@ -5,6 +5,11 @@ Provides tools for storing, searching, connecting, and exploring memories
 backed by SQLite with FTS5 full-text search. Designed to be spawned as a
 subprocess by Claude Code.
 
+Memory types:
+  - narrative: Per-project living document (the project's full story)
+  - note: Atomic fact, decision, correction, preference, or insight
+  - session_log: Lightweight record that a session happened
+
 Usage:
     python server.py
 """
@@ -26,8 +31,8 @@ import mcp.types as types
 DB_DIR = Path.home() / ".claude" / "memory"
 DB_PATH = DB_DIR / "memory.db"
 
-VALID_TYPES = {"decision", "insight", "progress", "correction", "session_summary", "chunk_summary", "note"}
-VALID_RELATIONSHIPS = {"supports", "contradicts", "supersedes", "implements", "depends_on", "related_to"}
+VALID_TYPES = {"narrative", "note", "session_log"}
+VALID_RELATIONSHIPS = {"supersedes", "related_to"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -38,30 +43,31 @@ CREATE TABLE IF NOT EXISTS memories (
     session_id TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
-    transcript_ref TEXT
+    transcript_ref TEXT,
+    tags TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    content, type, project,
+    content, type, project, tags,
     content='memories',
     content_rowid='id'
 );
 
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-    INSERT INTO memories_fts(rowid, content, type, project)
-    VALUES (new.id, new.content, new.type, new.project);
+    INSERT INTO memories_fts(rowid, content, type, project, tags)
+    VALUES (new.id, new.content, new.type, new.project, new.tags);
 END;
 
 CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content, type, project)
-    VALUES('delete', old.id, old.content, old.type, old.project);
+    INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
+    VALUES('delete', old.id, old.content, old.type, old.project, old.tags);
 END;
 
 CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content, type, project)
-    VALUES('delete', old.id, old.content, old.type, old.project);
-    INSERT INTO memories_fts(rowid, content, type, project)
-    VALUES (new.id, new.content, new.type, new.project);
+    INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
+    VALUES('delete', old.id, old.content, old.type, old.project, old.tags);
+    INSERT INTO memories_fts(rowid, content, type, project, tags)
+    VALUES (new.id, new.content, new.type, new.project, new.tags);
 END;
 
 CREATE TABLE IF NOT EXISTS connections (
@@ -90,15 +96,59 @@ def get_db() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Create tables and triggers if they don't already exist."""
+    """Create tables and triggers if they don't already exist.
+
+    Handles migration from v1 schema (adds tags column, rebuilds FTS
+    with tags, migrates old types to new types).
+    """
     conn = get_db()
     try:
-        conn.executescript(SCHEMA)
-        # Migrate: add transcript_ref if missing (for existing databases)
-        columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
-        if "transcript_ref" not in columns:
-            conn.execute("ALTER TABLE memories ADD COLUMN transcript_ref TEXT")
-        conn.commit()
+        # Check existing columns before running schema
+        columns = []
+        try:
+            columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
+        except Exception:
+            pass
+
+        if columns:
+            # Existing database — migrate
+            if "transcript_ref" not in columns:
+                conn.execute("ALTER TABLE memories ADD COLUMN transcript_ref TEXT")
+            if "tags" not in columns:
+                conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT")
+
+            # Rebuild FTS to include tags column if it exists but lacks tags
+            try:
+                fts_cols = conn.execute("PRAGMA table_info(memories_fts)").fetchall()
+                fts_col_names = [row[1] for row in fts_cols]
+                if "tags" not in fts_col_names:
+                    # Drop old FTS and triggers, recreate with tags
+                    conn.executescript("""
+                        DROP TRIGGER IF EXISTS memories_ai;
+                        DROP TRIGGER IF EXISTS memories_ad;
+                        DROP TRIGGER IF EXISTS memories_au;
+                        DROP TABLE IF EXISTS memories_fts;
+                    """)
+                    conn.executescript(SCHEMA)
+                    # Rebuild FTS index from existing data
+                    conn.execute("""
+                        INSERT INTO memories_fts(rowid, content, type, project, tags)
+                        SELECT id, content, type, project, tags FROM memories
+                    """)
+            except Exception:
+                pass
+
+            # Migrate old types to new types
+            conn.execute("UPDATE memories SET type = 'note' WHERE type IN ('decision', 'insight', 'progress', 'correction')")
+            conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'project_narrative'")
+            conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'note' AND content LIKE '[PROJECT NARRATIVE]%'")
+            conn.execute("UPDATE memories SET type = 'session_log' WHERE type = 'session_summary'")
+            conn.execute("UPDATE memories SET type = 'note' WHERE type = 'chunk_summary'")
+            conn.commit()
+        else:
+            # Fresh database
+            conn.executescript(SCHEMA)
+            conn.commit()
     finally:
         conn.close()
 
@@ -124,7 +174,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="memory_store",
-            description="Store a new memory.",
+            description="Store a memory. Types: 'narrative' (per-project living document), 'note' (atomic fact/decision/correction), 'session_log' (session record).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -134,12 +184,12 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "type": {
                         "type": "string",
-                        "description": "One of: decision, insight, progress, correction, session_summary, note",
+                        "description": "One of: narrative, note, session_log",
                         "enum": list(VALID_TYPES),
                     },
                     "project": {
                         "type": "string",
-                        "description": "Project name, e.g. 'finance-nexus'",
+                        "description": "Project name, e.g. 'finance_nexus'",
                     },
                     "session_id": {
                         "type": "string",
@@ -154,7 +204,11 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "transcript_ref": {
                         "type": "string",
-                        "description": "Reference to raw transcript file and line range, e.g. '~/.claude/memory/transcripts/SESSION_ID.jsonl:150-220'",
+                        "description": "Reference to raw transcript file, e.g. '~/.claude/memory/transcripts/SESSION_ID.jsonl'",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Comma-separated tags for searchability, e.g. 'correction, mcp-config'",
                     },
                     "connections": {
                         "type": "array",
@@ -177,7 +231,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_search",
-            description="Full-text search across all memories.",
+            description="Full-text search across all memories. Returns snippets for narratives, full content for notes.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -243,7 +297,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_connect",
-            description="Create a connection between two memories.",
+            description="Create a connection between two memories. Use 'supersedes' for narrative versions, 'related_to' for linked notes.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -257,7 +311,7 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "relationship": {
                         "type": "string",
-                        "description": "One of: supports, contradicts, supersedes, implements, depends_on, related_to",
+                        "description": "One of: supersedes, related_to",
                         "enum": list(VALID_RELATIONSHIPS),
                     },
                 },
@@ -266,7 +320,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_explore",
-            description="Explore the knowledge graph from a starting memory.",
+            description="Explore connections from a starting memory.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -307,34 +361,29 @@ async def list_tools() -> list[types.Tool]:
 # ---------------------------------------------------------------------------
 
 def _text(content: str) -> list[types.TextContent]:
-    """Wrap a string as a list containing a single TextContent."""
     return [types.TextContent(type="text", text=content)]
 
 
 def _error(message: str) -> list[types.TextContent]:
-    """Return an error-formatted text result."""
     return _text(f"Error: {message}")
 
 
 @app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     try:
-        if name == "memory_store":
-            return _handle_store(arguments)
-        elif name == "memory_search":
-            return _handle_search(arguments)
-        elif name == "memory_recent":
-            return _handle_recent(arguments)
-        elif name == "memory_get":
-            return _handle_get(arguments)
-        elif name == "memory_connect":
-            return _handle_connect(arguments)
-        elif name == "memory_explore":
-            return _handle_explore(arguments)
-        elif name == "memory_delete":
-            return _handle_delete(arguments)
-        else:
+        handlers = {
+            "memory_store": _handle_store,
+            "memory_search": _handle_search,
+            "memory_recent": _handle_recent,
+            "memory_get": _handle_get,
+            "memory_connect": _handle_connect,
+            "memory_explore": _handle_explore,
+            "memory_delete": _handle_delete,
+        }
+        handler = handlers.get(name)
+        if not handler:
             return _error(f"Unknown tool: {name}")
+        return handler(arguments)
     except Exception as exc:
         return _error(str(exc))
 
@@ -348,6 +397,7 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
     session_id = args.get("session_id")
     importance = args.get("importance", 5)
     transcript_ref = args.get("transcript_ref")
+    tags = args.get("tags")
     connections = args.get("connections", [])
 
     if not content:
@@ -359,23 +409,25 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        # Deduplication: skip if similar content was stored in the last hour
-        existing = conn.execute(
-            "SELECT id FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
-            "AND created_at > datetime('now', '-1 hour')",
-            (content,),
-        ).fetchone()
-        if existing:
-            return _text(json.dumps({
-                "id": existing["id"],
-                "status": "duplicate_skipped",
-                "message": "Similar memory already stored recently"
-            }, indent=2))
+        # Deduplication: skip if similar content stored in the last hour
+        # (skip for narratives — they're meant to be updated)
+        if mem_type != "narrative":
+            existing = conn.execute(
+                "SELECT id FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
+                "AND created_at > datetime('now', '-1 hour')",
+                (content,),
+            ).fetchone()
+            if existing:
+                return _text(json.dumps({
+                    "id": existing["id"],
+                    "status": "duplicate_skipped",
+                    "message": "Similar memory already stored recently"
+                }, indent=2))
 
         cursor = conn.execute(
-            "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (mem_type, content, project, session_id, importance, transcript_ref),
+            "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (mem_type, content, project, session_id, importance, transcript_ref, tags),
         )
         memory_id = cursor.lastrowid
 
@@ -384,7 +436,6 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
             relationship = link.get("relationship", "")
             if relationship not in VALID_RELATIONSHIPS:
                 continue
-            # Verify the target memory exists
             target = conn.execute("SELECT id FROM memories WHERE id = ?", (to_id,)).fetchone()
             if target:
                 conn.execute(
@@ -410,15 +461,13 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
     if not query:
         return _error("query is required")
 
-    # Build FTS query: escape special characters for safety, use implicit AND
-    fts_query = " ".join(
-        f'"{token}"' for token in query.split() if token
-    )
+    fts_query = " ".join(f'"{token}"' for token in query.split() if token)
 
     conn = get_db()
     try:
         sql = (
-            "SELECT m.id, m.type, m.content, m.project, m.created_at, m.importance, m.transcript_ref "
+            "SELECT m.id, m.type, m.content, m.project, m.created_at, "
+            "m.importance, m.transcript_ref, m.tags "
             "FROM memories_fts f "
             "JOIN memories m ON m.id = f.rowid "
             "WHERE memories_fts MATCH ? "
@@ -439,9 +488,11 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
         results = []
         for row in rows:
             d = row_to_dict(row)
-            # Truncate content to 200 characters for search results
-            if len(d["content"]) > 200:
-                d["content"] = d["content"][:200] + "..."
+            # For notes/session_logs: return full content (they're short)
+            # For narratives: truncate to 500 chars in search results
+            # (use memory_get for full content)
+            if d["type"] == "narrative" and len(d["content"]) > 500:
+                d["content"] = d["content"][:500] + "...\n[Use memory_get for full narrative]"
             results.append(d)
 
         return _text(json.dumps(results, indent=2))
@@ -458,7 +509,7 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        sql = "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref FROM memories WHERE 1=1 "
+        sql = "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref, tags FROM memories WHERE 1=1 "
         params: list[Any] = []
 
         if project:
@@ -472,7 +523,13 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
         params.append(limit)
 
         rows = conn.execute(sql, params).fetchall()
-        results = [row_to_dict(row) for row in rows]
+        results = []
+        for row in rows:
+            d = row_to_dict(row)
+            # Truncate narratives in list view
+            if d["type"] == "narrative" and len(d["content"]) > 500:
+                d["content"] = d["content"][:500] + "...\n[Use memory_get for full narrative]"
+            results.append(d)
         return _text(json.dumps(results, indent=2))
     finally:
         conn.close()
@@ -488,7 +545,7 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref "
+            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref, tags "
             "FROM memories WHERE id = ?",
             (memory_id,),
         ).fetchone()
@@ -498,20 +555,18 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
 
         memory = row_to_dict(row)
 
-        # Get connections where this memory is the source
         outgoing = conn.execute(
             "SELECT c.to_id, c.relationship, c.created_at, "
-            "m.type, m.content, m.project, m.importance "
+            "m.type, substr(m.content, 1, 200) as content, m.project, m.importance "
             "FROM connections c "
             "JOIN memories m ON m.id = c.to_id "
             "WHERE c.from_id = ?",
             (memory_id,),
         ).fetchall()
 
-        # Get connections where this memory is the target
         incoming = conn.execute(
             "SELECT c.from_id, c.relationship, c.created_at, "
-            "m.type, m.content, m.project, m.importance "
+            "m.type, substr(m.content, 1, 200) as content, m.project, m.importance "
             "FROM connections c "
             "JOIN memories m ON m.id = c.from_id "
             "WHERE c.to_id = ?",
@@ -520,31 +575,13 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
 
         memory["connections"] = {
             "outgoing": [
-                {
-                    "to_id": r["to_id"],
-                    "relationship": r["relationship"],
-                    "connected_at": r["created_at"],
-                    "memory": {
-                        "type": r["type"],
-                        "content": r["content"],
-                        "project": r["project"],
-                        "importance": r["importance"],
-                    },
-                }
+                {"to_id": r["to_id"], "relationship": r["relationship"],
+                 "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
                 for r in outgoing
             ],
             "incoming": [
-                {
-                    "from_id": r["from_id"],
-                    "relationship": r["relationship"],
-                    "connected_at": r["created_at"],
-                    "memory": {
-                        "type": r["type"],
-                        "content": r["content"],
-                        "project": r["project"],
-                        "importance": r["importance"],
-                    },
-                }
+                {"from_id": r["from_id"], "relationship": r["relationship"],
+                 "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
                 for r in incoming
             ],
         }
@@ -568,7 +605,6 @@ def _handle_connect(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        # Verify both memories exist
         for mid in (from_id, to_id):
             if not conn.execute("SELECT id FROM memories WHERE id = ?", (mid,)).fetchone():
                 return _error(f"Memory {mid} not found")
@@ -579,10 +615,8 @@ def _handle_connect(args: dict[str, Any]) -> list[types.TextContent]:
         )
         conn.commit()
         return _text(json.dumps({
-            "status": "connected",
-            "from_id": from_id,
-            "to_id": to_id,
-            "relationship": relationship,
+            "status": "connected", "from_id": from_id,
+            "to_id": to_id, "relationship": relationship,
         }, indent=2))
     finally:
         conn.close()
@@ -599,9 +633,8 @@ def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        # Fetch starting memory
         start_row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance "
+            "SELECT id, type, substr(content, 1, 300) as content, project, created_at, importance "
             "FROM memories WHERE id = ?",
             (start_id,),
         ).fetchone()
@@ -619,7 +652,7 @@ def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
             visited.add(memory_id)
 
             row = conn.execute(
-                "SELECT id, type, content, project, created_at, importance "
+                "SELECT id, type, substr(content, 1, 300) as content, project, created_at, importance "
                 "FROM memories WHERE id = ?",
                 (memory_id,),
             ).fetchone()
@@ -627,35 +660,24 @@ def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
                 return
             nodes.append(row_to_dict(row))
 
-            # Outgoing connections
-            out = conn.execute(
-                "SELECT to_id, relationship FROM connections WHERE from_id = ?",
-                (memory_id,),
-            ).fetchall()
-            for c in out:
-                edges.append({
-                    "from_id": memory_id,
-                    "to_id": c["to_id"],
-                    "relationship": c["relationship"],
-                })
-                traverse(c["to_id"], current_depth + 1)
-
-            # Incoming connections
-            inc = conn.execute(
-                "SELECT from_id, relationship FROM connections WHERE to_id = ?",
-                (memory_id,),
-            ).fetchall()
-            for c in inc:
-                edges.append({
-                    "from_id": c["from_id"],
-                    "to_id": memory_id,
-                    "relationship": c["relationship"],
-                })
-                traverse(c["from_id"], current_depth + 1)
+            for direction, id_col, other_col in [
+                ("out", "from_id", "to_id"),
+                ("in", "to_id", "from_id"),
+            ]:
+                rows = conn.execute(
+                    f"SELECT {other_col} as other_id, relationship FROM connections WHERE {id_col} = ?",
+                    (memory_id,),
+                ).fetchall()
+                for c in rows:
+                    edges.append({
+                        "from_id": memory_id if direction == "out" else c["other_id"],
+                        "to_id": c["other_id"] if direction == "out" else memory_id,
+                        "relationship": c["relationship"],
+                    })
+                    traverse(c["other_id"], current_depth + 1)
 
         traverse(start_id, 0)
 
-        # Deduplicate edges
         seen_edges: set[tuple[int, int, str]] = set()
         unique_edges = []
         for e in edges:
@@ -664,13 +686,10 @@ def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
                 seen_edges.add(key)
                 unique_edges.append(e)
 
-        result = {
-            "start_id": start_id,
-            "depth": depth,
-            "nodes": nodes,
-            "edges": unique_edges,
-        }
-        return _text(json.dumps(result, indent=2))
+        return _text(json.dumps({
+            "start_id": start_id, "depth": depth,
+            "nodes": nodes, "edges": unique_edges,
+        }, indent=2))
     finally:
         conn.close()
 
@@ -688,9 +707,7 @@ def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
         if not row:
             return _error(f"Memory {memory_id} not found")
 
-        # Delete connections first
         conn.execute("DELETE FROM connections WHERE from_id = ? OR to_id = ?", (memory_id, memory_id))
-        # Delete the memory (triggers will clean up FTS)
         conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         conn.commit()
         return _text(json.dumps({"id": memory_id, "status": "deleted"}, indent=2))
