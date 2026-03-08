@@ -24,6 +24,15 @@ if [ -n "$CLAUDE_ENV_FILE" ]; then
     echo "export LLM_MEMORY_SESSION_ID='$SESSION_ID'" >> "$CLAUDE_ENV_FILE"
 fi
 
+# Auto-process transcripts for this project if no memories exist yet
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -n "$PROJECT" ] && [ "$SOURCE" != "compact" ]; then
+    EXISTING=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE project='$PROJECT';" 2>/dev/null)
+    if [ "$EXISTING" -eq "0" ] 2>/dev/null; then
+        "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/process_transcripts.py" --project "$PROJECT" --quiet 2>/dev/null
+    fi
+fi
+
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload the most recent session summary + chunk summaries
     if [ -n "$PROJECT" ]; then

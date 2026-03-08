@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import re
 import shutil
 import sqlite3
 from collections import deque
@@ -341,13 +342,42 @@ def store_chunk(
     return chunk_id
 
 
+# Regex to strip noisy XML-like tags injected by hooks and IDE
+_NOISE_TAG_RE = re.compile(
+    r"<(?:ide_opened_file|local-command-caveat|command-me|system-reminder|command-name|"
+    r"command-message|command-args|local-command-stdout|user-prompt-submit-hook|"
+    r"available-deferred-tools|fast_mode_info)>.*?</(?:ide_opened_file|local-command-caveat|"
+    r"command-me|system-reminder|command-name|command-message|command-args|"
+    r"local-command-stdout|user-prompt-submit-hook|available-deferred-tools|fast_mode_info)>",
+    re.DOTALL,
+)
+# Also strip self-closing / unclosed tags of the same types
+_NOISE_TAG_OPEN_RE = re.compile(
+    r"<(?:ide_opened_file|local-command-caveat|command-me|system-reminder|"
+    r"user-prompt-submit-hook|available-deferred-tools|fast_mode_info)[^>]*>[^<]*"
+)
+
+
+_HTML_TAG_RE = re.compile(r"</?(?:h[1-6]|p|div|span|br|ul|ol|li|a|strong|em|code|pre|table|tr|td|th)[^>]*>")
+
+
+def _clean_text(text: str) -> str:
+    """Strip noisy tags from extracted text."""
+    text = _NOISE_TAG_RE.sub("", text)
+    text = _NOISE_TAG_OPEN_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("", text)
+    # Collapse multiple whitespace/newlines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _extract_user_text(entry: dict) -> str:
     """Extract text content from a user message entry."""
     msg = entry.get("message", {})
     content = msg.get("content", "")
 
     if isinstance(content, str):
-        return content.strip()
+        return _clean_text(content)
 
     if isinstance(content, list):
         parts = []
@@ -356,7 +386,7 @@ def _extract_user_text(entry: dict) -> str:
                 parts.append(block.get("text", "").strip())
             elif isinstance(block, str):
                 parts.append(block.strip())
-        return " ".join(parts)
+        return _clean_text(" ".join(parts))
 
     return ""
 
@@ -367,7 +397,7 @@ def _extract_assistant_text(entry: dict) -> str:
     content = msg.get("content", [])
 
     if isinstance(content, str):
-        return content.strip()
+        return _clean_text(content)
 
     if isinstance(content, list):
         parts = []
@@ -376,7 +406,7 @@ def _extract_assistant_text(entry: dict) -> str:
                 text = block.get("text", "").strip()
                 if text:
                     parts.append(text)
-        return " ".join(parts)
+        return _clean_text(" ".join(parts))
 
     return ""
 
@@ -467,10 +497,38 @@ def store_summary(
 # Main
 # ---------------------------------------------------------------------------
 
+def _session_belongs_to_project(conn: sqlite3.Connection, session_id: str, project: str) -> bool:
+    """Check if a session_id has any memories for the given project (or had before deletion)."""
+    # After deletion, no rows will match — so we check the transcript path instead
+    transcripts = find_transcripts(project_filter=project)
+    return any(sid == session_id for _, sid in transcripts)
+
+
+def delete_project_memories(conn: sqlite3.Connection, project: str, mem_type: str) -> int:
+    """Delete all memories of a given type for a project. Returns count deleted."""
+    # Delete connections first
+    conn.execute(
+        "DELETE FROM connections WHERE from_id IN "
+        "(SELECT id FROM memories WHERE project=? AND type=?) "
+        "OR to_id IN (SELECT id FROM memories WHERE project=? AND type=?)",
+        (project, mem_type, project, mem_type),
+    )
+    cursor = conn.execute(
+        "DELETE FROM memories WHERE project=? AND type=?",
+        (project, mem_type),
+    )
+    conn.commit()
+    return cursor.rowcount
+
+
 def process_summaries(args, conn, transcripts) -> tuple[int, int]:
     """Process transcripts into session_summary memories."""
     processed = get_processed_sessions(conn, "session_summary") if conn else set()
-    print(f"Found {len(transcripts)} transcripts, {len(processed)} session summaries already exist")
+    # If reprocessing, don't skip the target project's sessions
+    if args.reprocess and args.project:
+        processed = {s for s in processed if not _session_belongs_to_project(conn, s, args.project)}
+    if not args.quiet:
+        print(f"Found {len(transcripts)} transcripts, {len(processed)} session summaries already exist")
 
     new_count = 0
     skipped_count = 0
@@ -492,16 +550,18 @@ def process_summaries(args, conn, transcripts) -> tuple[int, int]:
         transcript_ref = f"~/.claude/memory/transcripts/{session_id}.jsonl"
 
         if args.dry_run:
-            print(f"\n[DRY RUN] Would create summary: {session_id}")
-            print(f"  Project: {data['project']}")
-            print(f"  Turns: {data['turn_count']}")
-            print(f"  File: {path} ({path.stat().st_size / 1024:.0f} KB)")
-            if args.verbose:
-                print(f"  Summary preview:\n    {summary[:300]}...")
+            if not args.quiet:
+                print(f"\n[DRY RUN] Would create summary: {session_id}")
+                print(f"  Project: {data['project']}")
+                print(f"  Turns: {data['turn_count']}")
+                print(f"  File: {path} ({path.stat().st_size / 1024:.0f} KB)")
+                if args.verbose:
+                    print(f"  Summary preview:\n    {summary[:300]}...")
         else:
             archive_transcript(path, session_id)
             memory_id = store_summary(conn, session_id, data["project"], summary, transcript_ref)
-            print(f"  Summary: {session_id} → #{memory_id} ({data['project']}, {data['turn_count']} turns)")
+            if not args.quiet:
+                print(f"  Summary: {session_id} → #{memory_id} ({data['project']}, {data['turn_count']} turns)")
 
         new_count += 1
 
@@ -511,7 +571,10 @@ def process_summaries(args, conn, transcripts) -> tuple[int, int]:
 def process_chunks(args, conn, transcripts) -> tuple[int, int]:
     """Process transcripts into chunk_summary memories."""
     processed = get_processed_sessions(conn, "chunk_summary") if conn else set()
-    print(f"Found {len(transcripts)} transcripts, {len(processed)} already chunked")
+    if args.reprocess and args.project:
+        processed = {s for s in processed if not _session_belongs_to_project(conn, s, args.project)}
+    if not args.quiet:
+        print(f"Found {len(transcripts)} transcripts, {len(processed)} already chunked")
 
     new_chunks = 0
     skipped_count = 0
@@ -532,12 +595,13 @@ def process_chunks(args, conn, transcripts) -> tuple[int, int]:
         transcript_ref = f"~/.claude/memory/transcripts/{session_id}.jsonl"
 
         if args.dry_run:
-            print(f"\n[DRY RUN] Would create {len(chunks)} chunks: {session_id} ({project})")
-            if args.verbose:
-                for i, chunk in enumerate(chunks, 1):
-                    summary = build_chunk_summary(chunk, i, len(chunks), project)
-                    print(f"  Chunk {i}: {chunk['turn_count']} turns")
-                    print(f"    {summary[:200]}...")
+            if not args.quiet:
+                print(f"\n[DRY RUN] Would create {len(chunks)} chunks: {session_id} ({project})")
+                if args.verbose:
+                    for i, chunk in enumerate(chunks, 1):
+                        summary = build_chunk_summary(chunk, i, len(chunks), project)
+                        print(f"  Chunk {i}: {chunk['turn_count']} turns")
+                        print(f"    {summary[:200]}...")
         else:
             archive_transcript(path, session_id)
             prev_id = None
@@ -546,7 +610,8 @@ def process_chunks(args, conn, transcripts) -> tuple[int, int]:
                 chunk_id = store_chunk(conn, session_id, project, content, transcript_ref, prev_id)
                 prev_id = chunk_id
                 new_chunks += 1
-            print(f"  Chunks: {session_id} → {len(chunks)} chunks ({project})")
+            if not args.quiet:
+                print(f"  Chunks: {session_id} → {len(chunks)} chunks ({project})")
 
     return new_chunks, skipped_count
 
@@ -555,9 +620,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Process Claude Code transcripts into LLM Memory")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be processed without writing")
     parser.add_argument("--verbose", action="store_true", help="Print detailed output per transcript")
+    parser.add_argument("--quiet", action="store_true", help="Minimal output (for use from hooks)")
     parser.add_argument("--project", type=str, help="Only process transcripts for this project")
     parser.add_argument("--chunks-only", action="store_true", help="Only generate chunk summaries, skip session summaries")
     parser.add_argument("--summaries-only", action="store_true", help="Only generate session summaries, skip chunks")
+    parser.add_argument("--reprocess", action="store_true", help="Delete existing memories for the project and regenerate")
     args = parser.parse_args()
 
     if not DB_PATH.exists() and not args.dry_run:
@@ -568,17 +635,32 @@ def main() -> None:
     conn = get_db() if not args.dry_run else None
     transcripts = find_transcripts(project_filter=args.project)
 
+    # Reprocess: delete existing memories for the filtered project first
+    if args.reprocess and conn and args.project:
+        if not args.chunks_only:
+            deleted = delete_project_memories(conn, args.project, "session_summary")
+            if not args.quiet:
+                print(f"Deleted {deleted} session summaries for {args.project}")
+        if not args.summaries_only:
+            deleted = delete_project_memories(conn, args.project, "chunk_summary")
+            if not args.quiet:
+                print(f"Deleted {deleted} chunk summaries for {args.project}")
+
     summary_new = summary_skip = chunk_new = chunk_skip = 0
 
     if not args.chunks_only:
-        print("--- Session Summaries ---")
+        if not args.quiet:
+            print("--- Session Summaries ---")
         summary_new, summary_skip = process_summaries(args, conn, transcripts)
-        print(f"Summaries: {summary_new} new, {summary_skip} skipped.\n")
+        if not args.quiet:
+            print(f"Summaries: {summary_new} new, {summary_skip} skipped.\n")
 
     if not args.summaries_only:
-        print("--- Chunk Summaries ---")
+        if not args.quiet:
+            print("--- Chunk Summaries ---")
         chunk_new, chunk_skip = process_chunks(args, conn, transcripts)
-        print(f"Chunks: {chunk_new} new, {chunk_skip} skipped.")
+        if not args.quiet:
+            print(f"Chunks: {chunk_new} new, {chunk_skip} skipped.")
 
     if conn:
         conn.close()
