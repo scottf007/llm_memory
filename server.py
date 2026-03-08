@@ -26,7 +26,7 @@ import mcp.types as types
 DB_DIR = Path.home() / ".claude" / "memory"
 DB_PATH = DB_DIR / "memory.db"
 
-VALID_TYPES = {"decision", "insight", "progress", "correction", "session_summary", "note"}
+VALID_TYPES = {"decision", "insight", "progress", "correction", "session_summary", "chunk_summary", "note"}
 VALID_RELATIONSHIPS = {"supports", "contradicts", "supersedes", "implements", "depends_on", "related_to"}
 
 SCHEMA = """
@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS memories (
     project TEXT,
     session_id TEXT,
     created_at TEXT DEFAULT (datetime('now')),
-    importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10)
+    importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
+    transcript_ref TEXT
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -93,6 +94,10 @@ def init_db() -> None:
     conn = get_db()
     try:
         conn.executescript(SCHEMA)
+        # Migrate: add transcript_ref if missing (for existing databases)
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
+        if "transcript_ref" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN transcript_ref TEXT")
         conn.commit()
     finally:
         conn.close()
@@ -146,6 +151,10 @@ async def list_tools() -> list[types.Tool]:
                         "minimum": 1,
                         "maximum": 10,
                         "default": 5,
+                    },
+                    "transcript_ref": {
+                        "type": "string",
+                        "description": "Reference to raw transcript file and line range, e.g. '~/.claude/memory/transcripts/SESSION_ID.jsonl:150-220'",
                     },
                     "connections": {
                         "type": "array",
@@ -338,6 +347,7 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
     project = args.get("project")
     session_id = args.get("session_id")
     importance = args.get("importance", 5)
+    transcript_ref = args.get("transcript_ref")
     connections = args.get("connections", [])
 
     if not content:
@@ -363,9 +373,9 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
             }, indent=2))
 
         cursor = conn.execute(
-            "INSERT INTO memories (type, content, project, session_id, importance) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (mem_type, content, project, session_id, importance),
+            "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (mem_type, content, project, session_id, importance, transcript_ref),
         )
         memory_id = cursor.lastrowid
 
@@ -408,7 +418,7 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
     conn = get_db()
     try:
         sql = (
-            "SELECT m.id, m.type, m.content, m.project, m.created_at, m.importance "
+            "SELECT m.id, m.type, m.content, m.project, m.created_at, m.importance, m.transcript_ref "
             "FROM memories_fts f "
             "JOIN memories m ON m.id = f.rowid "
             "WHERE memories_fts MATCH ? "
@@ -448,7 +458,7 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        sql = "SELECT id, type, content, project, session_id, created_at, importance FROM memories WHERE 1=1 "
+        sql = "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref FROM memories WHERE 1=1 "
         params: list[Any] = []
 
         if project:
@@ -478,7 +488,7 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance "
+            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref "
             "FROM memories WHERE id = ?",
             (memory_id,),
         ).fetchone()

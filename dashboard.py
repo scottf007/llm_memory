@@ -96,7 +96,7 @@ async def api_memories(
             )
             data_sql = (
                 "SELECT m.id, m.type, m.content, m.project, m.session_id, "
-                "m.created_at, m.importance "
+                "m.created_at, m.importance, m.transcript_ref "
                 "FROM memories_fts f "
                 "JOIN memories m ON m.id = f.rowid "
                 "WHERE memories_fts MATCH ?"
@@ -118,7 +118,7 @@ async def api_memories(
             count_sql = "SELECT COUNT(*) as cnt FROM memories WHERE 1=1"
             data_sql = (
                 "SELECT id, type, content, project, session_id, "
-                "created_at, importance FROM memories WHERE 1=1"
+                "created_at, importance, transcript_ref FROM memories WHERE 1=1"
             )
 
             if project:
@@ -310,7 +310,7 @@ async def api_memory_detail(memory_id: int):
 
     try:
         row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance "
+            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref "
             "FROM memories WHERE id = ?",
             (memory_id,),
         ).fetchone()

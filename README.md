@@ -46,7 +46,7 @@ LLM Memory is an MCP (Model Context Protocol) server that gives Claude Code pers
 
 | Tool | Purpose |
 |------|---------|
-| `memory_store` | Save a memory with type, project, importance, and optional connections |
+| `memory_store` | Save a memory with type, project, importance, transcript_ref, and optional connections |
 | `memory_search` | Full-text search across all memories |
 | `memory_recent` | Get the N most recent memories, optionally filtered by project/type |
 | `memory_get` | Fetch a specific memory by ID with all its connections |
@@ -61,6 +61,7 @@ LLM Memory is an MCP (Model Context Protocol) server that gives Claude Code pers
 - `progress` — What was accomplished in a task
 - `correction` — A mistake that was corrected (stored with high importance so it's not repeated)
 - `session_summary` — End-of-session summary of what happened
+- `chunk_summary` — Mid-session summary of a work chunk (numbered, linked, captures decisions/outcomes)
 - `note` — General information worth remembering
 
 ### Relationship Types
@@ -89,7 +90,7 @@ cd ~/projects/llm_memory
 This will:
 1. Create a Python venv and install the `mcp` package
 2. Create the memory database directory at `~/.claude/memory/`
-3. Add the MCP server to your Claude Code settings (`~/.claude/settings.json`)
+3. Register the MCP server with Claude Code (stored in `~/.claude.json`)
 
 ### Install lifecycle hooks (optional but recommended)
 
@@ -124,14 +125,15 @@ After installing, restart Claude Code (close and reopen, or restart the CLI). Th
 
 ## What Changes in Your Setup
 
-### ~/.claude/settings.json
+### ~/.claude.json
 
-The install script adds an MCP server entry:
+The install script registers the MCP server via `claude mcp add-json`:
 
 ```json
 {
   "mcpServers": {
     "llm_memory": {
+      "type": "stdio",
       "command": "/path/to/llm_memory/.venv/bin/python3",
       "args": ["/path/to/llm_memory/server.py"]
     }
@@ -140,6 +142,8 @@ The install script adds an MCP server entry:
 ```
 
 Claude Code will spawn `server.py` as a subprocess when it starts and communicate via stdin/stdout using the MCP protocol.
+
+### ~/.claude/settings.json
 
 The hook install script adds lifecycle hooks for SessionStart, PostToolUse, PreCompact, and SessionEnd. See `hooks/install_hooks.sh` for the full configuration.
 
@@ -172,6 +176,24 @@ sqlite3 ~/.claude/memory/memory.db "SELECT id, type, project, substr(content, 1,
 
 **Next session:** Claude searches memories for the project it's working on and picks up where it left off, even though the conversation is gone.
 
+## Three-Layer Memory
+
+LLM Memory uses a three-layer approach to preserve context:
+
+```
+Layer 1: Raw transcript (archived JSONL, never modified)
+Layer 2: Chunk summaries (numbered, linked, filtered mid-session snapshots)
+Layer 3: Extracted signals (decisions, learnings, corrections, insights)
+```
+
+**Layer 1 — Raw Transcripts.** The SessionEnd hook automatically copies the raw JSONL transcript to `~/.claude/memory/transcripts/`. These are the unmodified source of truth.
+
+**Layer 2 — Chunk Summaries.** Claude creates `chunk_summary` memories at natural breakpoints (topic changes, subtask completions, before compaction). Each chunk captures decisions, outcomes, and learnings while filtering out noise like circular debugging or dead-end research. Chunks are numbered per session, linked via `memory_connect`, and reference the raw transcript via `transcript_ref`.
+
+**Layer 3 — Extracted Signals.** Individual `decision`, `insight`, `correction`, and other memory types that capture specific high-value information. These are the most durable and searchable.
+
+The CLAUDE.md rules (see `claude-rules-example.md`) tell Claude when to create each layer.
+
 ## Web Dashboard
 
 Browse and visualize your memories in a browser:
@@ -192,6 +214,7 @@ Requires `fastapi` and `jinja2` (installed automatically by `install.sh`).
 
 Everything is local:
 - Database: `~/.claude/memory/memory.db`
+- Archived transcripts: `~/.claude/memory/transcripts/`
 - No data leaves your machine
 - No API keys needed
 - No cloud service dependencies
@@ -204,7 +227,7 @@ cp ~/.claude/memory/memory.db ~/.claude/memory/memory.db.bak
 
 ## Uninstall
 
-Remove the MCP server and hook entries from `~/.claude/settings.json`, delete the venv, and optionally delete the database:
+Remove the MCP server (`claude mcp remove llm_memory --scope user`) and hook entries from `~/.claude/settings.json`, delete the venv, and optionally delete the database:
 
 ```bash
 rm -rf /path/to/llm_memory/.venv

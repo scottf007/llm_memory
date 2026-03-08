@@ -10,6 +10,12 @@ if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
     exit 0
 fi
 
+# Archive raw transcript before anything else
+TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
+mkdir -p "$TRANSCRIPT_DIR"
+ARCHIVE_NAME="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)}.jsonl"
+cp "$TRANSCRIPT" "$TRANSCRIPT_DIR/$ARCHIVE_NAME" 2>/dev/null || true
+
 DB="$HOME/.claude/memory/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0

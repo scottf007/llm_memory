@@ -165,6 +165,7 @@
   .badge-type.progress        { background: #3fb950; }
   .badge-type.correction      { background: #f85149; }
   .badge-type.session_summary { background: #58a6ff; }
+  .badge-type.chunk_summary   { background: #39d353; }
   .badge-type.note            { background: #8b949e; }
 
   .badge-project {
@@ -380,6 +381,7 @@
         <option value="progress">Progress</option>
         <option value="correction">Correction</option>
         <option value="session_summary">Session Summary</option>
+        <option value="chunk_summary">Chunk Summary</option>
         <option value="note">Note</option>
       </select>
     </div>
@@ -435,6 +437,7 @@
     progress: '#3fb950',
     correction: '#f85149',
     session_summary: '#58a6ff',
+    chunk_summary: '#39d353',
     note: '#8b949e'
   };
   const PAGE_SIZE = 20;
@@ -651,7 +654,8 @@
         '<span><strong>Project:</strong> ' + esc(mem.project || '--') + '</span>' +
         '<span><strong>Importance:</strong> ' + (mem.importance || 'N/A') + ' / 10</span>' +
         '<span><strong>Created:</strong> ' + esc(mem.created_at || '') + '</span>' +
-        (mem.updated_at ? '<span><strong>Updated:</strong> ' + esc(mem.updated_at) + '</span>' : '');
+        (mem.updated_at ? '<span><strong>Updated:</strong> ' + esc(mem.updated_at) + '</span>' : '') +
+        (mem.transcript_ref ? '<span><strong>Transcript:</strong> <code style="font-size:12px;background:#21262d;padding:2px 6px;border-radius:3px;">' + esc(mem.transcript_ref) + '</code></span>' : '');
 
       // Connections
       const conns = mem.connections || [];

@@ -32,6 +32,38 @@ IMPORTANT: These MCP tools are available DIRECTLY — do NOT use ToolSearch to f
 - Include the project name in every memory_store call.
 - Use memory_connect to link related memories (supports, contradicts, supersedes, implements, depends_on, related_to).
 
+## Chunk Summaries
+At natural breakpoints during a session (topic change, subtask completion, before compaction, or when context is getting long), store a chunk_summary memory capturing the work just completed.
+
+### When to create chunk summaries:
+- After completing a distinct subtask or feature
+- When switching topics or projects within a session
+- Before compaction (in addition to session_summary)
+- After resolving a complex debugging session
+- Every ~20-30 minutes of active work
+
+### What to include:
+- Decisions made and their rationale
+- Key learnings and insights discovered
+- Outcomes (what worked, what was built/changed)
+- File paths modified and why
+- Current state / what comes next
+
+### What to filter out:
+- Circular debugging loops (just record the resolution)
+- Wrong assumptions that were immediately corrected
+- Dead-end research paths (unless the dead-end itself is informative)
+- Verbatim code blocks (summarize the change instead)
+- Routine operations (file reads, directory listings)
+
+### How to create them:
+- Use type "chunk_summary" with importance 5-7 (raise to 8+ for critical decisions)
+- Number chunks per session in the content: "Chunk 1: ..."
+- Include the project name
+- Set transcript_ref to the archived transcript path if known (e.g. "~/.claude/memory/transcripts/SESSION_ID.jsonl")
+- Link sequential chunks with memory_connect using "related_to"
+- Link the final chunk to the session_summary with "supports"
+
 ## Context Management
 - After every ~10 tool calls, assess whether important unsaved decisions exist. If so, memory_store them.
 - Prefer reading files on-demand over loading everything upfront.
