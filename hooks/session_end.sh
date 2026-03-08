@@ -27,17 +27,28 @@ if [ "$EXISTING" -gt "0" ]; then
     exit 0
 fi
 
-# Extract last few assistant text blocks as a rough summary
-SUMMARY=$(/home/scott/projects/llm_memory/.venv/bin/python3 -c "
+# Extract project name and last few assistant text blocks as a rough summary
+read -r PROJECT SUMMARY < <(/home/scott/projects/llm_memory/.venv/bin/python3 -c "
 import json, sys
+from pathlib import Path
 
 transcript_path = '$TRANSCRIPT'
 messages = []
+project = ''
 try:
     with open(transcript_path, 'r') as f:
         for line in f:
             try:
                 entry = json.loads(line.strip())
+                # Derive project from cwd
+                if not project:
+                    cwd = entry.get('cwd', '')
+                    if cwd:
+                        parts = Path(cwd).parts
+                        for i, part in enumerate(parts):
+                            if part == 'projects' and i + 1 < len(parts):
+                                project = parts[i + 1]
+                                break
                 if entry.get('type') == 'assistant':
                     msg = entry.get('message', {})
                     content = msg.get('content', [])
@@ -57,13 +68,17 @@ except:
 if messages:
     recent = messages[-3:]
     summary = ' | '.join(recent)[:1500]
-    # Escape for SQL
     summary = summary.replace(\"'\", \"''\")
-    print(summary)
+    # Output: PROJECT<tab>SUMMARY (project may be empty)
+    print(f'{project}\t{summary}')
 " 2>/dev/null)
 
 if [ -n "$SUMMARY" ]; then
-    sqlite3 "$DB" "INSERT INTO memories (type, content, session_id, importance) VALUES ('session_summary', 'Auto-saved session summary: $SUMMARY', '$SESSION_ID', 6);" 2>/dev/null
+    if [ -n "$PROJECT" ]; then
+        sqlite3 "$DB" "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) VALUES ('session_summary', 'Auto-saved session summary: $SUMMARY', '$PROJECT', '$SESSION_ID', 6, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
+    else
+        sqlite3 "$DB" "INSERT INTO memories (type, content, session_id, importance, transcript_ref) VALUES ('session_summary', 'Auto-saved session summary: $SUMMARY', '$SESSION_ID', 6, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
+    fi
 fi
 
 exit 0
