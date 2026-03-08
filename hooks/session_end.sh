@@ -27,7 +27,8 @@ if [ "$EXISTING" -gt "0" ]; then
 fi
 
 # Extract project name, turn count, and brief summary from transcript
-read -r PROJECT TURN_COUNT SUMMARY < <(/home/scott/projects/llm_memory/.venv/bin/python3 -c "
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+read -r PROJECT TURN_COUNT SUMMARY < <("$SCRIPT_DIR/.venv/bin/python3" -c "
 import json, sys
 from pathlib import Path
 
