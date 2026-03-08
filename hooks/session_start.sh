@@ -4,10 +4,18 @@
 
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
 DB="$HOME/.claude/memory/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
+fi
+
+# Derive project name from cwd (e.g. /home/scott/projects/finance_nexus → finance_nexus)
+PROJECT=""
+if [ -n "$CWD" ]; then
+    # Extract the directory name after "projects/"
+    PROJECT=$(echo "$CWD" | sed -n 's|.*/projects/\([^/]*\).*|\1|p')
 fi
 
 # Export session ID for other hooks
@@ -18,10 +26,18 @@ fi
 
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload the most recent session summary + chunk summaries
-    SUMMARY=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-    CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+    if [ -n "$PROJECT" ]; then
+        SUMMARY=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+    else
+        SUMMARY=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+    fi
     if [ -n "$SUMMARY" ] || [ -n "$CHUNKS" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
+        if [ -n "$PROJECT" ]; then
+            echo "## Active project: $PROJECT"
+        fi
         if [ -n "$SUMMARY" ]; then
             echo "$SUMMARY"
         fi
@@ -32,13 +48,23 @@ if [ "$SOURCE" = "compact" ]; then
         echo "=== END POST-COMPACTION CONTEXT ==="
     fi
 else
-    # Fresh startup or resume: load high-importance memories + recent summaries
-    SUMMARIES=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
-    IMPORTANT=$(sqlite3 -separator '|' "$DB" "SELECT id, type, project, substr(content, 1, 300), importance FROM memories WHERE importance >= 7 AND type != 'session_summary' ORDER BY created_at DESC LIMIT 10;" 2>/dev/null)
-    CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+    # Fresh startup or resume: load memories, prioritizing current project
+    if [ -n "$PROJECT" ]; then
+        # Project-specific: load this project's summaries and chunks first
+        SUMMARIES=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+        IMPORTANT=$(sqlite3 -separator '|' "$DB" "SELECT id, type, project, substr(content, 1, 300), importance FROM memories WHERE importance >= 7 AND type != 'session_summary' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 10;" 2>/dev/null)
+    else
+        SUMMARIES=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='session_summary' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        CHUNKS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 300) FROM memories WHERE type='chunk_summary' ORDER BY created_at DESC LIMIT 5;" 2>/dev/null)
+        IMPORTANT=$(sqlite3 -separator '|' "$DB" "SELECT id, type, project, substr(content, 1, 300), importance FROM memories WHERE importance >= 7 AND type != 'session_summary' ORDER BY created_at DESC LIMIT 10;" 2>/dev/null)
+    fi
 
     if [ -n "$SUMMARIES" ] || [ -n "$IMPORTANT" ] || [ -n "$CHUNKS" ]; then
         echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
+        if [ -n "$PROJECT" ]; then
+            echo "## Active project: $PROJECT"
+        fi
         if [ -n "$SUMMARIES" ]; then
             echo "## Recent Session Summaries:"
             echo "$SUMMARIES"
