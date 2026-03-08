@@ -14,64 +14,49 @@ Common symptoms:
 
 ## How It Works
 
-LLM Memory is an MCP (Model Context Protocol) server that gives Claude Code persistent memory tools. Claude stores and retrieves memories itself — no external AI service needed, Claude IS the intelligence layer.
-
 ```
 ┌─────────────┐     MCP (stdio)     ┌──────────────┐     ┌──────────┐
 │ Claude Code  │◄──────────────────►│ LLM Memory   │────►│ SQLite   │
 │              │                    │ server.py    │     │ + FTS5   │
 └─────────────┘                    └──────────────┘     └──────────┘
        │
-       │ reads on startup
+       │ lifecycle hooks + CLAUDE.md rules
        ▼
- ~/.claude/CLAUDE.md
- (memory protocol rules)
+ SessionStart → auto-load memories
+ PostToolUse  → monitor transcript size
+ PreCompact   → save progress before compaction
+ SessionEnd   → archive transcript + save summary
 ```
 
-### Three components:
+1. **It's an MCP server** (`server.py`) — a Python process that Claude Code spawns automatically on startup and talks to via stdin/stdout using the Model Context Protocol.
 
-1. **MCP Server** (`server.py`) — Python server with SQLite + FTS5. Claude Code spawns it automatically. Provides 7 tools: `memory_store`, `memory_search`, `memory_recent`, `memory_get`, `memory_connect`, `memory_explore`, `memory_delete`.
+2. **SQLite is the backend** — all memories live in `~/.claude/memory/memory.db` with WAL mode, foreign keys, and FTS5 full-text search. Everything local, nothing leaves your machine.
 
-2. **Global CLAUDE.md** — Rules that tell Claude when and how to use memory. Loaded into every session automatically.
+3. **7 memory tools** — `memory_store`, `memory_search`, `memory_recent`, `memory_get`, `memory_connect`, `memory_explore`, `memory_delete`. Claude calls these directly during conversations.
 
-3. **Lifecycle Hooks** — Bash scripts for session lifecycle events:
-   - **SessionStart** — Auto-loads recent memories into context
-   - **PostToolUse** — Monitors transcript size, warns when context is getting large
-   - **PreCompact** — Instructs Claude to save progress before compaction
-   - **SessionEnd** — Auto-saves session summary from transcript
+4. **7 memory types** — `decision`, `insight`, `progress`, `correction`, `session_summary`, `chunk_summary`, `note`. Each serves a different purpose — corrections get stored at high importance so mistakes aren't repeated.
 
-4. **Web Dashboard** (`dashboard.py`) — Browser-based read-only viewer with timeline and knowledge graph visualization at `http://localhost:8765`.
+5. **Knowledge graph** — memories can be linked with 6 relationship types (`supports`, `contradicts`, `supersedes`, `implements`, `depends_on`, `related_to`). `memory_explore` traverses connections up to 3 hops deep.
 
-## Memory Tools
+6. **Three-layer memory architecture** — Layer 1: raw transcripts (archived JSONL, unmodified). Layer 2: chunk summaries (filtered, numbered mid-session snapshots). Layer 3: extracted signals (individual decisions, insights, corrections).
 
-| Tool | Purpose |
-|------|---------|
-| `memory_store` | Save a memory with type, project, importance, transcript_ref, and optional connections |
-| `memory_search` | Full-text search across all memories |
-| `memory_recent` | Get the N most recent memories, optionally filtered by project/type |
-| `memory_get` | Fetch a specific memory by ID with all its connections |
-| `memory_connect` | Link two memories with a relationship (supports, contradicts, supersedes, etc.) |
-| `memory_explore` | Traverse the knowledge graph from a starting memory up to 3 hops deep |
-| `memory_delete` | Remove a memory and its connections |
+7. **Chunk summaries** — Claude creates these at natural breakpoints (topic changes, subtask completions, before compaction). They capture decisions/outcomes/learnings while filtering out noise like circular debugging and dead-end research.
 
-### Memory Types
+8. **Transcript archiving** — the SessionEnd hook copies the raw JSONL transcript to `~/.claude/memory/transcripts/` before anything else. Chunk summaries can reference these via `transcript_ref`.
 
-- `decision` — A choice that was made and why
-- `insight` — Something learned about the codebase, architecture, or domain
-- `progress` — What was accomplished in a task
-- `correction` — A mistake that was corrected (stored with high importance so it's not repeated)
-- `session_summary` — End-of-session summary of what happened
-- `chunk_summary` — Mid-session summary of a work chunk (numbered, linked, captures decisions/outcomes)
-- `note` — General information worth remembering
+9. **Deduplication** — `memory_store` checks if similar content (first 100 chars) was stored in the last hour and skips duplicates. Prevents Claude from flooding the database with repeated saves.
 
-### Relationship Types
+10. **4 lifecycle hooks** — SessionStart (loads memories into context), PostToolUse (warns at 300KB/500KB transcript size), PreCompact (tells Claude to save progress before compaction), SessionEnd (archives transcript + auto-saves summary).
 
-- `supports` — Memory A provides evidence for Memory B
-- `contradicts` — Memory A conflicts with Memory B
-- `supersedes` — Memory A replaces Memory B (newer decision)
-- `implements` — Memory A is an implementation of Memory B
-- `depends_on` — Memory A requires Memory B
-- `related_to` — General relationship
+11. **SessionStart is context-aware** — on fresh start, it loads recent session summaries + chunk summaries + high-importance memories. After compaction, it loads the most recent summary + recent chunks to rebuild lost context.
+
+12. **CLAUDE.md rules** — behavioral instructions in `~/.claude/CLAUDE.md` that tell Claude *when* and *how* to use memory. When to store, when to search, how to create chunk summaries, how to handle large files. Claude follows these every session.
+
+13. **Web dashboard** (`dashboard.py`) — FastAPI app at `localhost:8765` with two views: Timeline (filterable/searchable card list of all memories) and Graph (force-directed vis.js visualization of the knowledge graph). Read-only, never modifies the DB.
+
+14. **Auto-migration** — `init_db()` detects old schemas and adds missing columns (like `transcript_ref`). Existing databases upgrade seamlessly without losing data.
+
+15. **One-command install** — `./install.sh` creates a venv, installs deps, and registers the MCP server via `claude mcp add-json`. `./hooks/install_hooks.sh` adds all 4 hooks. Copy `claude-rules-example.md` to `~/.claude/CLAUDE.md` and restart Claude Code — done.
 
 ## Requirements
 
@@ -163,36 +148,6 @@ SQLite database where all memories are stored. Created automatically on first ru
 ```bash
 sqlite3 ~/.claude/memory/memory.db "SELECT id, type, project, substr(content, 1, 80) FROM memories ORDER BY created_at DESC LIMIT 20;"
 ```
-
-## How It Behaves In Practice
-
-**Session start:** Claude reads `~/.claude/CLAUDE.md`, sees the memory protocol rules, and calls `memory_recent` or `memory_search` to load relevant context from previous sessions.
-
-**During work:** At task boundaries (finishing a subtask, making a decision, getting corrected), Claude calls `memory_store` to persist important information.
-
-**Large file generation:** Instead of outputting a 17,000-line file and crashing, Claude writes one section at a time using Write/Edit tools.
-
-**Session getting long:** The hook warns Claude when the transcript is large. Claude saves current progress with `memory_store` before context compaction hits.
-
-**Next session:** Claude searches memories for the project it's working on and picks up where it left off, even though the conversation is gone.
-
-## Three-Layer Memory
-
-LLM Memory uses a three-layer approach to preserve context:
-
-```
-Layer 1: Raw transcript (archived JSONL, never modified)
-Layer 2: Chunk summaries (numbered, linked, filtered mid-session snapshots)
-Layer 3: Extracted signals (decisions, learnings, corrections, insights)
-```
-
-**Layer 1 — Raw Transcripts.** The SessionEnd hook automatically copies the raw JSONL transcript to `~/.claude/memory/transcripts/`. These are the unmodified source of truth.
-
-**Layer 2 — Chunk Summaries.** Claude creates `chunk_summary` memories at natural breakpoints (topic changes, subtask completions, before compaction). Each chunk captures decisions, outcomes, and learnings while filtering out noise like circular debugging or dead-end research. Chunks are numbered per session, linked via `memory_connect`, and reference the raw transcript via `transcript_ref`.
-
-**Layer 3 — Extracted Signals.** Individual `decision`, `insight`, `correction`, and other memory types that capture specific high-value information. These are the most durable and searchable.
-
-The CLAUDE.md rules (see `claude-rules-example.md`) tell Claude when to create each layer.
 
 ## Web Dashboard
 
