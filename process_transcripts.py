@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sqlite3
@@ -45,12 +46,26 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
-def get_processed_sessions(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute(
-        "SELECT DISTINCT session_id FROM memories "
-        "WHERE type='session_log' AND session_id IS NOT NULL",
-    ).fetchall()
-    return {r["session_id"] for r in rows}
+def get_processed_sessions(conn) -> set[str]:
+    sessions = set()
+    # Check DB
+    if conn:
+        rows = conn.execute(
+            "SELECT DISTINCT session_id FROM memories "
+            "WHERE type='session_log' AND session_id IS NOT NULL",
+        ).fetchall()
+        sessions.update(r["session_id"] for r in rows)
+    # Also check record files
+    records_dir = DB_DIR / "records"
+    if records_dir.exists():
+        for path in records_dir.glob("*.json"):
+            try:
+                data = json.loads(path.read_text())
+                if data.get("type") == "session_log" and data.get("session_id"):
+                    sessions.add(data["session_id"])
+            except Exception:
+                continue
+    return sessions
 
 
 # ---------------------------------------------------------------------------
@@ -253,20 +268,45 @@ def archive_transcript(path: Path, session_id: str) -> Path:
 
 
 def store_session_log(
-    conn: sqlite3.Connection,
+    conn,
     session_id: str,
     project: str,
     content: str,
     transcript_ref: str,
-) -> int:
-    """Insert a session_log memory. Returns the new memory ID."""
-    cursor = conn.execute(
-        "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        ("session_log", content, project, session_id, 3, transcript_ref),
-    )
-    conn.commit()
-    return cursor.lastrowid
+) -> str:
+    """Insert a session_log memory. Returns the UUID."""
+    uuid = os.urandom(16).hex()
+    created_at = datetime.now(tz=__import__('datetime').timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+
+    record = {
+        "schema_version": 1,
+        "uuid": uuid,
+        "type": "session_log",
+        "content": content,
+        "project": project,
+        "session_id": session_id,
+        "importance": 3,
+        "transcript_ref": transcript_ref,
+        "tags": None,
+        "created_at": created_at,
+        "connections": [],
+    }
+
+    # Write record file
+    records_dir = DB_DIR / "records"
+    records_dir.mkdir(parents=True, exist_ok=True)
+    (records_dir / f"{uuid}.json").write_text(json.dumps(record, indent=2))
+
+    # Also insert into DB for immediate use
+    if conn:
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, session_id, importance, transcript_ref, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid, "session_log", content, project, session_id, 3, transcript_ref, created_at),
+        )
+        conn.commit()
+
+    return uuid
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +315,7 @@ def store_session_log(
 
 def process_transcripts(args, conn, transcripts) -> tuple[int, int]:
     """Process transcripts into session_log memories."""
-    processed = get_processed_sessions(conn) if conn else set()
+    processed = get_processed_sessions(conn)
     if not args.quiet:
         print(f"Found {len(transcripts)} transcripts, {len(processed)} session_logs already exist")
 
@@ -309,9 +349,9 @@ def process_transcripts(args, conn, transcripts) -> tuple[int, int]:
                 print(f"  File: {path} ({path.stat().st_size / 1024:.0f} KB)")
         else:
             archive_transcript(path, session_id)
-            memory_id = store_session_log(conn, session_id, data["project"], content, transcript_ref)
+            uuid = store_session_log(conn, session_id, data["project"], content, transcript_ref)
             if not args.quiet:
-                print(f"  session_log: {session_id} → #{memory_id} ({data['project']}, {data['turn_count']} turns)")
+                print(f"  session_log: {session_id} → {uuid} ({data['project']}, {data['turn_count']} turns)")
 
         new_count += 1
 

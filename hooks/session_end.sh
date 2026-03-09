@@ -15,14 +15,11 @@ mkdir -p "$TRANSCRIPT_DIR"
 ARCHIVE_NAME="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)}.jsonl"
 cp "$TRANSCRIPT" "$TRANSCRIPT_DIR/$ARCHIVE_NAME" 2>/dev/null || true
 
-DB="$HOME/.claude/memory/memory.db"
-if [ ! -f "$DB" ]; then
-    exit 0
-fi
+RECORDS_DIR="$HOME/.claude/memory/records"
+mkdir -p "$RECORDS_DIR"
 
-# Skip if we already logged this session
-EXISTING=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE session_id='$SESSION_ID' AND type='session_log';" 2>/dev/null)
-if [ "$EXISTING" -gt "0" ]; then
+# Skip if we already logged this session (check record files)
+if grep -rl "\"session_id\": \"$SESSION_ID\"" "$RECORDS_DIR"/*.json 2>/dev/null | head -1 | grep -q .; then
     exit 0
 fi
 
@@ -74,11 +71,31 @@ if messages:
 
 if [ -n "$SUMMARY" ]; then
     CONTENT="Session $SESSION_ID for ${PROJECT:-unknown}, $TURN_COUNT turns. $SUMMARY"
-    if [ -n "$PROJECT" ]; then
-        sqlite3 "$DB" "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref) VALUES ('session_log', '$CONTENT', '$PROJECT', '$SESSION_ID', 3, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
-    else
-        sqlite3 "$DB" "INSERT INTO memories (type, content, session_id, importance, transcript_ref) VALUES ('session_log', '$CONTENT', '$SESSION_ID', 3, '~/.claude/memory/transcripts/$ARCHIVE_NAME');" 2>/dev/null
-    fi
+    TRANSCRIPT_REF="~/.claude/memory/transcripts/$ARCHIVE_NAME"
+
+    # Write JSON record file using Python for proper escaping
+    python3 -c "
+import json, os
+from datetime import datetime
+
+uuid = os.urandom(16).hex()
+record = {
+    'schema_version': 1,
+    'uuid': uuid,
+    'type': 'session_log',
+    'content': '''$CONTENT''',
+    'project': '$PROJECT' or None,
+    'session_id': '$SESSION_ID',
+    'importance': 3,
+    'transcript_ref': '$TRANSCRIPT_REF',
+    'tags': None,
+    'created_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S'),
+    'connections': []
+}
+path = '$RECORDS_DIR/' + uuid + '.json'
+with open(path, 'w') as f:
+    json.dump(record, f, indent=2)
+" 2>/dev/null
 fi
 
 exit 0

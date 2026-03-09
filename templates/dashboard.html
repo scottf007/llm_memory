@@ -548,7 +548,7 @@
     const search = filterSearch.value.trim();
     if (project) params.set('project', project);
     if (type) params.set('type', type);
-    if (search) params.set('q', search);
+    if (search) params.set('search', search);
     return params.toString();
   }
 
@@ -559,10 +559,10 @@
 
     const card = document.createElement('div');
     card.className = 'memory-card';
-    card.setAttribute('data-id', mem.id);
+    card.setAttribute('data-uuid', mem.uuid);
     card.innerHTML =
       '<div class="card-header">' +
-        '<span class="badge-id">#' + esc(String(mem.id)) + '</span>' +
+        '<span class="badge-id">' + esc(String(mem.uuid).substring(0, 8)) + '</span>' +
         '<span class="badge-type ' + esc(typeClass) + '">' + esc(mem.type || 'note') + '</span>' +
         (mem.project ? '<span class="badge-project">' + esc(mem.project) + '</span>' : '') +
       '</div>' +
@@ -572,7 +572,7 @@
         '<span>' + relativeTime(mem.created_at) + '</span>' +
         (connections > 0 ? '<span class="conn-count">' + connections + ' connection' + (connections !== 1 ? 's' : '') + '</span>' : '') +
       '</div>';
-    card.addEventListener('click', () => openDetail(mem.id));
+    card.addEventListener('click', () => openDetail(mem.uuid));
     return card;
   }
 
@@ -631,10 +631,10 @@
   filterSearch.addEventListener('input', debounce(resetAndLoad, 300));
 
   // --- Detail panel ---
-  async function openDetail(id) {
+  async function openDetail(uuid) {
     try {
-      const mem = await fetchJSON('/api/memory/' + id);
-      document.getElementById('detail-title').textContent = 'Memory #' + id;
+      const mem = await fetchJSON('/api/memory/' + uuid);
+      document.getElementById('detail-title').textContent = 'Memory ' + uuid.substring(0, 8);
       detailContent.textContent = mem.content || '';
 
       detailMeta.innerHTML =
@@ -655,21 +655,21 @@
         outgoing.forEach(c => {
           const item = document.createElement('div');
           item.className = 'conn-item';
-          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory #' + c.to_id);
+          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory ' + c.to_uuid);
           item.innerHTML =
-            '<div class="conn-rel">' + esc(c.relationship) + ' → #' + c.to_id + '</div>' +
+            '<div class="conn-rel">' + esc(c.relationship) + ' → ' + c.to_uuid.substring(0, 8) + '</div>' +
             '<div>' + esc(preview) + '</div>';
-          item.addEventListener('click', () => openDetail(c.to_id));
+          item.addEventListener('click', () => openDetail(c.to_uuid));
           detailConnections.appendChild(item);
         });
         incoming.forEach(c => {
           const item = document.createElement('div');
           item.className = 'conn-item';
-          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory #' + c.from_id);
+          const preview = (c.memory && c.memory.content) ? c.memory.content.substring(0, 150) : ('Memory ' + c.from_uuid);
           item.innerHTML =
-            '<div class="conn-rel">#' + c.from_id + ' ' + esc(c.relationship) + ' → this</div>' +
+            '<div class="conn-rel">' + c.from_uuid.substring(0, 8) + ' ' + esc(c.relationship) + ' → this</div>' +
             '<div>' + esc(preview) + '</div>';
-          item.addEventListener('click', () => openDetail(c.from_id));
+          item.addEventListener('click', () => openDetail(c.from_uuid));
           detailConnections.appendChild(item);
         });
       } else {
@@ -724,8 +724,8 @@
         const size = 10 + importance * 3;
         const preview = (n.content || '').substring(0, 120);
         return {
-          id: n.id,
-          label: '#' + n.id,
+          id: n.uuid,
+          label: n.uuid.substring(0, 8),
           title: '<strong>' + esc(n.type || '') + '</strong> (' + esc(n.project || '') + ')<br>' + esc(preview),
           color: {
             background: typeColor,
@@ -740,8 +740,8 @@
 
       const edges = new vis.DataSet(rawEdges.map((e, i) => ({
         id: e.id || i,
-        from: e.from || e.source_id || e.from_id,
-        to: e.to || e.target_id || e.to_id,
+        from: e.from || e.from_uuid,
+        to: e.to || e.to_uuid,
         label: e.relationship || e.type || '',
         color: { color: '#30363d', highlight: '#58a6ff', hover: '#58a6ff' },
         font: { color: '#8b949e', size: 10, strokeWidth: 0 },

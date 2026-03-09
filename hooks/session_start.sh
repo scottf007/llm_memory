@@ -6,6 +6,15 @@ INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
+# Sync CLAUDE.md from shared config if newer
+SHARED_CLAUDE_MD="$HOME/.claude/memory/config/CLAUDE.md"
+LOCAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+if [ -f "$SHARED_CLAUDE_MD" ]; then
+    if [ ! -f "$LOCAL_CLAUDE_MD" ] || [ "$SHARED_CLAUDE_MD" -nt "$LOCAL_CLAUDE_MD" ]; then
+        cp "$SHARED_CLAUDE_MD" "$LOCAL_CLAUDE_MD"
+    fi
+fi
+
 DB="$HOME/.claude/memory/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
@@ -36,10 +45,10 @@ if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
         NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
     else
         NARRATIVE=""
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
     fi
     if [ -n "$NARRATIVE" ] || [ -n "$NOTES" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
@@ -59,8 +68,8 @@ else
     # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
         NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
 
         # Check if narrative needs updating (new session_logs since last narrative)
         NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
@@ -71,8 +80,8 @@ else
         fi
     else
         NARRATIVE=""
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT id, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT id, project, substr(content, 1, 200) FROM memories WHERE type='session_log' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
         NEW_SESSIONS="0"
     fi
 

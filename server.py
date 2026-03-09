@@ -2,8 +2,11 @@
 MCP server for persistent Claude Code memory.
 
 Provides tools for storing, searching, connecting, and exploring memories
-backed by SQLite with FTS5 full-text search. Designed to be spawned as a
-subprocess by Claude Code.
+backed by SQLite with FTS5 full-text search, with JSON file sync support
+for cross-machine synchronization via Syncthing.
+
+Files are the source of truth. The SQLite database is a derived, ephemeral index.
+You can delete memory.db at any time and rebuild it from the records directory.
 
 Memory types:
   - narrative: Per-project living document (the project's full story)
@@ -12,11 +15,14 @@ Memory types:
 
 Usage:
     python server.py
+    python server.py --rebuild   # Delete DB and rebuild from files
 """
 
 import json
 import os
 import sqlite3
+import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -30,13 +36,14 @@ import mcp.types as types
 
 DB_DIR = Path.home() / ".claude" / "memory"
 DB_PATH = DB_DIR / "memory.db"
+RECORDS_DIR = DB_DIR / "records"
 
 VALID_TYPES = {"narrative", "note", "session_log"}
 VALID_RELATIONSHIPS = {"supersedes", "related_to"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid TEXT PRIMARY KEY,
     type TEXT NOT NULL,
     content TEXT NOT NULL,
     project TEXT,
@@ -50,35 +57,74 @@ CREATE TABLE IF NOT EXISTS memories (
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
     content, type, project, tags,
     content='memories',
-    content_rowid='id'
+    content_rowid='rowid'
 );
 
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
     INSERT INTO memories_fts(rowid, content, type, project, tags)
-    VALUES (new.id, new.content, new.type, new.project, new.tags);
+    VALUES (new.rowid, new.content, new.type, new.project, new.tags);
 END;
 
 CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
     INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
-    VALUES('delete', old.id, old.content, old.type, old.project, old.tags);
+    VALUES('delete', old.rowid, old.content, old.type, old.project, old.tags);
 END;
 
 CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
     INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
-    VALUES('delete', old.id, old.content, old.type, old.project, old.tags);
+    VALUES('delete', old.rowid, old.content, old.type, old.project, old.tags);
     INSERT INTO memories_fts(rowid, content, type, project, tags)
-    VALUES (new.id, new.content, new.type, new.project, new.tags);
+    VALUES (new.rowid, new.content, new.type, new.project, new.tags);
 END;
 
 CREATE TABLE IF NOT EXISTS connections (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_id INTEGER NOT NULL REFERENCES memories(id),
-    to_id INTEGER NOT NULL REFERENCES memories(id),
+    from_uuid TEXT NOT NULL REFERENCES memories(uuid),
+    to_uuid TEXT NOT NULL REFERENCES memories(uuid),
     relationship TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(from_id, to_id, relationship)
+    PRIMARY KEY (from_uuid, to_uuid, relationship)
 );
 """
+
+# ---------------------------------------------------------------------------
+# UUID helper
+# ---------------------------------------------------------------------------
+
+
+def generate_uuid() -> str:
+    """Generate a 32-char lowercase hex UUID."""
+    return os.urandom(16).hex()
+
+
+# ---------------------------------------------------------------------------
+# File helpers
+# ---------------------------------------------------------------------------
+
+
+def write_record_file(record: dict) -> Path:
+    """Write a memory record as a JSON file. File-first, then DB."""
+    RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+    path = RECORDS_DIR / f"{record['uuid']}.json"
+    path.write_text(json.dumps(record, indent=2))
+    return path
+
+
+def read_record_file(uuid: str) -> dict | None:
+    """Read a memory record from its JSON file."""
+    path = RECORDS_DIR / f"{uuid}.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def delete_record_file(uuid: str) -> bool:
+    """Delete a memory record's JSON file. Returns True if file existed."""
+    path = RECORDS_DIR / f"{uuid}.json"
+    if path.exists():
+        path.unlink()
+        return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # Database helpers
@@ -98,64 +144,308 @@ def get_db() -> sqlite3.Connection:
 def init_db() -> None:
     """Create tables and triggers if they don't already exist.
 
-    Handles migration from v1 schema (adds tags column, rebuilds FTS
-    with tags, migrates old types to new types).
+    Detects old integer-ID schema and migrates to UUID-based schema.
     """
-    conn = get_db()
-    try:
-        # Check existing columns before running schema
-        columns = []
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Check if we need migration from old schema
+    if DB_PATH.exists():
+        conn = get_db()
         try:
-            columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
-        except Exception:
-            pass
-
-        if columns:
-            # Existing database — migrate
-            if "transcript_ref" not in columns:
-                conn.execute("ALTER TABLE memories ADD COLUMN transcript_ref TEXT")
-            if "tags" not in columns:
-                conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT")
-
-            # Rebuild FTS to include tags column if it exists but lacks tags
+            columns = []
             try:
-                fts_cols = conn.execute("PRAGMA table_info(memories_fts)").fetchall()
-                fts_col_names = [row[1] for row in fts_cols]
-                if "tags" not in fts_col_names:
-                    # Drop old FTS and triggers, recreate with tags
-                    conn.executescript("""
-                        DROP TRIGGER IF EXISTS memories_ai;
-                        DROP TRIGGER IF EXISTS memories_ad;
-                        DROP TRIGGER IF EXISTS memories_au;
-                        DROP TABLE IF EXISTS memories_fts;
-                    """)
-                    conn.executescript(SCHEMA)
-                    # Rebuild FTS index from existing data
-                    conn.execute("""
-                        INSERT INTO memories_fts(rowid, content, type, project, tags)
-                        SELECT id, content, type, project, tags FROM memories
-                    """)
+                columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
             except Exception:
                 pass
 
-            # Migrate old types to new types
-            conn.execute("UPDATE memories SET type = 'note' WHERE type IN ('decision', 'insight', 'progress', 'correction')")
-            conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'project_narrative'")
-            conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'note' AND content LIKE '[PROJECT NARRATIVE]%'")
-            conn.execute("UPDATE memories SET type = 'session_log' WHERE type = 'session_summary'")
-            conn.execute("UPDATE memories SET type = 'note' WHERE type = 'chunk_summary'")
-            conn.commit()
-        else:
-            # Fresh database
-            conn.executescript(SCHEMA)
-            conn.commit()
+            if columns and "id" in columns and "uuid" not in columns:
+                # Old integer-ID schema detected — migrate
+                conn.close()
+                _migrate_v1_to_v2()
+                return
+
+            if columns and "uuid" in columns:
+                # Already on new schema, nothing to do
+                conn.close()
+                return
+        except Exception:
+            conn.close()
+            raise
+
+    # Fresh database — create new schema
+    conn = get_db()
+    try:
+        conn.executescript(SCHEMA)
+        conn.commit()
     finally:
         conn.close()
+
+    # Create .stignore for Syncthing
+    _ensure_stignore()
+
+
+def _ensure_stignore() -> None:
+    """Create .stignore file to prevent Syncthing from syncing the DB."""
+    stignore_path = DB_DIR / ".stignore"
+    if not stignore_path.exists():
+        stignore_path.write_text("memory.db\nmemory.db-wal\nmemory.db-shm\n")
+
+
+def _migrate_v1_to_v2() -> None:
+    """Migrate existing integer-ID memories to UUID-based file records."""
+    RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+
+    conn = get_db()
+    try:
+        # Handle older v1 schemas that might be missing columns
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(memories)").fetchall()]
+        if "transcript_ref" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN transcript_ref TEXT")
+        if "tags" not in columns:
+            conn.execute("ALTER TABLE memories ADD COLUMN tags TEXT")
+
+        # Migrate old types before reading
+        conn.execute("UPDATE memories SET type = 'note' WHERE type IN ('decision', 'insight', 'progress', 'correction')")
+        conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'project_narrative'")
+        conn.execute("UPDATE memories SET type = 'narrative' WHERE type = 'note' AND content LIKE '[PROJECT NARRATIVE]%'")
+        conn.execute("UPDATE memories SET type = 'session_log' WHERE type = 'session_summary'")
+        conn.execute("UPDATE memories SET type = 'note' WHERE type = 'chunk_summary'")
+        conn.commit()
+
+        # Read all existing records
+        rows = conn.execute(
+            "SELECT id, type, content, project, session_id, created_at, "
+            "importance, transcript_ref, tags FROM memories"
+        ).fetchall()
+
+        # Map old integer IDs to new UUIDs
+        id_to_uuid = {}
+        for row in rows:
+            uuid = generate_uuid()
+            id_to_uuid[row["id"]] = uuid
+
+        # Read all connections
+        connections = conn.execute(
+            "SELECT from_id, to_id, relationship FROM connections"
+        ).fetchall()
+
+        # Build connection lookup: from_id -> [(to_id, relationship), ...]
+        conn_lookup: dict[int, list[tuple[int, str]]] = {}
+        for c in connections:
+            conn_lookup.setdefault(c["from_id"], []).append(
+                (c["to_id"], c["relationship"])
+            )
+
+        # Write JSON files
+        for row in rows:
+            old_id = row["id"]
+            uuid = id_to_uuid[old_id]
+            record = {
+                "schema_version": 1,
+                "uuid": uuid,
+                "type": row["type"],
+                "content": row["content"],
+                "project": row["project"],
+                "session_id": row["session_id"],
+                "importance": row["importance"] or 5,
+                "transcript_ref": row["transcript_ref"],
+                "tags": row["tags"],
+                "created_at": row["created_at"],
+                "connections": [],
+            }
+            for to_id, rel in conn_lookup.get(old_id, []):
+                if to_id in id_to_uuid:
+                    record["connections"].append({
+                        "to_uuid": id_to_uuid[to_id],
+                        "relationship": rel,
+                    })
+
+            write_record_file(record)
+
+        conn.close()
+
+        # Rebuild DB from files with new schema
+        full_rebuild()
+
+    except Exception:
+        conn.close()
+        raise
 
 
 def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     """Convert a sqlite3.Row to a plain dict."""
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# Startup sync
+# ---------------------------------------------------------------------------
+
+
+def _import_record(conn: sqlite3.Connection, record: dict) -> None:
+    """Insert a single record from a JSON file into the DB."""
+    conn.execute(
+        "INSERT OR IGNORE INTO memories (uuid, type, content, project, session_id, "
+        "created_at, importance, transcript_ref, tags) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            record["uuid"], record["type"], record["content"],
+            record.get("project"), record.get("session_id"),
+            record.get("created_at"), record.get("importance", 5),
+            record.get("transcript_ref"), record.get("tags"),
+        ),
+    )
+
+
+def _rebuild_connections(conn: sqlite3.Connection, uuids: set, records_dir: Path) -> None:
+    """Rebuild connection rows for newly imported records."""
+    for uuid in uuids:
+        path = records_dir / f"{uuid}.json"
+        if not path.exists():
+            continue
+        try:
+            record = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        for link in record.get("connections", []):
+            to_uuid = link.get("to_uuid")
+            relationship = link.get("relationship")
+            if not to_uuid or not relationship:
+                continue
+            # Only insert if target exists in DB
+            if conn.execute("SELECT 1 FROM memories WHERE uuid = ?", (to_uuid,)).fetchone():
+                conn.execute(
+                    "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) "
+                    "VALUES (?, ?, ?)",
+                    (uuid, to_uuid, relationship),
+                )
+
+
+def _resolve_conflicts(records_dir: Path) -> None:
+    """Merge any Syncthing conflict files."""
+    for conflict_path in records_dir.glob("*.sync-conflict-*"):
+        # Extract original UUID from conflict filename
+        # Syncthing format: {uuid}.sync-conflict-{date}-{id}.json
+        stem = conflict_path.stem
+        original_uuid = stem.split(".sync-conflict")[0]
+        original_path = records_dir / f"{original_uuid}.json"
+
+        if not original_path.exists():
+            # Original was deleted; conflict file is stale
+            conflict_path.unlink()
+            continue
+
+        try:
+            original = json.loads(original_path.read_text())
+            conflict = json.loads(conflict_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            # Can't parse — remove conflict file, keep original
+            conflict_path.unlink()
+            continue
+
+        # Merge connections (union)
+        existing = {(c["to_uuid"], c["relationship"]) for c in original.get("connections", [])}
+        for c in conflict.get("connections", []):
+            key = (c["to_uuid"], c["relationship"])
+            if key not in existing:
+                original.setdefault("connections", []).append(c)
+
+        # Keep the more recent content if different
+        if conflict.get("created_at", "") > original.get("created_at", ""):
+            original["content"] = conflict["content"]
+
+        original_path.write_text(json.dumps(original, indent=2))
+        conflict_path.unlink()
+
+
+def sync_from_files() -> None:
+    """Reconcile records/ directory with SQLite DB."""
+    RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Resolve Syncthing conflicts first
+    _resolve_conflicts(RECORDS_DIR)
+
+    conn = get_db()
+    try:
+        # 1. Get all UUIDs currently in DB
+        db_uuids = set(
+            row[0] for row in conn.execute("SELECT uuid FROM memories").fetchall()
+        )
+
+        # 2. Get all UUIDs from files on disk
+        file_uuids = set()
+        for path in RECORDS_DIR.glob("*.json"):
+            file_uuids.add(path.stem)
+
+        # 3. Files present on disk but missing from DB → import
+        to_import = file_uuids - db_uuids
+        for uuid in to_import:
+            path = RECORDS_DIR / f"{uuid}.json"
+            try:
+                record = json.loads(path.read_text())
+                _import_record(conn, record)
+            except (json.JSONDecodeError, OSError, KeyError):
+                # Skip corrupt/unreadable files
+                continue
+
+        # 4. Records in DB but file missing from disk → delete from DB
+        to_remove = db_uuids - file_uuids
+        for uuid in to_remove:
+            conn.execute("DELETE FROM connections WHERE from_uuid = ? OR to_uuid = ?", (uuid, uuid))
+            conn.execute("DELETE FROM memories WHERE uuid = ?", (uuid,))
+
+        # 5. Rebuild connections for imported records
+        if to_import:
+            _rebuild_connections(conn, to_import, RECORDS_DIR)
+
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def full_rebuild() -> None:
+    """Delete and rebuild memory.db entirely from records/ files."""
+    if DB_PATH.exists():
+        DB_PATH.unlink()
+    # Also delete WAL and SHM files
+    for suffix in ("-wal", "-shm"):
+        p = DB_PATH.parent / (DB_PATH.name + suffix)
+        if p.exists():
+            p.unlink()
+
+    init_db()  # Creates fresh schema
+
+    conn = get_db()
+    try:
+        # Pass 1: Import all records
+        for path in sorted(RECORDS_DIR.glob("*.json")):
+            try:
+                record = json.loads(path.read_text())
+                _import_record(conn, record)
+            except (json.JSONDecodeError, OSError, KeyError):
+                continue
+
+        # Pass 2: Import all connections (all records now exist)
+        for path in RECORDS_DIR.glob("*.json"):
+            try:
+                record = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            for link in record.get("connections", []):
+                to_uuid = link.get("to_uuid")
+                relationship = link.get("relationship")
+                if not to_uuid or not relationship:
+                    continue
+                if conn.execute("SELECT 1 FROM memories WHERE uuid = ?", (to_uuid,)).fetchone():
+                    conn.execute(
+                        "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) "
+                        "VALUES (?, ?, ?)",
+                        (record["uuid"], to_uuid, relationship),
+                    )
+
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -216,13 +506,13 @@ async def list_tools() -> list[types.Tool]:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "to_id": {"type": "integer"},
+                                "to_uuid": {"type": "string"},
                                 "relationship": {
                                     "type": "string",
                                     "enum": list(VALID_RELATIONSHIPS),
                                 },
                             },
-                            "required": ["to_id", "relationship"],
+                            "required": ["to_uuid", "relationship"],
                         },
                     },
                 },
@@ -283,16 +573,16 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="memory_get",
-            description="Get a specific memory by ID with its connections.",
+            description="Get a specific memory by UUID with its connections.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "id": {
-                        "type": "integer",
-                        "description": "Memory ID",
+                    "uuid": {
+                        "type": "string",
+                        "description": "Memory UUID (32-char hex string)",
                     },
                 },
-                "required": ["id"],
+                "required": ["uuid"],
             },
         ),
         types.Tool(
@@ -301,13 +591,13 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "from_id": {
-                        "type": "integer",
-                        "description": "Source memory ID",
+                    "from_uuid": {
+                        "type": "string",
+                        "description": "Source memory UUID",
                     },
-                    "to_id": {
-                        "type": "integer",
-                        "description": "Target memory ID",
+                    "to_uuid": {
+                        "type": "string",
+                        "description": "Target memory UUID",
                     },
                     "relationship": {
                         "type": "string",
@@ -315,7 +605,7 @@ async def list_tools() -> list[types.Tool]:
                         "enum": list(VALID_RELATIONSHIPS),
                     },
                 },
-                "required": ["from_id", "to_id", "relationship"],
+                "required": ["from_uuid", "to_uuid", "relationship"],
             },
         ),
         types.Tool(
@@ -324,9 +614,9 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "memory_id": {
-                        "type": "integer",
-                        "description": "Starting memory ID",
+                    "uuid": {
+                        "type": "string",
+                        "description": "Starting memory UUID",
                     },
                     "depth": {
                         "type": "integer",
@@ -336,7 +626,7 @@ async def list_tools() -> list[types.Tool]:
                         "default": 1,
                     },
                 },
-                "required": ["memory_id"],
+                "required": ["uuid"],
             },
         ),
         types.Tool(
@@ -345,12 +635,12 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "id": {
-                        "type": "integer",
-                        "description": "Memory ID to delete",
+                    "uuid": {
+                        "type": "string",
+                        "description": "Memory UUID to delete",
                     },
                 },
-                "required": ["id"],
+                "required": ["uuid"],
             },
         ),
     ]
@@ -413,39 +703,69 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
         # (skip for narratives — they're meant to be updated)
         if mem_type != "narrative":
             existing = conn.execute(
-                "SELECT id FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
+                "SELECT uuid FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
                 "AND created_at > datetime('now', '-1 hour')",
                 (content,),
             ).fetchone()
             if existing:
                 return _text(json.dumps({
-                    "id": existing["id"],
+                    "uuid": existing["uuid"],
                     "status": "duplicate_skipped",
                     "message": "Similar memory already stored recently"
                 }, indent=2))
 
-        cursor = conn.execute(
-            "INSERT INTO memories (type, content, project, session_id, importance, transcript_ref, tags) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (mem_type, content, project, session_id, importance, transcript_ref, tags),
-        )
-        memory_id = cursor.lastrowid
+        uuid = generate_uuid()
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
+        # Build the record dict
+        record = {
+            "schema_version": 1,
+            "uuid": uuid,
+            "type": mem_type,
+            "content": content,
+            "project": project,
+            "session_id": session_id,
+            "importance": importance,
+            "transcript_ref": transcript_ref,
+            "tags": tags,
+            "created_at": created_at,
+            "connections": [],
+        }
+
+        # Process connections for the record file
         for link in connections:
-            to_id = link.get("to_id")
+            to_uuid = link.get("to_uuid")
             relationship = link.get("relationship", "")
             if relationship not in VALID_RELATIONSHIPS:
                 continue
-            target = conn.execute("SELECT id FROM memories WHERE id = ?", (to_id,)).fetchone()
-            if target:
-                conn.execute(
-                    "INSERT OR IGNORE INTO connections (from_id, to_id, relationship) "
-                    "VALUES (?, ?, ?)",
-                    (memory_id, to_id, relationship),
-                )
+            if to_uuid:
+                target = conn.execute("SELECT uuid FROM memories WHERE uuid = ?", (to_uuid,)).fetchone()
+                if target:
+                    record["connections"].append({
+                        "to_uuid": to_uuid,
+                        "relationship": relationship,
+                    })
+
+        # Write file FIRST (source of truth), then DB
+        write_record_file(record)
+
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, session_id, "
+            "created_at, importance, transcript_ref, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid, mem_type, content, project, session_id, created_at, importance, transcript_ref, tags),
+        )
+
+        # Insert connections into DB
+        for link in record["connections"]:
+            conn.execute(
+                "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) "
+                "VALUES (?, ?, ?)",
+                (uuid, link["to_uuid"], link["relationship"]),
+            )
 
         conn.commit()
-        return _text(json.dumps({"id": memory_id, "status": "stored"}, indent=2))
+        return _text(json.dumps({"uuid": uuid, "status": "stored"}, indent=2))
     finally:
         conn.close()
 
@@ -466,10 +786,10 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
     conn = get_db()
     try:
         sql = (
-            "SELECT m.id, m.type, m.content, m.project, m.created_at, "
+            "SELECT m.uuid, m.type, m.content, m.project, m.created_at, "
             "m.importance, m.transcript_ref, m.tags "
             "FROM memories_fts f "
-            "JOIN memories m ON m.id = f.rowid "
+            "JOIN memories m ON m.rowid = f.rowid "
             "WHERE memories_fts MATCH ? "
         )
         params: list[Any] = [fts_query]
@@ -509,7 +829,10 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        sql = "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref, tags FROM memories WHERE 1=1 "
+        sql = (
+            "SELECT uuid, type, content, project, session_id, created_at, "
+            "importance, transcript_ref, tags FROM memories WHERE 1=1 "
+        )
         params: list[Any] = []
 
         if project:
@@ -538,49 +861,50 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
 # -- memory_get ------------------------------------------------------------
 
 def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
-    memory_id = args.get("id")
-    if memory_id is None:
-        return _error("id is required")
+    uuid = args.get("uuid")
+    if not uuid:
+        return _error("uuid is required")
 
     conn = get_db()
     try:
         row = conn.execute(
-            "SELECT id, type, content, project, session_id, created_at, importance, transcript_ref, tags "
-            "FROM memories WHERE id = ?",
-            (memory_id,),
+            "SELECT uuid, type, content, project, session_id, created_at, "
+            "importance, transcript_ref, tags "
+            "FROM memories WHERE uuid = ?",
+            (uuid,),
         ).fetchone()
 
         if not row:
-            return _error(f"Memory {memory_id} not found")
+            return _error(f"Memory {uuid} not found")
 
         memory = row_to_dict(row)
 
         outgoing = conn.execute(
-            "SELECT c.to_id, c.relationship, c.created_at, "
+            "SELECT c.to_uuid, c.relationship, c.created_at, "
             "m.type, substr(m.content, 1, 200) as content, m.project, m.importance "
             "FROM connections c "
-            "JOIN memories m ON m.id = c.to_id "
-            "WHERE c.from_id = ?",
-            (memory_id,),
+            "JOIN memories m ON m.uuid = c.to_uuid "
+            "WHERE c.from_uuid = ?",
+            (uuid,),
         ).fetchall()
 
         incoming = conn.execute(
-            "SELECT c.from_id, c.relationship, c.created_at, "
+            "SELECT c.from_uuid, c.relationship, c.created_at, "
             "m.type, substr(m.content, 1, 200) as content, m.project, m.importance "
             "FROM connections c "
-            "JOIN memories m ON m.id = c.from_id "
-            "WHERE c.to_id = ?",
-            (memory_id,),
+            "JOIN memories m ON m.uuid = c.from_uuid "
+            "WHERE c.to_uuid = ?",
+            (uuid,),
         ).fetchall()
 
         memory["connections"] = {
             "outgoing": [
-                {"to_id": r["to_id"], "relationship": r["relationship"],
+                {"to_uuid": r["to_uuid"], "relationship": r["relationship"],
                  "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
                 for r in outgoing
             ],
             "incoming": [
-                {"from_id": r["from_id"], "relationship": r["relationship"],
+                {"from_uuid": r["from_uuid"], "relationship": r["relationship"],
                  "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
                 for r in incoming
             ],
@@ -594,29 +918,46 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
 # -- memory_connect --------------------------------------------------------
 
 def _handle_connect(args: dict[str, Any]) -> list[types.TextContent]:
-    from_id = args.get("from_id")
-    to_id = args.get("to_id")
+    from_uuid = args.get("from_uuid")
+    to_uuid = args.get("to_uuid")
     relationship = args.get("relationship", "")
 
-    if from_id is None or to_id is None:
-        return _error("from_id and to_id are required")
+    if not from_uuid or not to_uuid:
+        return _error("from_uuid and to_uuid are required")
     if relationship not in VALID_RELATIONSHIPS:
         return _error(f"relationship must be one of: {', '.join(sorted(VALID_RELATIONSHIPS))}")
 
     conn = get_db()
     try:
-        for mid in (from_id, to_id):
-            if not conn.execute("SELECT id FROM memories WHERE id = ?", (mid,)).fetchone():
+        for mid in (from_uuid, to_uuid):
+            if not conn.execute("SELECT uuid FROM memories WHERE uuid = ?", (mid,)).fetchone():
                 return _error(f"Memory {mid} not found")
 
+        # Update the source record's JSON file
+        record = read_record_file(from_uuid)
+        if record:
+            existing_conns = record.get("connections", [])
+            already_exists = any(
+                c["to_uuid"] == to_uuid and c["relationship"] == relationship
+                for c in existing_conns
+            )
+            if not already_exists:
+                existing_conns.append({
+                    "to_uuid": to_uuid,
+                    "relationship": relationship,
+                })
+                record["connections"] = existing_conns
+                write_record_file(record)
+
+        # Insert into DB
         conn.execute(
-            "INSERT OR IGNORE INTO connections (from_id, to_id, relationship) VALUES (?, ?, ?)",
-            (from_id, to_id, relationship),
+            "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) VALUES (?, ?, ?)",
+            (from_uuid, to_uuid, relationship),
         )
         conn.commit()
         return _text(json.dumps({
-            "status": "connected", "from_id": from_id,
-            "to_id": to_id, "relationship": relationship,
+            "status": "connected", "from_uuid": from_uuid,
+            "to_uuid": to_uuid, "relationship": relationship,
         }, indent=2))
     finally:
         conn.close()
@@ -625,69 +966,69 @@ def _handle_connect(args: dict[str, Any]) -> list[types.TextContent]:
 # -- memory_explore --------------------------------------------------------
 
 def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
-    start_id = args.get("memory_id")
+    start_uuid = args.get("uuid")
     depth = min(args.get("depth", 1), 3)
 
-    if start_id is None:
-        return _error("memory_id is required")
+    if not start_uuid:
+        return _error("uuid is required")
 
     conn = get_db()
     try:
         start_row = conn.execute(
-            "SELECT id, type, substr(content, 1, 300) as content, project, created_at, importance "
-            "FROM memories WHERE id = ?",
-            (start_id,),
+            "SELECT uuid, type, substr(content, 1, 300) as content, project, created_at, importance "
+            "FROM memories WHERE uuid = ?",
+            (start_uuid,),
         ).fetchone()
 
         if not start_row:
-            return _error(f"Memory {start_id} not found")
+            return _error(f"Memory {start_uuid} not found")
 
-        visited: set[int] = set()
+        visited: set[str] = set()
         nodes: list[dict[str, Any]] = []
         edges: list[dict[str, Any]] = []
 
-        def traverse(memory_id: int, current_depth: int) -> None:
-            if memory_id in visited or current_depth > depth:
+        def traverse(memory_uuid: str, current_depth: int) -> None:
+            if memory_uuid in visited or current_depth > depth:
                 return
-            visited.add(memory_id)
+            visited.add(memory_uuid)
 
             row = conn.execute(
-                "SELECT id, type, substr(content, 1, 300) as content, project, created_at, importance "
-                "FROM memories WHERE id = ?",
-                (memory_id,),
+                "SELECT uuid, type, substr(content, 1, 300) as content, project, created_at, importance "
+                "FROM memories WHERE uuid = ?",
+                (memory_uuid,),
             ).fetchone()
             if not row:
                 return
             nodes.append(row_to_dict(row))
 
             for direction, id_col, other_col in [
-                ("out", "from_id", "to_id"),
-                ("in", "to_id", "from_id"),
+                ("out", "from_uuid", "to_uuid"),
+                ("in", "to_uuid", "from_uuid"),
             ]:
                 rows = conn.execute(
-                    f"SELECT {other_col} as other_id, relationship FROM connections WHERE {id_col} = ?",
-                    (memory_id,),
+                    f"SELECT {other_col} as other_uuid, relationship FROM connections WHERE {id_col} = ?",
+                    (memory_uuid,),
                 ).fetchall()
                 for c in rows:
                     edges.append({
-                        "from_id": memory_id if direction == "out" else c["other_id"],
-                        "to_id": c["other_id"] if direction == "out" else memory_id,
+                        "from_uuid": memory_uuid if direction == "out" else c["other_uuid"],
+                        "to_uuid": c["other_uuid"] if direction == "out" else memory_uuid,
                         "relationship": c["relationship"],
                     })
-                    traverse(c["other_id"], current_depth + 1)
+                    traverse(c["other_uuid"], current_depth + 1)
 
-        traverse(start_id, 0)
+        traverse(start_uuid, 0)
 
-        seen_edges: set[tuple[int, int, str]] = set()
+        seen_edges: set[tuple[str, str, str]] = set()
         unique_edges = []
         for e in edges:
-            key = (e["from_id"], e["to_id"], e["relationship"])
+            key = (e["from_uuid"], e["to_uuid"], e["relationship"])
             if key not in seen_edges:
                 seen_edges.add(key)
                 unique_edges.append(e)
 
         return _text(json.dumps({
-            "start_id": start_id, "depth": depth,
+            "start_uuid": start_uuid, "depth": depth,
             "nodes": nodes, "edges": unique_edges,
         }, indent=2))
     finally:
@@ -697,20 +1038,23 @@ def _handle_explore(args: dict[str, Any]) -> list[types.TextContent]:
 # -- memory_delete ---------------------------------------------------------
 
 def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
-    memory_id = args.get("id")
-    if memory_id is None:
-        return _error("id is required")
+    uuid = args.get("uuid")
+    if not uuid:
+        return _error("uuid is required")
 
     conn = get_db()
     try:
-        row = conn.execute("SELECT id FROM memories WHERE id = ?", (memory_id,)).fetchone()
+        row = conn.execute("SELECT uuid FROM memories WHERE uuid = ?", (uuid,)).fetchone()
         if not row:
-            return _error(f"Memory {memory_id} not found")
+            return _error(f"Memory {uuid} not found")
 
-        conn.execute("DELETE FROM connections WHERE from_id = ? OR to_id = ?", (memory_id, memory_id))
-        conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+        # Delete file FIRST (source of truth), then DB
+        delete_record_file(uuid)
+
+        conn.execute("DELETE FROM connections WHERE from_uuid = ? OR to_uuid = ?", (uuid, uuid))
+        conn.execute("DELETE FROM memories WHERE uuid = ?", (uuid,))
         conn.commit()
-        return _text(json.dumps({"id": memory_id, "status": "deleted"}, indent=2))
+        return _text(json.dumps({"uuid": uuid, "status": "deleted"}, indent=2))
     finally:
         conn.close()
 
@@ -721,10 +1065,19 @@ def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
 
 async def main() -> None:
     init_db()
+    _ensure_stignore()
+    sync_from_files()
     async with stdio_server() as (read_stream, write_stream):
         await app.run(read_stream, write_stream, app.create_initialization_options())
 
 
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(main())
+
+    if "--rebuild" in sys.argv:
+        print("Rebuilding memory.db from records/ files...")
+        RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+        full_rebuild()
+        print("Rebuild complete.")
+    else:
+        asyncio.run(main())

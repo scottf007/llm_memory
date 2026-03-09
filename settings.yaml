@@ -1,0 +1,52 @@
+# Shared Claude Code settings - machine-independent
+# Run install.sh to apply these to ~/.claude/settings.json
+
+defaultMode: acceptEdits
+skipDangerousModePermissionPrompt: true
+
+# Permissions applied on install (machine accumulates more over time)
+permissions:
+  - "Bash(python:*)"
+  - "Bash(python3:*)"
+  - "Bash(ls:*)"
+  - "Bash(find:*)"
+  - "Bash(grep:*)"
+  - "Bash(sqlite3:*)"
+  - "Bash(curl:*)"
+  - "Bash(chmod +x:*)"
+  - "Bash(pip install:*)"
+  - "Bash(ssh:*)"
+  - "Bash(scp:*)"
+  - "Bash(git:*)"
+  - "Bash(python -m pytest:*)"
+  - "WebSearch"
+  - "mcp__llm_memory__memory_store"
+  - "mcp__llm_memory__memory_search"
+  - "mcp__llm_memory__memory_recent"
+  - "mcp__llm_memory__memory_get"
+  - "mcp__llm_memory__memory_connect"
+  - "mcp__llm_memory__memory_explore"
+  - "mcp__llm_memory__memory_delete"
+
+# Hook scripts (paths resolved relative to llm_memory install dir at install time)
+hooks:
+  SessionStart:
+    matcher: "startup|resume|compact"
+    script: session_start.sh
+    timeout: 5
+  PostToolUse:
+    - matcher: ""
+      script: session_monitor.sh
+      timeout: 5
+    - matcher: "mcp__llm_memory__memory_store"
+      command: "date +%s > /tmp/llm_memory_last_save"
+      async: true
+  PreCompact:
+    matcher: ""
+    script: pre_compact.sh
+    timeout: 5
+  SessionEnd:
+    matcher: ""
+    script: session_end.sh
+    timeout: 10
+    async: true

@@ -1,13 +1,12 @@
 # LLM Memory — CLAUDE.md Rules
 
 These rules go in your `~/.claude/CLAUDE.md` file so Claude Code knows when and how
-to use the LLM Memory tools. Copy this file directly:
+to use the LLM Memory tools. The install script copies this automatically to
+`~/.claude/memory/config/CLAUDE.md` (synced between machines) and applies it to
+`~/.claude/CLAUDE.md` on each machine.
 
-```bash
-cp claude-rules-example.md ~/.claude/CLAUDE.md
-```
-
-Or if you already have a `~/.claude/CLAUDE.md`, merge the sections below into it.
+To update: edit `~/.claude/memory/config/CLAUDE.md` — it syncs via Syncthing and
+gets applied on session start.
 
 ---
 
