@@ -80,15 +80,18 @@ hook_configs = {
 
 for event, entries in hook_configs.items():
     existing = settings['hooks'].get(event, [])
-    for entry in entries:
-        # Check if this hook command is already installed
-        cmd = entry['hooks'][0]['command']
-        already = any(
-            cmd in str(h.get('hooks', []))
-            for h in existing
+    # Remove any old llm_memory hooks (from previous install locations)
+    existing = [
+        h for h in existing
+        if not any(
+            'llm_memory' in str(hook.get('command', ''))
+            or 'llm_memory_last_save' in str(hook.get('command', ''))
+            for hook in h.get('hooks', [])
         )
-        if not already:
-            existing.append(entry)
+    ]
+    # Add new hooks
+    for entry in entries:
+        existing.append(entry)
     settings['hooks'][event] = existing
 
 with open(settings_path, 'w') as f:

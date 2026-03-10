@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version info
+        id: version
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y.%m.%d)
+          echo "tag=v${DATE}-${SHA}" >> $GITHUB_OUTPUT
+          echo "name=${DATE} (${SHA})" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.name }}
+          generate_release_notes: true

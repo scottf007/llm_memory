@@ -15,6 +15,32 @@ if [ -f "$SHARED_CLAUDE_MD" ]; then
     fi
 fi
 
+# Auto-update: check GitHub for newer version and update in background
+if [ "$SOURCE" != "compact" ]; then
+    LIB_DIR="$HOME/.claude/memory/lib"
+    if [ -f "$LIB_DIR/VERSION" ]; then
+        LOCAL_SHA=$(cat "$LIB_DIR/VERSION")
+        # Check GitHub API with a short timeout
+        REMOTE_SHA=$(timeout 3 curl -sf "https://api.github.com/repos/scottf007/llm_memory/commits/main" 2>/dev/null | jq -r '.sha' 2>/dev/null)
+        if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" != "null" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+            # Update in background so we don't block session start
+            (bash "$LIB_DIR/install.sh" --update >/dev/null 2>&1) &
+            echo "LLM_MEMORY_UPDATING: Updating llm_memory in background (${LOCAL_SHA:0:8} → ${REMOTE_SHA:0:8}). Restart Claude Code for MCP server changes to take effect."
+        fi
+    fi
+fi
+
+# Sweep: collect transcripts not yet captured by hooks
+if [ "$SOURCE" != "compact" ]; then
+    TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
+    mkdir -p "$TRANSCRIPT_DIR"
+    for src in "$HOME/.claude/projects"/*/*.jsonl; do
+        [ -f "$src" ] || continue
+        base=$(basename "$src")
+        [ -f "$TRANSCRIPT_DIR/$base" ] || cp "$src" "$TRANSCRIPT_DIR/$base" 2>/dev/null
+    done
+fi
+
 DB="$HOME/.claude/memory/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
@@ -128,6 +154,28 @@ else
     elif [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
         echo ""
         echo "NOTE: $NEW_SESSIONS new session(s) since last narrative update. Consider reading the new transcript(s) and updating the narrative."
+    fi
+
+    # Cross-project: find all projects that have session_logs but no narrative
+    NEEDS_NARRATIVE=$(sqlite3 "$DB" "
+        SELECT DISTINCT project FROM memories
+        WHERE type='session_log' AND project != ''
+        AND project NOT IN (
+            SELECT DISTINCT project FROM memories WHERE type='narrative'
+        )
+        ORDER BY project;" 2>/dev/null)
+    if [ -n "$NEEDS_NARRATIVE" ]; then
+        OTHER_PROJECTS=""
+        while IFS= read -r p; do
+            [ "$p" = "$PROJECT" ] && continue
+            [ -z "$p" ] && continue
+            OTHER_PROJECTS="${OTHER_PROJECTS:+$OTHER_PROJECTS, }$p"
+        done <<< "$NEEDS_NARRATIVE"
+        if [ -n "$OTHER_PROJECTS" ]; then
+            echo ""
+            echo "OTHER PROJECTS NEEDING NARRATIVES: $OTHER_PROJECTS"
+            echo "When convenient, switch to those project directories and generate their narratives."
+        fi
     fi
 
     echo "Use memory_search/memory_get for more context. Use memory_store to save new memories."

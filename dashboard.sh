@@ -1,11 +1,25 @@
 #!/bin/bash
 # Launch the LLM Memory web dashboard
+# Works from either the git clone or the installed lib/ directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$HOME/.claude/memory/lib"
 PORT="${1:-8765}"
 HOST="${2:-0.0.0.0}"
+
+# Use local venv if it exists (git clone), otherwise use lib/
+if [ -d "$SCRIPT_DIR/.venv" ]; then
+    VENV="$SCRIPT_DIR/.venv"
+    DASHBOARD="$SCRIPT_DIR/dashboard.py"
+elif [ -d "$LIB_DIR/.venv" ]; then
+    VENV="$LIB_DIR/.venv"
+    DASHBOARD="$LIB_DIR/dashboard.py"
+else
+    echo "ERROR: No Python venv found. Run install.sh first."
+    exit 1
+fi
 
 echo "LLM Memory Dashboard"
 echo "http://$HOST:$PORT"
 echo ""
 
-exec "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/dashboard.py" --host "$HOST" --port "$PORT"
+exec "$VENV/bin/python3" "$DASHBOARD" --host "$HOST" --port "$PORT"

@@ -379,10 +379,12 @@
     </div>
     <div>
       <label>Search</label>
-      <input type="text" id="filter-search" placeholder="Search memories...">
+      <input type="text" id="filter-search" placeholder="Search...">
     </div>
     <div class="stats-box">
-      <div class="stat-row"><span>Memories</span><span class="stat-val" id="stat-memories">--</span></div>
+      <div class="stat-row"><span>Narratives</span><span class="stat-val" id="stat-narratives">--</span></div>
+      <div class="stat-row"><span>Session Logs</span><span class="stat-val" id="stat-session-logs">--</span></div>
+      <div class="stat-row"><span>Notes</span><span class="stat-val" id="stat-notes">--</span></div>
       <div class="stat-row"><span>Connections</span><span class="stat-val" id="stat-connections">--</span></div>
       <div class="stat-row"><span>Projects</span><span class="stat-val" id="stat-projects">--</span></div>
     </div>
@@ -391,7 +393,7 @@
   <div class="main-content">
     <div class="card-list" id="card-list"></div>
     <button class="load-more-btn" id="load-more-btn" style="display:none;">Load more</button>
-    <div class="no-results" id="no-results" style="display:none;">No memories found.</div>
+    <div class="no-results" id="no-results" style="display:none;">No results found.</div>
   </div>
 </div>
 
@@ -411,7 +413,7 @@
   <div class="detail-backdrop" id="detail-backdrop"></div>
   <div class="detail-panel" style="position:relative;">
     <button class="close-btn" id="detail-close">&times;</button>
-    <h2 id="detail-title">Memory Detail</h2>
+    <h2 id="detail-title">Detail</h2>
     <div class="detail-meta" id="detail-meta"></div>
     <div class="detail-content" id="detail-content"></div>
     <h2 id="detail-conn-title" style="display:none;">Connections</h2>
@@ -514,7 +516,10 @@
   async function loadStats() {
     try {
       statsData = await fetchJSON('/api/stats');
-      document.getElementById('stat-memories').textContent = statsData.total_memories || 0;
+      const typeCounts = statsData.types || {};
+      document.getElementById('stat-narratives').textContent = typeCounts.narrative || 0;
+      document.getElementById('stat-session-logs').textContent = typeCounts.session_log || 0;
+      document.getElementById('stat-notes').textContent = typeCounts.note || 0;
       document.getElementById('stat-connections').textContent = statsData.total_connections || 0;
       const projects = statsData.projects || [];
       document.getElementById('stat-projects').textContent = projects.length;
@@ -604,7 +609,7 @@
       if (!append) {
         cardList.innerHTML = '';
         noResults.style.display = 'block';
-        noResults.textContent = 'Failed to load memories.';
+        noResults.textContent = 'Failed to load data.';
       }
     } finally {
       loading = false;
@@ -634,7 +639,8 @@
   async function openDetail(uuid) {
     try {
       const mem = await fetchJSON('/api/memory/' + uuid);
-      document.getElementById('detail-title').textContent = 'Memory ' + uuid.substring(0, 8);
+      const typeLabel = (mem.type || 'note').replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+      document.getElementById('detail-title').textContent = typeLabel + ' ' + uuid.substring(0, 8);
       detailContent.textContent = mem.content || '';
 
       detailMeta.innerHTML =
