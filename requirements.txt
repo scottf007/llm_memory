@@ -2,3 +2,4 @@ mcp>=1.0.0
 fastapi>=0.100.0
 jinja2>=3.0.0
 pyyaml
+pytest
