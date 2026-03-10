@@ -33,7 +33,7 @@ hook_configs = {
             'hooks': [{
                 'type': 'command',
                 'command': f'{hooks_dir}/session_start.sh',
-                'timeout': 5
+                'timeout': 15
             }]
         }
     ],
@@ -84,7 +84,7 @@ for event, entries in hook_configs.items():
     existing = [
         h for h in existing
         if not any(
-            'llm_memory' in str(hook.get('command', ''))
+            '/memory/lib/hooks/' in str(hook.get('command', ''))
             or 'llm_memory_last_save' in str(hook.get('command', ''))
             for hook in h.get('hooks', [])
         )
