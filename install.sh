@@ -30,11 +30,19 @@ for cmd in jq sqlite3 python3 curl; do
     fi
 done
 if [ -n "$MISSING" ]; then
-    echo "  ERROR: Missing required system tools:$MISSING"
-    echo "  Install them with your package manager, e.g.:"
-    echo "    sudo apt install$MISSING        # Debian/Ubuntu/WSL"
-    echo "    brew install$MISSING             # macOS"
-    exit 1
+    echo "  Missing:$MISSING — attempting to install..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get install -y $MISSING
+    elif command -v brew &> /dev/null; then
+        brew install $MISSING
+    elif command -v pacman &> /dev/null; then
+        sudo pacman -S --noconfirm $MISSING
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y $MISSING
+    else
+        echo "  ERROR: Could not auto-install. Please install manually:$MISSING"
+        exit 1
+    fi
 fi
 log "  All dependencies found."
 
