@@ -124,8 +124,8 @@ if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
     rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
-chmod +x "$VENV_DIR/bin/python3" "$VENV_DIR/bin/pip" "$VENV_DIR/bin/pip3" "$VENV_DIR/bin/activate" 2>/dev/null
-find "$VENV_DIR/bin" -type f -exec chmod +x {} \; 2>/dev/null
+chmod +x "$VENV_DIR/bin/python3" "$VENV_DIR/bin/pip" "$VENV_DIR/bin/pip3" "$VENV_DIR/bin/activate" 2>/dev/null || true
+find "$VENV_DIR/bin" -type f -exec chmod +x {} \; 2>/dev/null || true
 "$VENV_DIR/bin/python3" -m pip install -q -r "$LIB_DIR/requirements.txt"
 log "  Dependencies installed."
 
