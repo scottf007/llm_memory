@@ -73,22 +73,33 @@ def get_processed_sessions(conn) -> set[str]:
 # ---------------------------------------------------------------------------
 
 def find_transcripts(project_filter: Optional[str] = None) -> list[tuple[Path, str]]:
-    """Find main session JSONL files (skip subagents)."""
+    """Find main session JSONL files from project dirs and archive dir."""
+    seen_sessions: set[str] = set()
     results = []
-    if not PROJECTS_DIR.exists():
-        return results
 
-    for project_dir in sorted(PROJECTS_DIR.iterdir()):
-        if not project_dir.is_dir():
-            continue
-        if project_filter:
-            derived = derive_project_from_dir(project_dir)
-            if derived and project_filter not in derived:
+    # Scan ~/.claude/projects/*/
+    if PROJECTS_DIR.exists():
+        for project_dir in sorted(PROJECTS_DIR.iterdir()):
+            if not project_dir.is_dir():
                 continue
-        for jsonl in sorted(project_dir.glob("*.jsonl")):
+            if project_filter:
+                derived = derive_project_from_dir(project_dir)
+                if derived and project_filter not in derived:
+                    continue
+            for jsonl in sorted(project_dir.glob("*.jsonl")):
+                if jsonl.is_file():
+                    session_id = jsonl.stem
+                    seen_sessions.add(session_id)
+                    results.append((jsonl, session_id))
+
+    # Also scan ~/.claude/memory/transcripts/ for synced transcripts
+    if ARCHIVE_DIR.exists():
+        for jsonl in sorted(ARCHIVE_DIR.glob("*.jsonl")):
             if jsonl.is_file():
                 session_id = jsonl.stem
-                results.append((jsonl, session_id))
+                if session_id not in seen_sessions:
+                    seen_sessions.add(session_id)
+                    results.append((jsonl, session_id))
 
     return results
 
@@ -128,7 +139,10 @@ def derive_project(cwds: list[str], dir_path: Path) -> str:
         if project:
             return project
     dir_project = derive_project_from_dir(dir_path)
-    return dir_project if dir_project else "general"
+    # "transcripts" is the archive dir name, not a real project
+    if not dir_project or dir_project == "transcripts":
+        return "general"
+    return dir_project
 
 
 # ---------------------------------------------------------------------------

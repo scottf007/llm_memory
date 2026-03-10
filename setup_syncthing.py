@@ -187,7 +187,7 @@ def add_folder(address: str, api_key: str, folder_path: str, devices: list[dict]
         "devices": device_entries,
         "minDiskFree": {"value": 1, "unit": "%"},
         "versioning": {"type": ""},
-        "ignorePerms": False,
+        "ignorePerms": True,
         "autoNormalize": True,
     }
 
@@ -241,7 +241,7 @@ def add_folder_to_xml(config_path: Path, folder_path: str, dry_run: bool = False
         "rescanIntervalS": "60",
         "fsWatcherEnabled": "true",
         "fsWatcherDelayS": "5",
-        "ignorePerms": "false",
+        "ignorePerms": "true",
         "autoNormalize": "true",
     })
 

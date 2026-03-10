@@ -86,6 +86,45 @@ class TestStoreSessionLog:
             assert "already-processed" in sessions
 
 
+class TestFindTranscripts:
+    def test_includes_archive_dir(self, tmp_path):
+        """find_transcripts should pick up transcripts from the archive dir too."""
+        # Set up fake project dir and archive dir
+        projects_dir = tmp_path / "projects"
+        proj = projects_dir / "-home-user-projects-myproj"
+        proj.mkdir(parents=True)
+        (proj / "sess-local.jsonl").write_text('{"type":"user","message":{"content":"hi"}}\n')
+
+        archive_dir = tmp_path / "archive"
+        archive_dir.mkdir()
+        (archive_dir / "sess-synced.jsonl").write_text('{"type":"user","message":{"content":"hi"}}\n')
+
+        with patch.object(process_transcripts, "PROJECTS_DIR", projects_dir), \
+             patch.object(process_transcripts, "ARCHIVE_DIR", archive_dir):
+            results = process_transcripts.find_transcripts()
+            session_ids = [r[1] for r in results]
+            assert "sess-local" in session_ids
+            assert "sess-synced" in session_ids
+            assert len(session_ids) == len(set(session_ids))  # no dupes
+
+    def test_no_duplicates_when_same_session_in_both(self, tmp_path):
+        """If a session exists in both project dir and archive, only include once."""
+        projects_dir = tmp_path / "projects"
+        proj = projects_dir / "-home-user-projects-myproj"
+        proj.mkdir(parents=True)
+        (proj / "same-session.jsonl").write_text('{"type":"user","message":{"content":"hi"}}\n')
+
+        archive_dir = tmp_path / "archive"
+        archive_dir.mkdir()
+        (archive_dir / "same-session.jsonl").write_text('{"type":"user","message":{"content":"hi"}}\n')
+
+        with patch.object(process_transcripts, "PROJECTS_DIR", projects_dir), \
+             patch.object(process_transcripts, "ARCHIVE_DIR", archive_dir):
+            results = process_transcripts.find_transcripts()
+            session_ids = [r[1] for r in results]
+            assert session_ids.count("same-session") == 1
+
+
 class TestCleanText:
     def test_strips_noise_tags(self):
         text = "Hello <system-reminder>ignore this</system-reminder> world"
