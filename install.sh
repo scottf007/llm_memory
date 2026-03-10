@@ -120,11 +120,11 @@ fi
 
 # --- Step 3: Python environment ---
 log "[3/8] Setting up Python environment..."
-if [ ! -x "$VENV_DIR/bin/pip" ]; then
+if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
     rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
-"$VENV_DIR/bin/pip" install -q -r "$LIB_DIR/requirements.txt"
+"$VENV_DIR/bin/python3" -m pip install -q -r "$LIB_DIR/requirements.txt"
 log "  Dependencies installed."
 
 # --- Step 4: Create directories and config ---
