@@ -1,10 +1,7 @@
 # Shared Claude Code settings - machine-independent
 # Run install.sh to apply these to ~/.claude/settings.json
 
-defaultMode: acceptEdits
-skipDangerousModePermissionPrompt: true
-
-# Permissions applied on install (machine accumulates more over time)
+# Tool permissions: allow these tools without prompting each time
 permissions:
   - "Bash(python:*)"
   - "Bash(python3:*)"
@@ -20,6 +17,7 @@ permissions:
   - "Bash(git:*)"
   - "Bash(python -m pytest:*)"
   - "WebSearch"
+  # MCP memory server tools
   - "mcp__llm_memory__memory_store"
   - "mcp__llm_memory__memory_search"
   - "mcp__llm_memory__memory_recent"
@@ -30,21 +28,26 @@ permissions:
 
 # Hook scripts (paths resolved relative to llm_memory install dir at install time)
 hooks:
+  # Runs on session startup/resume/compact — loads context and checks for narrative updates
   SessionStart:
     matcher: "startup|resume|compact"
     script: session_start.sh
     timeout: 5
+  # Runs after each tool use — monitors session activity
   PostToolUse:
     - matcher: ""
       script: session_monitor.sh
       timeout: 5
+    # Records timestamp of last memory save for staleness checks
     - matcher: "mcp__llm_memory__memory_store"
       command: "date +%s > /tmp/llm_memory_last_save"
       async: true
+  # Runs before context compaction — preserves important context
   PreCompact:
     matcher: ""
     script: pre_compact.sh
     timeout: 5
+  # Runs on session end — saves session log asynchronously
   SessionEnd:
     matcher: ""
     script: session_end.sh
