@@ -1,0 +1,81 @@
+# LLM Memory — Full settings.yaml
+# Shared Claude Code settings — machine-independent configuration.
+# Run install.sh to apply these to ~/.claude/settings.json
+#
+# IMPORTANT: Every entry in "permissions" bypasses Claude's confirmation prompt
+# for that tool. Only add tools you trust to run without review.
+
+permissions:
+  # --- Shell commands ---
+  # Each "Bash(cmd:*)" entry allows that command with any arguments.
+  # The :* suffix is a wildcard — "Bash(git:*)" allows "git status",
+  # "git push --force", etc. Be aware of what you're allowing.
+
+  - "Bash(python:*)"           # Run python scripts
+  - "Bash(python3:*)"          # Run python3 scripts
+  - "Bash(ls:*)"               # List directory contents
+  - "Bash(find:*)"             # Find files — can be slow on large trees
+  - "Bash(grep:*)"             # Search file contents
+  - "Bash(sqlite3:*)"          # Query SQLite databases directly
+  - "Bash(curl:*)"             # HTTP requests — WARNING: can send data anywhere
+  - "Bash(chmod +x:*)"         # Make files executable
+  - "Bash(pip install:*)"      # Install Python packages — WARNING: runs arbitrary code
+  - "Bash(ssh:*)"              # SSH to remote hosts — WARNING: can execute remote commands
+  - "Bash(scp:*)"              # Copy files to/from remote hosts
+  - "Bash(git:*)"              # All git operations — includes push, reset, etc.
+  - "Bash(python -m pytest:*)" # Run pytest test suites
+
+  # --- Web search ---
+  - "WebSearch"                # Allow web searches without confirmation
+
+  # --- MCP memory server tools ---
+  # These are the 7 tools exposed by the llm_memory MCP server.
+  # All are safe to auto-approve — they only read/write local JSON files.
+  - "mcp__llm_memory__memory_store"    # Save a memory record
+  - "mcp__llm_memory__memory_search"   # Full-text search across memories
+  - "mcp__llm_memory__memory_recent"   # Get most recent memories
+  - "mcp__llm_memory__memory_get"      # Get a specific memory by ID
+  - "mcp__llm_memory__memory_connect"  # Create relationship between memories
+  - "mcp__llm_memory__memory_explore"  # Browse memory graph connections
+  - "mcp__llm_memory__memory_delete"   # Delete a memory record
+
+hooks:
+  # --- SessionStart ---
+  # Fires on: startup (new session), resume (returning to session), compact
+  # (context window compressed). This hook loads the project narrative so
+  # Claude has full context immediately.
+  SessionStart:
+    matcher: "startup|resume|compact"
+    script: session_start.sh
+    timeout: 5  # seconds — increase if your machine is slow
+
+  # --- PostToolUse ---
+  # Fires after every tool call. Multiple matchers can be specified as a list.
+  PostToolUse:
+    # First matcher: runs on ALL tool uses (empty matcher = match everything).
+    # Monitors transcript size to warn about compaction risk.
+    - matcher: ""
+      script: session_monitor.sh
+      timeout: 5
+    # Second matcher: runs only after memory_store calls.
+    # Records a timestamp so the monitor knows when memory was last saved.
+    - matcher: "mcp__llm_memory__memory_store"
+      command: "date +%s > /tmp/llm_memory_last_save"
+      async: true  # fire-and-forget, don't block the conversation
+
+  # --- PreCompact ---
+  # Fires just before Claude compresses its context window.
+  # Use this to save anything important before older messages are lost.
+  PreCompact:
+    matcher: ""
+    script: pre_compact.sh
+    timeout: 5
+
+  # --- SessionEnd ---
+  # Fires when the session ends (user exits or session times out).
+  # Archives the raw transcript and stores a session_log memory.
+  SessionEnd:
+    matcher: ""
+    script: session_end.sh
+    timeout: 10   # longer timeout — archiving can take a moment
+    async: true   # don't block Claude's exit

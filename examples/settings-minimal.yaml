@@ -1,0 +1,45 @@
+# LLM Memory — Minimal settings.yaml
+# Only includes MCP tool permissions and hook scripts.
+# Run install.sh to apply these to ~/.claude/settings.json
+
+permissions:
+  # Allow memory MCP tools without prompting each time.
+  # These correspond to the 7 tools exposed by the llm_memory MCP server.
+  - "mcp__llm_memory__memory_store"
+  - "mcp__llm_memory__memory_search"
+  - "mcp__llm_memory__memory_recent"
+  - "mcp__llm_memory__memory_get"
+  - "mcp__llm_memory__memory_connect"
+  - "mcp__llm_memory__memory_explore"
+  - "mcp__llm_memory__memory_delete"
+
+hooks:
+  # Runs when a session starts, resumes, or compacts.
+  # Loads the project narrative and checks if it needs updating.
+  SessionStart:
+    matcher: "startup|resume|compact"
+    script: session_start.sh
+    timeout: 5
+
+  # Runs after each tool use — monitors session activity (e.g., transcript size).
+  PostToolUse:
+    - matcher: ""
+      script: session_monitor.sh
+      timeout: 5
+    # Records timestamp of the last memory save for staleness detection.
+    - matcher: "mcp__llm_memory__memory_store"
+      command: "date +%s > /tmp/llm_memory_last_save"
+      async: true
+
+  # Runs before context compaction — saves important context before it's lost.
+  PreCompact:
+    matcher: ""
+    script: pre_compact.sh
+    timeout: 5
+
+  # Runs on session end — archives the transcript and stores a session_log.
+  SessionEnd:
+    matcher: ""
+    script: session_end.sh
+    timeout: 10
+    async: true  # async so it doesn't block Claude's exit

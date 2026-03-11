@@ -1,0 +1,31 @@
+[project]
+name = "llm-memory"
+version = "1.0.0"
+description = "Persistent memory for Claude Code. Stores project narratives, decisions, and session history across sessions — all local, no cloud services."
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Scott" },
+]
+
+dependencies = [
+    "mcp>=1.0.0",
+    "fastapi>=0.100.0",
+    "jinja2>=3.0.0",
+    "pyyaml",
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/scottvr/llm_memory"
+Repository = "https://github.com/scottvr/llm_memory"
+Documentation = "https://github.com/scottvr/llm_memory#readme"
