@@ -1,18 +1,97 @@
 # LLM Memory
 
-Persistent memory for Claude Code. Stores project narratives, decisions, and session history across sessions — all local, no cloud services. Syncs between machines via Syncthing.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://python.org)
+[![Tests](https://img.shields.io/github/actions/workflow/status/scottf007/llm_memory/tests.yml?label=tests)](https://github.com/scottf007/llm_memory/actions)
+
+**Persistent memory for Claude Code. Every session starts where the last one left off.**
 
 ## The Problem
 
-Claude Code forgets everything between sessions. Within a session, long conversations trigger "compaction" which lossy-summarizes older messages. If you're working on a large project across many sessions, you lose context constantly.
+Claude Code forgets everything between sessions. Long conversations get "compacted" — lossy-summarized into oblivion. If you work on a project across many sessions, you lose decisions, corrections, and context constantly. You spend the first 10 minutes re-explaining where you left off. Mistakes get repeated. Ideas get lost.
 
-Common symptoms:
-- Claude repeats mistakes it was corrected on last session
-- Claude doesn't know what was decided yesterday
-- You spend the first 10 minutes of every session re-explaining project state
-- Ideas get suggested but never acted on, and nobody remembers them
+LLM Memory fixes this. It gives Claude Code a local, persistent memory that survives across sessions and syncs across machines — no cloud services, no external APIs, everything on your machine.
+
+## Quick Install
+
+```bash
+curl -sL https://raw.githubusercontent.com/scottf007/llm_memory/main/install.sh | bash
+```
+
+Requires Python 3.10+, `jq`, `sqlite3`, and `curl`. No Node.js needed. Restart Claude Code after installing.
+
+<details>
+<summary>Or install from source</summary>
+
+```bash
+git clone https://github.com/scottf007/llm_memory.git
+cd llm_memory
+./install.sh
+```
+</details>
+
+## What It Does
+
+**MCP Server** — A local Python server that Claude Code spawns on startup. Provides 7 memory tools for storing, searching, and connecting memories. Backed by JSON files with a SQLite/FTS5 index for fast full-text search.
+
+**Lifecycle Hooks** — Shell scripts that fire automatically at session start, before compaction, and at session end. They load project context, archive raw transcripts, and ensure nothing falls through the cracks.
+
+**Web Dashboard** — A read-only browser UI for browsing your memories as a searchable timeline or interactive knowledge graph.
 
 ## How It Works
+
+```
+Session starts
+  --> Hooks sweep uncollected transcripts, load project narrative + recent notes
+  --> Claude knows exactly where you left off
+
+You work normally
+  --> Claude stores decisions, corrections, and insights as memories
+  --> Hooks monitor the session and track progress
+
+Session ends
+  --> Raw JSONL transcript archived
+  --> Session log created automatically
+  --> Next session picks up right where you stopped
+```
+
+**Project narratives** are the core feature. Each project gets a living document generated from your raw JSONL transcripts, covering session history, decisions, gotchas, current state, and next steps. When you start a session in a project with no narrative, Claude reads the transcripts and writes one automatically.
+
+## Memory Tools
+
+| Tool | Description |
+|------|-------------|
+| `memory_store` | Save a narrative, note, or session log |
+| `memory_search` | Full-text search across all memories |
+| `memory_recent` | List recent memories, filtered by project or type |
+| `memory_get` | Retrieve a specific memory by UUID |
+| `memory_connect` | Create a relationship between two memories |
+| `memory_explore` | Traverse the memory graph from a starting point |
+| `memory_delete` | Remove a memory |
+
+Three memory types: **narrative** (per-project living document), **note** (atomic fact, decision, or correction), **session_log** (automatic session record).
+
+Two relationship types: **supersedes** (narrative versioning) and **related_to** (linked notes).
+
+## Dashboard
+
+```bash
+llm-memory-dashboard          # http://localhost:8765
+llm-memory-dashboard 9000     # custom port
+```
+
+Timeline view with search and type/project filters. Force-directed knowledge graph showing how memories connect. Read-only — never modifies your data.
+
+## Multi-Device Sync
+
+LLM Memory syncs between machines via [Syncthing](https://syncthing.net/). JSON record files and transcripts sync automatically; each machine builds its own SQLite index on startup. No merge conflicts — every record uses a globally unique UUID.
+
+```bash
+python3 ~/.claude/memory/lib/setup_syncthing.py
+```
+
+<details>
+<summary><strong>Architecture</strong></summary>
 
 ```
 ┌─────────────┐     MCP (stdio)     ┌──────────────┐     ┌───────────┐
@@ -29,168 +108,79 @@ Common symptoms:
  SessionEnd   → archive transcript
 ```
 
-There are three layers:
-
-### 1. MCP Server (`server.py`)
-
-Claude Code spawns it as a subprocess on startup. Provides 7 memory tools: `memory_store`, `memory_search`, `memory_recent`, `memory_get`, `memory_connect`, `memory_explore`, `memory_delete`. Claude uses these to read and write memories during a session.
-
-### 2. Lifecycle Hooks
-
-Shell scripts that run automatically at key moments in a Claude Code session:
-
-- **SessionStart** — checks for updates from GitHub, sweeps for uncollected transcripts, loads the project narrative + recent notes into context, flags projects that need narratives
-- **PostToolUse** — monitors the session transcript and tracks save timestamps
-- **PreCompact** — saves context before Claude Code's compaction lossy-summarizes the conversation
-- **SessionEnd** — archives the raw JSONL transcript and creates a session_log record
-
-### 3. Shared Config (`CLAUDE.md`)
-
-A set of rules injected into every Claude Code session via `~/.claude/CLAUDE.md`. These tell Claude how to use the memory tools — when to search, when to store, how to write narratives. The rules sync between machines via `~/.claude/memory/config/CLAUDE.md`.
-
-### Memory Architecture
-
-**Records are JSON files.** Each memory is a JSON file in `~/.claude/memory/records/`. The SQLite database is a derived index rebuilt from these files on server startup. The database is disposable — the files are the source of truth.
+**Records are JSON files.** Each memory is a JSON file in `~/.claude/memory/records/`. The SQLite database is a derived index rebuilt from these files on server startup. The database is disposable — delete it anytime and rebuild.
 
 **UUIDs, not integers.** All records use 32-character hex UUIDs. No collisions across machines.
 
-**3 memory types:**
-- **narrative** — per-project living document. One per project, updated over time. Written from raw JSONL transcripts.
-- **note** — atomic fact, decision, correction, preference, or insight. Tagged for searchability.
-- **session_log** — lightweight record that a session happened. Created automatically by hooks.
+**Narratives are written from raw transcripts**, not from summaries. Transcripts capture the user's exact words, the debugging loops, the moments where direction changed. Summaries are lossy.
 
-**2 relationship types:** `supersedes` (narrative versioning), `related_to` (linked notes).
+**What the installer does:** checks dependencies, downloads code to `~/.claude/memory/lib/`, creates a Python venv, registers the MCP server with Claude Code, installs all 4 lifecycle hooks, and processes any existing transcripts into session logs.
 
-**Project narratives** are the core feature. When you start a session in a project directory with no narrative, Claude reads the raw JSONL transcripts and generates one with: session history, decisions made, gotchas, current state, outstanding items, and direction. Nothing gets lost between sessions.
+**What happens on session start:**
+1. Auto-update check against GitHub
+2. Transcript sweep — collects any JSONL files not yet archived
+3. Project detection from working directory
+4. Narrative + recent notes loaded into context
+5. If no narrative exists but transcripts do, Claude generates one automatically
+6. Staleness check — flags narratives that need updating
 
-**Raw JSONL transcripts** are archived to `~/.claude/memory/transcripts/`. Narratives are always written from these, never from summaries — summaries are lossy.
+**Data layout:**
 
-## Requirements
-
-- Python 3.10+
-- Claude Code (CLI or VS Code extension)
-- **jq** — used by lifecycle hooks to parse JSON (`sudo apt install jq` / `brew install jq`)
-- **sqlite3** CLI — used by hooks to query the database (`sudo apt install sqlite3` / `brew install sqlite3`)
-- **curl** — used for downloading and auto-updates
-- No Node.js, no cloud services, no external APIs
-
-## Install
-
-One-liner (no git clone needed):
-
-```bash
-curl -sL https://raw.githubusercontent.com/scottf007/llm_memory/main/install.sh | bash
+```
+~/.claude/memory/
+  records/        ← one JSON file per memory (source of truth, synced)
+  transcripts/    ← raw session JSONL files (synced)
+  config/         ← shared CLAUDE.md rules (synced)
+  memory.db       ← local search index (rebuilt on startup, never synced)
+  lib/            ← installed code + Python venv (not synced)
 ```
 
-Or clone and run:
+</details>
+
+## Configuration
+
+LLM Memory injects rules into `~/.claude/CLAUDE.md` that tell Claude when and how to use memory tools — when to search for past context, when to store decisions, how to write narratives. The source of these rules lives at `~/.claude/memory/config/CLAUDE.md` and syncs between machines via Syncthing.
+
+## Development
 
 ```bash
 git clone https://github.com/scottf007/llm_memory.git
 cd llm_memory
-./install.sh
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install pytest
+python3 -m pytest tests/
 ```
 
-The installer will:
-1. Check system dependencies (jq, sqlite3, python3, curl)
-2. Download the latest version from GitHub to `~/.claude/memory/lib/`
-3. Create a Python venv and install dependencies
-4. Create the memory directory at `~/.claude/memory/` (with `records/`, `transcripts/`, `config/`)
-5. Copy shared config (`CLAUDE.md`) and apply it
-6. Register the MCP server with Claude Code
-7. Install all 4 lifecycle hooks
-8. Scan existing transcripts and process them into session logs
+## Troubleshooting
 
-Restart Claude Code after installing. Start a session in any project directory — the narrative system activates automatically.
+**MCP server not loading**
+- Run `claude mcp list` and verify `llm_memory` appears
+- Check Python version: `python3 --version` (needs 3.10+)
+- Re-register: `claude mcp remove llm_memory --scope user` then re-run `install.sh`
 
-## What Happens on Session Start
+**Hooks not firing**
+- Check `~/.claude/settings.json` for hook entries
+- Verify scripts are executable: `ls -la ~/.claude/memory/lib/hooks/`
+- Re-run `install.sh` to reinstall hooks
 
-1. **Auto-update** — checks GitHub for a newer version. If found, downloads and installs in the background.
-2. **Transcript sweep** — scans `~/.claude/projects/` for any JSONL transcripts not yet archived to `~/.claude/memory/transcripts/` and copies them. This catches transcripts from before the hooks were installed or from sessions where hooks failed.
-3. **Project detection** — derives the project name from the current working directory.
-4. **Narrative loading** — if a narrative exists for this project, loads it into Claude's context along with recent notes and session logs.
-5. **Narrative generation** — if transcripts exist but no narrative, tells Claude to generate one immediately from the raw JSONL files.
-6. **Staleness check** — if new sessions have happened since the last narrative update, suggests updating it.
-7. **Cross-project check** — lists any other projects that have session logs but no narrative yet.
+**Permission errors**
+- `chmod +x ~/.claude/memory/lib/hooks/*.sh`
 
-## Multi-Device Sync
-
-LLM Memory is designed for multi-device use via [Syncthing](https://syncthing.net/):
-
-1. Install llm_memory on each machine (`curl ... | bash` or `./install.sh`)
-2. Set up Syncthing: `python3 ~/.claude/memory/lib/setup_syncthing.py`
-3. The `.stignore` file (created by install) excludes `memory.db` and the venv from sync
-4. Each machine rebuilds its own SQLite index from the shared record files on server startup
-5. No conflicts — every record has a globally unique UUID filename
-
-What syncs:
-- `records/` — one JSON file per memory (the source of truth)
-- `transcripts/` — raw session JSONL files
-- `config/CLAUDE.md` — shared Claude rules across machines
-
-What stays local:
-- `memory.db` — each machine builds its own index
-- `lib/.venv/` — each machine has its own Python environment
-
-If the database gets out of sync, rebuild it:
-```bash
-python3 ~/.claude/memory/lib/server.py --rebuild
-```
-
-## Web Dashboard
-
-Browse and visualize your memories in a browser:
-
-```bash
-llm-memory-dashboard          # http://localhost:8765
-llm-memory-dashboard 9000     # custom port
-```
-
-- **Timeline view** — filterable list of all memories with search, type/project filters
-- **Graph view** — force-directed knowledge graph showing memory connections
-- Read-only — never modifies the database
-
-## Data Storage
-
-Everything is local:
-
-```
-~/.claude/memory/
-  memory.db              ← local index (never synced, can be rebuilt)
-  .stignore              ← excludes DB and venv from Syncthing
-  lib/                   ← installed code (downloaded from GitHub)
-    server.py            ← MCP server
-    hooks/               ← lifecycle hook scripts
-    dashboard.py         ← web dashboard
-    .venv/               ← Python virtual environment
-    VERSION              ← current installed commit SHA
-  records/               ← synced — one JSON file per memory
-  transcripts/           ← synced — raw session JSONL files
-  config/
-    CLAUDE.md            ← synced — shared Claude rules
-```
-
-```bash
-# Back up (just the records — they ARE the data)
-cp -r ~/.claude/memory/records/ ~/backup/llm-memory-records/
-
-# Rebuild database from record files
-python3 ~/.claude/memory/lib/server.py --rebuild
-
-# Inspect
-sqlite3 ~/.claude/memory/memory.db \
-  "SELECT substr(uuid,1,8), type, project, substr(content,1,60) FROM memories ORDER BY created_at DESC LIMIT 20;"
-```
+**Database issues**
+- Rebuild anytime: `python3 ~/.claude/memory/lib/server.py --rebuild`
+- The database is disposable — JSON record files are the real data
 
 ## Uninstall
 
 ```bash
 claude mcp remove llm_memory --scope user
 # Remove hook entries from ~/.claude/settings.json
-rm -rf ~/.claude/memory/lib/        # remove installed code and venv
-rm ~/.claude/memory/memory.db       # optional — delete local index
-rm -rf ~/.claude/memory/records/    # optional — delete all stored memories
+rm -rf ~/.claude/memory/lib/
+# Optionally delete all stored memories:
+# rm -rf ~/.claude/memory/records/ ~/.claude/memory/transcripts/
 ```
 
 ## License
 
-MIT
+[MIT](LICENSE)
