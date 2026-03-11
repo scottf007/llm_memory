@@ -16,12 +16,15 @@ if [ -f "$SHARED_CLAUDE_MD" ]; then
 fi
 
 # Auto-update: check GitHub for newer version and update in background
-if [ "$SOURCE" != "compact" ]; then
+# Skip if the user has opted out via sentinel file
+if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-update" ]; then
     LIB_DIR="$HOME/.claude/memory/lib"
+    REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
+    BRANCH="${LLM_MEMORY_BRANCH:-main}"
     if [ -f "$LIB_DIR/VERSION" ]; then
         LOCAL_SHA=$(cat "$LIB_DIR/VERSION")
         # Check GitHub API with a short timeout
-        REMOTE_SHA=$(timeout 3 curl -sf "https://api.github.com/repos/scottf007/llm_memory/commits/main" 2>/dev/null | jq -r '.sha' 2>/dev/null)
+        REMOTE_SHA=$(timeout 3 curl -sf "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null | jq -r '.sha' 2>/dev/null)
         if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" != "null" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
             # Update in background so we don't block session start
             (bash "$LIB_DIR/install.sh" --update >/dev/null 2>&1) &

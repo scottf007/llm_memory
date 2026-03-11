@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-REPO="scottf007/llm_memory"
-BRANCH="main"
+REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
+BRANCH="${LLM_MEMORY_BRANCH:-main}"
 MEMORY_DIR="$HOME/.claude/memory"
 LIB_DIR="$MEMORY_DIR/lib"
 VENV_DIR="$LIB_DIR/.venv"
@@ -76,7 +76,9 @@ else
     else
         # Download and extract
         curl -sL "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" | tar xz -C "$TMPDIR"
-        EXTRACTED="$TMPDIR/llm_memory-$BRANCH"
+        # GitHub archives use the repo name (after the slash) as the directory prefix
+        REPO_NAME="${REPO##*/}"
+        EXTRACTED="$TMPDIR/${REPO_NAME}-$BRANCH"
 
         if [ ! -d "$EXTRACTED" ]; then
             echo "  ERROR: Download failed or archive structure unexpected."
