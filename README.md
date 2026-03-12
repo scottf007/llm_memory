@@ -32,7 +32,7 @@ cd llm_memory
 
 ## What It Does
 
-**MCP Server** — A local Python server that Claude Code spawns on startup. Provides 7 memory tools for storing, searching, and connecting memories. Backed by JSON files with a SQLite/FTS5 index for fast full-text search.
+**MCP Server** — A local Python server that Claude Code spawns on startup. Provides 8 memory tools for storing, searching, connecting, and auditing memories. Backed by JSON files with a SQLite/FTS5 index for fast full-text search.
 
 **Lifecycle Hooks** — Shell scripts that fire automatically at session start, before compaction, and at session end. They load project context, archive raw transcripts, and ensure nothing falls through the cracks.
 
@@ -68,6 +68,7 @@ Session ends
 | `memory_connect` | Create a relationship between two memories |
 | `memory_explore` | Traverse the memory graph from a starting point |
 | `memory_delete` | Remove a memory |
+| `narrative_coverage` | Check which transcripts are processed into a narrative |
 
 Three memory types: **narrative** (per-project living document), **note** (atomic fact, decision, or correction), **session_log** (automatic session record).
 

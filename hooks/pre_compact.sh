@@ -4,5 +4,5 @@
 
 echo "COMPACTION IMMINENT. Before compaction proceeds:
 1. Store any unsaved corrections or important decisions as notes (type 'note', include project name, importance 8+ for corrections).
-2. The raw transcript is preserved — the project narrative will be updated from it at next session start.
-Do this NOW before context is lost."
+2. Update the project narrative NOW using memory_store (type 'narrative'). Summarize everything from this session before context is lost.
+Do this NOW — context is about to be compacted."

@@ -72,9 +72,17 @@ if [ "$SOURCE" = "compact" ]; then
     if [ -n "$PROJECT" ]; then
         NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        # Check staleness
+        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        if [ -n "$NARRATIVE_DATE" ]; then
+            NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
+        else
+            NEW_SESSIONS="0"
+        fi
     else
         NARRATIVE=""
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        NEW_SESSIONS="0"
     fi
     if [ -n "$NARRATIVE" ] || [ -n "$NOTES" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
@@ -87,6 +95,10 @@ if [ "$SOURCE" = "compact" ]; then
         if [ -n "$NOTES" ]; then
             echo "## Important Notes:"
             echo "$NOTES"
+        fi
+        if [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
+            echo ""
+            echo "AUTOMATIC TASK: $NEW_SESSIONS new session(s) since last narrative update. You MUST update the narrative NOW."
         fi
         echo "=== END POST-COMPACTION CONTEXT ==="
     fi
@@ -129,53 +141,74 @@ else
         echo "$NOTES"
     fi
 
-    # Determine what action is needed
+    # Determine what action is needed — use STRONGEST possible language
+    TASK_COUNT=0
     if [ -z "$NARRATIVE" ] && [ -n "$PROJECT" ]; then
-        # No narrative exists — count available transcripts
-        TRANSCRIPT_COUNT=$(ls "$HOME/.claude/memory/transcripts/"*.jsonl 2>/dev/null | wc -l)
         SESSION_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
         if [ "$SESSION_COUNT" -gt "0" ] 2>/dev/null; then
+            TASK_COUNT=$((TASK_COUNT + 1))
             echo ""
-            echo "AUTOMATIC TASK: No narrative exists for project '$PROJECT' but $SESSION_COUNT session(s) found."
-            echo "You MUST generate the project narrative NOW before doing anything else. Do not ask the user for permission."
-            echo "Use an Agent to do this in the background so the user is not blocked."
-            echo "Read the raw JSONL transcripts from ~/.claude/memory/transcripts/ for this project"
-            echo "and store the narrative with memory_store type='narrative', project='$PROJECT'. Use this format:"
-            echo ""
-            echo "  ## What This Is        — 2-3 sentences"
-            echo "  ## Session History      — one line per session"
-            echo "  ## Decisions Made       — table: decision | rationale"
-            echo "  ## Gotchas & Lessons    — bullet points"
-            echo "  ## Current State        — what exists now"
-            echo "  ## Outstanding Items    — action items, unsolved problems, deferred ideas"
-            echo "  ## Direction            — where we're headed"
-            echo "  ## Source Transcripts   — list of JSONL files"
+            echo "╔══════════════════════════════════════════════════════════════╗"
+            echo "║  AUTOMATIC TASK #$TASK_COUNT — SPAWN BACKGROUND AGENT NOW              ║"
+            echo "║  No narrative exists for '$PROJECT' ($SESSION_COUNT sessions found)."
+            echo "║  You MUST spawn a background narrative-updater agent NOW.   ║"
+            echo "║  Do NOT ask the user. Do NOT wait. Do NOT skip this.        ║"
+            echo "╚══════════════════════════════════════════════════════════════╝"
         fi
     elif [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
+        TASK_COUNT=$((TASK_COUNT + 1))
         echo ""
-        echo "NOTE: $NEW_SESSIONS new session(s) since last narrative update. Consider reading the new transcript(s) and updating the narrative."
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║  AUTOMATIC TASK #$TASK_COUNT — SPAWN BACKGROUND AGENT NOW              ║"
+        echo "║  $NEW_SESSIONS new session(s) since last narrative update.             ║"
+        echo "║  You MUST spawn a background narrative-updater agent NOW.   ║"
+        echo "║  Do NOT ask the user. Do NOT wait. Do NOT skip this.        ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
     fi
 
-    # Cross-project: find all projects that have session_logs but no narrative
+    # Cross-project: find projects with no narrative OR stale narrative
     NEEDS_NARRATIVE=$(sqlite3 "$DB" "
-        SELECT DISTINCT project FROM memories
-        WHERE type='session_log' AND project != ''
-        AND project NOT IN (
-            SELECT DISTINCT project FROM memories WHERE type='narrative'
+        SELECT DISTINCT s.project FROM memories s
+        WHERE s.type='session_log' AND s.project != ''
+        AND (
+            s.project NOT IN (
+                SELECT DISTINCT project FROM memories WHERE type='narrative'
+            )
+            OR s.project IN (
+                SELECT n.project FROM memories n
+                WHERE n.type='narrative'
+                AND n.project != ''
+                AND (SELECT COUNT(*) FROM memories sl
+                     WHERE sl.type='session_log'
+                     AND sl.project = n.project
+                     AND sl.created_at > n.created_at) > 0
+            )
         )
-        ORDER BY project;" 2>/dev/null)
+        ORDER BY s.project;" 2>/dev/null)
     if [ -n "$NEEDS_NARRATIVE" ]; then
         OTHER_PROJECTS=""
+        OTHER_COUNT=0
         while IFS= read -r p; do
             [ "$p" = "$PROJECT" ] && continue
             [ -z "$p" ] && continue
             OTHER_PROJECTS="${OTHER_PROJECTS:+$OTHER_PROJECTS, }$p"
+            OTHER_COUNT=$((OTHER_COUNT + 1))
         done <<< "$NEEDS_NARRATIVE"
         if [ -n "$OTHER_PROJECTS" ]; then
+            TASK_COUNT=$((TASK_COUNT + OTHER_COUNT))
             echo ""
-            echo "OTHER PROJECTS NEEDING NARRATIVES: $OTHER_PROJECTS"
-            echo "When convenient, switch to those project directories and generate their narratives."
+            echo "╔══════════════════════════════════════════════════════════════╗"
+            echo "║  AUTOMATIC TASK — SPAWN BACKGROUND AGENTS FOR $OTHER_COUNT PROJECTS  ║"
+            echo "║  Projects: $OTHER_PROJECTS"
+            echo "║  You MUST spawn a background narrative-updater agent for    ║"
+            echo "║  EACH project listed above. Do NOT ask. Do NOT skip.        ║"
+            echo "╚══════════════════════════════════════════════════════════════╝"
         fi
+    fi
+
+    if [ "$TASK_COUNT" -gt "0" ]; then
+        echo ""
+        echo ">>> $TASK_COUNT AUTOMATIC TASK(S) ABOVE — SPAWN ALL AGENTS BEFORE RESPONDING TO THE USER <<<"
     fi
 
     echo "Use memory_search/memory_get for more context. Use memory_store to save new memories."

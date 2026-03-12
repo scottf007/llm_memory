@@ -92,6 +92,14 @@ def find_transcripts(project_filter: Optional[str] = None) -> list[tuple[Path, s
                     seen_sessions.add(session_id)
                     results.append((jsonl, session_id))
 
+            # Scan subagent transcripts: {project_dir}/{session}/subagents/*.jsonl
+            for subagent_jsonl in sorted(project_dir.glob("*/subagents/*.jsonl")):
+                if subagent_jsonl.is_file():
+                    session_id = subagent_jsonl.stem
+                    if session_id not in seen_sessions:
+                        seen_sessions.add(session_id)
+                        results.append((subagent_jsonl, session_id))
+
     # Also scan ~/.claude/memory/transcripts/ for synced transcripts
     if ARCHIVE_DIR.exists():
         for jsonl in sorted(ARCHIVE_DIR.glob("*.jsonl")):
@@ -123,21 +131,177 @@ def derive_project_from_dir(dir_path: Path) -> str:
     return name
 
 
+def _is_home_dir(cwd: str) -> bool:
+    """Check if a path is a user's home directory (e.g. /home/scott, /root)."""
+    p = Path(cwd)
+    parts = p.parts
+    # /home/<user> has exactly 3 parts: ('/', 'home', 'user')
+    if len(parts) == 3 and parts[1] == "home":
+        return True
+    # /root
+    if len(parts) == 2 and parts[1] == "root":
+        return True
+    return False
+
+
 def _project_from_cwd(cwd: str) -> Optional[str]:
-    """Extract project name from a cwd path like /home/user/projects/foo."""
+    """Extract project name from a cwd path like /home/user/projects/foo.
+
+    Falls back to the last directory component if it's not a home directory
+    and the path has enough depth (3+ components).
+    """
     parts = Path(cwd).parts
+    # First try: look for a 'projects/' parent segment
     for i, part in enumerate(parts):
         if part == "projects" and i + 1 < len(parts):
             return parts[i + 1]
+    # Second try: use last component if path is deep enough and not a home dir
+    if len(parts) >= 4 and not _is_home_dir(cwd):
+        return parts[-1]
     return None
 
 
-def derive_project(cwds: list[str], dir_path: Path) -> str:
-    """Derive project name from collected cwds, falling back to directory name."""
+def _derive_project_from_content(user_texts: list[str]) -> Optional[str]:
+    """Derive a project name from conversation content by finding repeated terms.
+
+    Returns a sanitized project name or None if no strong theme is found.
+    """
+    if not user_texts:
+        return None
+
+    # Common English words to skip
+    stop_words = {
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "can", "shall", "must", "need", "let",
+        "lets", "i", "me", "my", "we", "our", "you", "your", "it", "its",
+        "he", "she", "they", "them", "this", "that", "these", "those",
+        "what", "which", "who", "whom", "how", "when", "where", "why",
+        "and", "or", "but", "not", "no", "so", "if", "then", "else",
+        "for", "to", "of", "in", "on", "at", "by", "with", "from", "up",
+        "out", "about", "into", "over", "after", "before", "between",
+        "through", "during", "just", "also", "some", "all", "any", "each",
+        "get", "got", "set", "use", "using", "used", "make", "made",
+        "want", "like", "know", "think", "see", "go", "going", "come",
+        "take", "give", "tell", "say", "said", "here", "there", "now",
+        "very", "really", "quite", "well", "much", "more", "most", "than",
+        "too", "only", "still", "already", "just", "even", "back",
+        "way", "thing", "things", "something", "anything", "everything",
+        "one", "two", "first", "new", "good", "right", "work", "file",
+        "files", "code", "sure", "help", "please", "thanks",
+    }
+
+    combined = " ".join(user_texts).lower()
+    # Extract words (2+ chars, alphanumeric)
+    words = re.findall(r"[a-z][a-z0-9]{1,}", combined)
+    # Count word frequency, skip stop words
+    from collections import Counter
+    word_counts = Counter(w for w in words if w not in stop_words)
+
+    if not word_counts:
+        return None
+
+    # Also look for bigrams (two-word phrases) - these often capture project names
+    bigram_counts: dict[str, int] = Counter()
+    for text in user_texts:
+        text_words = re.findall(r"[A-Za-z][a-z0-9]*(?:\s+[A-Za-z][a-z0-9]*)?", text)
+        # Extract capitalized bigrams from original text (e.g. "Home Assistant")
+        caps = re.findall(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+", text)
+        for phrase in caps:
+            key = phrase.lower().replace(" ", "_")
+            bigram_counts[key] += 1
+
+    # Prefer bigram if it appears in multiple turns
+    min_turns = max(2, len(user_texts) // 3)
+    for phrase, count in bigram_counts.most_common(3):
+        if count >= min_turns:
+            return phrase
+
+    # Fall back to most common single word if it appears frequently
+    top_word, top_count = word_counts.most_common(1)[0]
+    if top_count >= min_turns:
+        return top_word
+
+    return None
+
+
+def _match_known_projects(user_texts: list[str]) -> Optional[str]:
+    """Check if conversation content matches a known project in the DB.
+
+    Looks up existing projects from the database and checks if the conversation
+    is clearly about one of them — catches sessions that would otherwise be 'general'.
+    """
+    if not user_texts:
+        return None
+
+    db_path = DB_DIR / "memory.db"
+    if not db_path.exists():
+        return None
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute(
+            "SELECT DISTINCT project FROM memories WHERE project != '' AND project != 'general'"
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return None
+
+    known_projects = [r[0] for r in rows]
+    if not known_projects:
+        return None
+
+    combined = " ".join(user_texts).lower()
+
+    # Check each known project — count mentions of the project name
+    # and related terms (underscores become spaces for matching)
+    best_project = None
+    best_score = 0
+
+    for project in known_projects:
+        score = 0
+        # Match exact project name
+        score += combined.count(project.lower()) * 3
+        # Match with underscores as spaces (e.g. "finance nexus" for "finance_nexus")
+        spaced = project.replace("_", " ").lower()
+        if spaced != project.lower():
+            score += combined.count(spaced) * 3
+        # Match individual words from project name (if multi-word)
+        parts = project.lower().replace("_", " ").replace("-", " ").split()
+        if len(parts) > 1:
+            for part in parts:
+                if len(part) > 3:  # skip tiny words
+                    score += combined.count(part)
+
+        if score > best_score:
+            best_score = score
+            best_project = project
+
+    # Require a minimum score — at least 3 mentions
+    if best_score >= 3 and best_project:
+        return best_project
+
+    return None
+
+
+def derive_project(cwds: list[str], dir_path: Path,
+                   user_texts: Optional[list[str]] = None) -> str:
+    """Derive project name from collected cwds, falling back to directory name
+    or content-based derivation."""
     for cwd in cwds:
         project = _project_from_cwd(cwd)
         if project:
             return project
+    # Try matching against known projects in the DB
+    if user_texts:
+        known_match = _match_known_projects(user_texts)
+        if known_match:
+            return known_match
+    # Try content-based derivation (creates new project names from themes)
+    if user_texts:
+        content_project = _derive_project_from_content(user_texts)
+        if content_project:
+            return content_project
     dir_project = derive_project_from_dir(dir_path)
     # "transcripts" is the archive dir name, not a real project
     if not dir_project or dir_project == "transcripts":
@@ -223,10 +387,12 @@ def extract_session_data(path: Path) -> dict[str, Any]:
     cwds: list[str] = []
     cwd_seen: set[str] = set()
     session_id = None
+    parent_session_id = None
     first_ts = None
     last_ts = None
     turn_count = 0
     last_assistant_text = ""
+    user_texts: list[str] = []
 
     with open(path, "r", errors="replace") as f:
         for line in f:
@@ -249,23 +415,46 @@ def extract_session_data(path: Path) -> dict[str, Any]:
                 cwds.append(entry_cwd)
             if not session_id and entry.get("sessionId"):
                 session_id = entry["sessionId"]
+            if not parent_session_id and entry.get("parentSessionId"):
+                parent_session_id = entry["parentSessionId"]
 
             if entry_type == "user":
                 turn_count += 1
+                text = _extract_user_text(entry)
+                if text:
+                    user_texts.append(text)
 
             elif entry_type == "assistant":
                 text = _extract_assistant_text(entry)
                 if text and len(text) > 50:
                     last_assistant_text = text[:300]
 
-    return {
-        "session_id": session_id or path.stem,
-        "project": derive_project(cwds, path.parent),
+    resolved_session_id = session_id or path.stem
+    project = derive_project(cwds, path.parent, user_texts)
+
+    # Build summary — for subagent transcripts, include parent reference
+    if parent_session_id:
+        summary = (
+            f"Agent session {resolved_session_id} "
+            f"(parent: {parent_session_id}) for {project}, "
+            f"{turn_count} turns."
+        )
+        if last_assistant_text:
+            summary += f" {last_assistant_text}"
+    else:
+        summary = last_assistant_text
+
+    result = {
+        "session_id": resolved_session_id,
+        "project": project,
         "turn_count": turn_count,
         "first_timestamp": first_ts,
         "last_timestamp": last_ts,
-        "summary": last_assistant_text,
+        "summary": summary,
     }
+    if parent_session_id:
+        result["parent_session_id"] = parent_session_id
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +481,10 @@ def store_session_log(
     uuid = os.urandom(16).hex()
     created_at = datetime.now(tz=__import__('datetime').timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
+    # Detect subagent sessions — tag with "agent"
+    is_agent = session_id.startswith("agent-") or "(parent:" in content
+    tags = "agent" if is_agent else None
+
     record = {
         "schema_version": 1,
         "uuid": uuid,
@@ -301,7 +494,7 @@ def store_session_log(
         "session_id": session_id,
         "importance": 3,
         "transcript_ref": transcript_ref,
-        "tags": None,
+        "tags": tags,
         "created_at": created_at,
         "connections": [],
     }
@@ -314,9 +507,9 @@ def store_session_log(
     # Also insert into DB for immediate use
     if conn:
         conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, session_id, importance, transcript_ref, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (uuid, "session_log", content, project, session_id, 3, transcript_ref, created_at),
+            "INSERT INTO memories (uuid, type, content, project, session_id, importance, transcript_ref, tags, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid, "session_log", content, project, session_id, 3, transcript_ref, tags, created_at),
         )
         conn.commit()
 

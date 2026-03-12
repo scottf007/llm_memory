@@ -1,0 +1,51 @@
+#!/bin/bash
+# SubagentStart hook: injects project context (narrative + important notes) into subagents.
+# Fires when a subagent is spawned.
+
+INPUT=$(cat)
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+
+DB="$HOME/.claude/memory/memory.db"
+if [ ! -f "$DB" ]; then
+    exit 0
+fi
+
+# Derive project name from cwd
+PROJECT=""
+if [ -n "$CWD" ]; then
+    PROJECT=$(echo "$CWD" | sed -n 's|.*/projects/\([^/]*\).*|\1|p')
+fi
+
+if [ -z "$PROJECT" ]; then
+    exit 0
+fi
+
+# Query narrative
+NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+
+# Query important notes (importance >= 7)
+NOTES=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 7 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+
+# Build additionalContext string
+CONTEXT="## Project: ${PROJECT}"
+if [ -n "$NARRATIVE" ]; then
+    CONTEXT="${CONTEXT}
+## Narrative:
+${NARRATIVE}"
+fi
+if [ -n "$NOTES" ]; then
+    CONTEXT="${CONTEXT}
+
+## Important Notes:
+${NOTES}"
+fi
+
+# Output JSON using jq for proper escaping
+jq -n --arg context "$CONTEXT" '{
+    "hookSpecificOutput": {
+        "hookEventName": "SubagentStart",
+        "additionalContext": $context
+    }
+}'
+
+exit 0

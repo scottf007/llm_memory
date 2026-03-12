@@ -75,6 +75,26 @@ hook_configs = {
                 'async': True
             }]
         }
+    ],
+    'SubagentStart': [
+        {
+            'matcher': '',
+            'hooks': [{
+                'type': 'command',
+                'command': f'{hooks_dir}/subagent_start.sh',
+                'timeout': 5
+            }]
+        }
+    ],
+    'SubagentStop': [
+        {
+            'matcher': '',
+            'hooks': [{
+                'type': 'command',
+                'command': f'{hooks_dir}/subagent_stop.sh',
+                'timeout': 5
+            }]
+        }
     ]
 }
 
@@ -98,10 +118,12 @@ with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
 
 print('All hooks installed:')
-print('  - SessionStart  (auto-load recent memories)')
-print('  - PostToolUse   (session monitor + save timestamp)')
-print('  - PreCompact    (save before compaction)')
-print('  - SessionEnd    (auto-save session summary)')
+print('  - SessionStart   (auto-load narrative + memories)')
+print('  - PostToolUse    (session monitor + save timestamp)')
+print('  - PreCompact     (save before compaction)')
+print('  - SessionEnd     (auto-save session summary)')
+print('  - SubagentStart  (inject narrative into agents)')
+print('  - SubagentStop   (notify parent of narrative updates)')
 "
 
 echo ""

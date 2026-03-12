@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.1.0] - 2026-03-12
+
+### Added
+
+- New MCP tool: `narrative_coverage(project)` — diffs on-disk transcript files
+  against the narrative's `transcript_ref` to identify unprocessed transcripts
+- `transcript_ref` now accepts JSON arrays of file paths (legacy string format
+  still supported)
+- Narrative uniqueness enforcement: storing a narrative auto-supersedes the
+  previous one for the same project, and narratives require a non-empty project
+- Rebuild deduplication: `full_rebuild()` keeps only the latest narrative per
+  project when multiple record files exist
+- `memory_get` now includes connections from the JSON record file that reference
+  deleted memories (e.g. supersedes connections to old narratives)
+- 16 new tests covering narrative coverage, uniqueness, rebuild dedup, and
+  project-required validation
+
+### Changed
+
+- Narrative-updater agent rewritten for 1-transcript-per-invocation architecture.
+  Each agent processes a single file, merges into the existing narrative, and
+  appends to `transcript_ref`. Sequential within a project (to avoid overwrites),
+  parallel across projects.
+- CLAUDE.md spawning instructions updated to use `narrative_coverage` for
+  discovery and sequential agent spawning
+
 ## [1.0.0] - 2026-03-10
 
 First public release. This changelog is retroactive, covering all development
