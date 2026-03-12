@@ -227,6 +227,70 @@ class TestStaleNarrativeMandatory:
         )
 
 
+# ---- Stale narrative triggers AUTOMATIC TASK, not NOTE ----
+
+class TestStaleNarrativeAutomaticTask:
+    """When a narrative exists but has new sessions since it was written,
+    the hook must output 'AUTOMATIC TASK', not a soft 'NOTE: ... Consider'."""
+
+    def test_stale_narrative_says_automatic_task(self, tmp_path):
+        """Stale narrative should trigger 'AUTOMATIC TASK' in output."""
+        home, conn, _ = _setup_test_home(tmp_path)
+
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("dddd" * 8, "narrative", "# Old narrative", "testproj",
+             "2026-03-10T10:00:00", 10),
+        )
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (os.urandom(16).hex(), "session_log",
+             "New session", "testproj", "new-sess",
+             "2026-03-11T10:00:00", 3),
+        )
+        conn.commit()
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/scott/projects/testproj")
+
+        assert "AUTOMATIC TASK" in stdout, (
+            f"Stale narrative should output 'AUTOMATIC TASK', got:\n{stdout}"
+        )
+        assert "NOTE:" not in stdout, (
+            f"Stale narrative should NOT use soft 'NOTE:', got:\n{stdout}"
+        )
+
+    def test_fresh_narrative_no_automatic_task(self, tmp_path):
+        """Narrative with no new sessions should NOT trigger AUTOMATIC TASK."""
+        home, conn, _ = _setup_test_home(tmp_path)
+
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("eeee" * 8, "narrative", "# Fresh narrative", "testproj",
+             "2026-03-11T10:00:00", 10),
+        )
+        conn.execute(
+            "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (os.urandom(16).hex(), "session_log",
+             "Old session", "testproj", "old-sess",
+             "2026-03-10T10:00:00", 3),
+        )
+        conn.commit()
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/scott/projects/testproj")
+
+        assert "AUTOMATIC TASK" not in stdout, (
+            f"Fresh narrative should NOT trigger AUTOMATIC TASK, got:\n{stdout}"
+        )
+
+
 # ---- Cross-project staleness detection ----
 
 class TestCrossProjectStaleness:
