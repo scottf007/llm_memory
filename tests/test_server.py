@@ -230,6 +230,222 @@ class TestDelete:
         assert len(result["connections"]["incoming"]) == 0
 
 
+class TestNarrativeUniqueness:
+    """Narratives should be one-per-project. Storing a new narrative for the
+    same project must supersede the old one, not create duplicates."""
+
+    def test_second_narrative_supersedes_first(self):
+        """Storing a new narrative for the same project should auto-supersede the old one."""
+        r1 = json.loads(server._handle_store({
+            "content": "# V1 narrative\nOriginal project story.",
+            "type": "narrative",
+            "project": "myproj",
+            "importance": 10,
+        })[0].text)
+        assert r1["status"] == "stored"
+
+        r2 = json.loads(server._handle_store({
+            "content": "# V2 narrative\nUpdated project story with new sessions.",
+            "type": "narrative",
+            "project": "myproj",
+            "importance": 10,
+        })[0].text)
+        assert r2["status"] == "stored"
+
+        # The new narrative should have a supersedes connection to the old one
+        result = json.loads(server._handle_get({"uuid": r2["uuid"]})[0].text)
+        outgoing = result["connections"]["outgoing"]
+        supersedes = [c for c in outgoing if c["relationship"] == "supersedes"]
+        assert len(supersedes) == 1, (
+            f"New narrative should auto-supersede the old one, but has {len(supersedes)} supersedes connections"
+        )
+        assert supersedes[0]["to_uuid"] == r1["uuid"]
+
+    def test_only_one_active_narrative_per_project(self):
+        """Querying narratives for a project should return only the latest (non-superseded) one."""
+        server._handle_store({
+            "content": "# V1\nFirst version.",
+            "type": "narrative",
+            "project": "singleproj",
+            "importance": 10,
+        })
+        server._handle_store({
+            "content": "# V2\nSecond version.",
+            "type": "narrative",
+            "project": "singleproj",
+            "importance": 10,
+        })
+        server._handle_store({
+            "content": "# V3\nThird version.",
+            "type": "narrative",
+            "project": "singleproj",
+            "importance": 10,
+        })
+
+        # When asking for recent narratives for this project, should get exactly 1
+        result = json.loads(server._handle_recent({
+            "project": "singleproj",
+            "type": "narrative",
+        })[0].text)
+        assert len(result) == 1, (
+            f"Expected exactly 1 active narrative for project, got {len(result)}. "
+            f"Old narratives should be removed or excluded after being superseded."
+        )
+        assert "V3" in result[0]["content"]
+
+    def test_narrative_supersedes_connection_in_json_file(self, tmp_memory_dir):
+        """The supersedes connection should also be written to the JSON record file."""
+        r1 = json.loads(server._handle_store({
+            "content": "# Old narrative",
+            "type": "narrative",
+            "project": "fileproj",
+        })[0].text)
+
+        r2 = json.loads(server._handle_store({
+            "content": "# New narrative",
+            "type": "narrative",
+            "project": "fileproj",
+        })[0].text)
+
+        # Check the JSON file for the new narrative has the supersedes connection
+        path = tmp_memory_dir / "records" / f"{r2['uuid']}.json"
+        record = json.loads(path.read_text())
+        supersedes = [
+            c for c in record.get("connections", [])
+            if c["relationship"] == "supersedes"
+        ]
+        assert len(supersedes) == 1, (
+            f"JSON file should contain supersedes connection, but has {len(supersedes)}"
+        )
+        assert supersedes[0]["to_uuid"] == r1["uuid"]
+
+    def test_old_narrative_deleted_after_superseded(self):
+        """Once superseded, the old narrative record should be deleted (not just connected)."""
+        r1 = json.loads(server._handle_store({
+            "content": "# Obsolete narrative",
+            "type": "narrative",
+            "project": "cleanproj",
+            "importance": 10,
+        })[0].text)
+
+        server._handle_store({
+            "content": "# Current narrative",
+            "type": "narrative",
+            "project": "cleanproj",
+            "importance": 10,
+        })
+
+        # The old narrative should no longer exist
+        old = server._handle_get({"uuid": r1["uuid"]})[0].text
+        assert "Error" in old, (
+            "Old narrative should be deleted after being superseded, but it still exists"
+        )
+
+    def test_narrative_across_different_projects_independent(self):
+        """Narratives for different projects should not interfere with each other."""
+        r1 = json.loads(server._handle_store({
+            "content": "# Project A narrative",
+            "type": "narrative",
+            "project": "proj_a",
+        })[0].text)
+
+        r2 = json.loads(server._handle_store({
+            "content": "# Project B narrative",
+            "type": "narrative",
+            "project": "proj_b",
+        })[0].text)
+
+        # Both should exist independently
+        a = json.loads(server._handle_get({"uuid": r1["uuid"]})[0].text)
+        b = json.loads(server._handle_get({"uuid": r2["uuid"]})[0].text)
+        assert a["content"] == "# Project A narrative"
+        assert b["content"] == "# Project B narrative"
+
+        # Each project should have exactly 1 narrative
+        result_a = json.loads(server._handle_recent({"project": "proj_a", "type": "narrative"})[0].text)
+        result_b = json.loads(server._handle_recent({"project": "proj_b", "type": "narrative"})[0].text)
+        assert len(result_a) == 1
+        assert len(result_b) == 1
+
+
+class TestNarrativeRequiresProject:
+    """Narratives must have a non-empty project. A narrative without a project
+    is useless — it can't be looked up or uniquely enforced."""
+
+    def test_narrative_without_project_rejected(self):
+        """Storing a narrative with no project should fail."""
+        result = server._handle_store({
+            "content": "# Orphan narrative\nNo project specified.",
+            "type": "narrative",
+            "importance": 10,
+        })[0].text
+        assert "Error" in result or "project" in result.lower(), (
+            f"Narrative without a project should be rejected, but got: {result}"
+        )
+
+    def test_narrative_with_empty_project_rejected(self):
+        """Storing a narrative with empty string project should fail."""
+        result = server._handle_store({
+            "content": "# Empty project narrative",
+            "type": "narrative",
+            "project": "",
+            "importance": 10,
+        })[0].text
+        assert "Error" in result or "project" in result.lower(), (
+            f"Narrative with empty project should be rejected, but got: {result}"
+        )
+
+    def test_note_without_project_allowed(self):
+        """Notes without a project should still be allowed (they're atomic facts)."""
+        result = json.loads(server._handle_store({
+            "content": "A general note without a project.",
+            "type": "note",
+        })[0].text)
+        assert result["status"] == "stored"
+
+
+class TestNarrativeSurvivesRebuild:
+    """After full_rebuild(), narrative uniqueness should still hold —
+    exactly one narrative per project."""
+
+    def test_rebuild_with_multiple_narrative_files_keeps_latest(self, tmp_memory_dir):
+        """If multiple narrative JSON files exist for the same project,
+        rebuild should only keep the most recent one."""
+        records_dir = tmp_memory_dir / "records"
+
+        # Create two narrative files for the same project with different timestamps
+        old_uuid = os.urandom(16).hex()
+        new_uuid = os.urandom(16).hex()
+
+        for uuid, content, created_at in [
+            (old_uuid, "# V1 old narrative", "2026-03-08T10:00:00"),
+            (new_uuid, "# V2 new narrative", "2026-03-10T10:00:00"),
+        ]:
+            record = {
+                "schema_version": 1,
+                "uuid": uuid,
+                "type": "narrative",
+                "content": content,
+                "project": "rebuildproj",
+                "importance": 10,
+                "created_at": created_at,
+                "connections": [],
+            }
+            (records_dir / f"{uuid}.json").write_text(json.dumps(record))
+
+        server.full_rebuild()
+
+        result = json.loads(server._handle_recent({
+            "project": "rebuildproj",
+            "type": "narrative",
+        })[0].text)
+        assert len(result) == 1, (
+            f"After rebuild with 2 narrative files for same project, "
+            f"expected 1 active narrative, got {len(result)}"
+        )
+        assert "V2" in result[0]["content"]
+
+
 class TestSync:
     def test_sync_imports_new_file(self, tmp_memory_dir):
         """A JSON file added externally should be imported on sync."""
@@ -275,3 +491,119 @@ class TestSync:
         contents = [r["content"] for r in result]
         assert "Survive rebuild" in contents
         assert "Also survive" in contents
+
+
+class TestNarrativeCoverage:
+    def test_no_narrative_returns_unprocessed(self, tmp_path):
+        """When no narrative exists, all on-disk files are unprocessed."""
+        # Create a fake project dir with transcripts (under .claude/projects/)
+        proj_dir = tmp_path / ".claude" / "projects" / "-home-scott-projects-testproj"
+        proj_dir.mkdir(parents=True)
+        (proj_dir / "session1.jsonl").write_text("{}")
+        (proj_dir / "session2.jsonl").write_text("{}")
+        sub_dir = proj_dir / "subagents"
+        sub_dir.mkdir()
+        (sub_dir / "agent1.jsonl").write_text("{}")
+
+        with patch("server.Path.home", return_value=tmp_path):
+            result = json.loads(
+                server._handle_narrative_coverage({"project": "testproj"})[0].text
+            )
+
+        assert result["status"] == "no_narrative"
+        assert result["narrative_uuid"] is None
+        assert len(result["unprocessed"]) == 3
+
+    def test_all_processed(self, tmp_path):
+        """When transcript_ref covers all files, nothing is unprocessed."""
+        proj_dir = tmp_path / ".claude" / "projects" / "-home-scott-projects-myproj"
+        proj_dir.mkdir(parents=True)
+        f1 = proj_dir / "abc.jsonl"
+        f1.write_text("{}")
+        f2 = proj_dir / "def.jsonl"
+        f2.write_text("{}")
+
+        # Store a narrative with transcript_ref as JSON array
+        transcript_ref = json.dumps([str(f1), str(f2)])
+        r = json.loads(server._handle_store({
+            "content": "# My narrative",
+            "type": "narrative",
+            "project": "myproj",
+            "transcript_ref": [str(f1), str(f2)],
+        })[0].text)
+
+        with patch("server.Path.home", return_value=tmp_path):
+            result = json.loads(
+                server._handle_narrative_coverage({"project": "myproj"})[0].text
+            )
+
+        assert result["unprocessed_count"] == 0
+        assert "All" in result["summary"]
+
+    def test_partial_coverage(self, tmp_path):
+        """Unprocessed files are correctly identified."""
+        proj_dir = tmp_path / ".claude" / "projects" / "-home-scott-projects-partial"
+        proj_dir.mkdir(parents=True)
+        f1 = proj_dir / "done.jsonl"
+        f1.write_text("{}")
+        f2 = proj_dir / "new.jsonl"
+        f2.write_text("{}")
+        sub_dir = proj_dir / "subagents"
+        sub_dir.mkdir()
+        f3 = sub_dir / "agent.jsonl"
+        f3.write_text("{}")
+
+        r = json.loads(server._handle_store({
+            "content": "# Partial narrative",
+            "type": "narrative",
+            "project": "partial",
+            "transcript_ref": [str(f1)],
+        })[0].text)
+
+        with patch("server.Path.home", return_value=tmp_path):
+            result = json.loads(
+                server._handle_narrative_coverage({"project": "partial"})[0].text
+            )
+
+        assert result["unprocessed_count"] == 2
+        assert result["on_disk_count"] == 3
+        assert result["processed_count"] == 1
+
+    def test_transcript_ref_list_stored_as_json(self, tmp_memory_dir):
+        """When transcript_ref is passed as a list, it's stored as JSON string."""
+        r = json.loads(server._handle_store({
+            "content": "# List ref test",
+            "type": "narrative",
+            "project": "listref",
+            "transcript_ref": ["/path/a.jsonl", "/path/b.jsonl"],
+        })[0].text)
+
+        # Check the stored record file
+        path = tmp_memory_dir / "records" / f"{r['uuid']}.json"
+        record = json.loads(path.read_text())
+        ref = record["transcript_ref"]
+        assert isinstance(ref, str)
+        parsed = json.loads(ref)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+
+    def test_legacy_string_transcript_ref(self, tmp_path):
+        """Legacy freeform string transcript_ref is still parsed."""
+        proj_dir = tmp_path / ".claude" / "projects" / "-home-scott-projects-legacy"
+        proj_dir.mkdir(parents=True)
+        f1 = proj_dir / "abc.jsonl"
+        f1.write_text("{}")
+
+        r = json.loads(server._handle_store({
+            "content": "# Legacy narrative",
+            "type": "narrative",
+            "project": "legacy",
+            "transcript_ref": str(f1),
+        })[0].text)
+
+        with patch("server.Path.home", return_value=tmp_path):
+            result = json.loads(
+                server._handle_narrative_coverage({"project": "legacy"})[0].text
+            )
+
+        assert result["unprocessed_count"] == 0

@@ -425,7 +425,23 @@ def full_rebuild() -> None:
             except (json.JSONDecodeError, OSError, KeyError):
                 continue
 
-        # Pass 2: Import all connections (all records now exist)
+        # Pass 2: Deduplicate narratives — keep only the latest per project
+        narrative_rows = conn.execute(
+            "SELECT uuid, project, created_at FROM memories WHERE type = 'narrative' AND project IS NOT NULL "
+            "ORDER BY project, created_at DESC"
+        ).fetchall()
+        seen_projects: set[str] = set()
+        for row in narrative_rows:
+            proj = row["project"]
+            if proj in seen_projects:
+                # This is an older duplicate — delete it
+                old_uuid = row["uuid"]
+                conn.execute("DELETE FROM memories WHERE uuid = ?", (old_uuid,))
+                delete_record_file(old_uuid)
+            else:
+                seen_projects.add(proj)
+
+        # Pass 3: Import all connections (all records now exist)
         for path in RECORDS_DIR.glob("*.json"):
             try:
                 record = json.loads(path.read_text())
@@ -493,8 +509,12 @@ async def list_tools() -> list[types.Tool]:
                         "default": 5,
                     },
                     "transcript_ref": {
-                        "type": "string",
-                        "description": "Reference to raw transcript file, e.g. '~/.claude/memory/transcripts/SESSION_ID.jsonl'",
+                        "type": ["string", "array"],
+                        "description": "Transcript files processed to create this memory. "
+                        "Prefer a JSON array of full paths, e.g. "
+                        "['~/.claude/projects/-home-scott-projects-brine/abc123.jsonl']. "
+                        "Legacy string format also accepted.",
+                        "items": {"type": "string"},
                     },
                     "tags": {
                         "type": "string",
@@ -630,6 +650,21 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="narrative_coverage",
+            description="Check which transcript files have been processed into a project's narrative. "
+            "Compares on-disk .jsonl files against the narrative's transcript_ref field.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name, e.g. 'cricket_manager'",
+                    },
+                },
+                "required": ["project"],
+            },
+        ),
+        types.Tool(
             name="memory_delete",
             description="Delete a memory and its connections.",
             inputSchema={
@@ -669,6 +704,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             "memory_connect": _handle_connect,
             "memory_explore": _handle_explore,
             "memory_delete": _handle_delete,
+            "narrative_coverage": _handle_narrative_coverage,
         }
         handler = handlers.get(name)
         if not handler:
@@ -690,12 +726,20 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
     tags = args.get("tags")
     connections = args.get("connections", [])
 
+    # Normalize transcript_ref: store as JSON string whether input is list or string
+    if isinstance(transcript_ref, list):
+        transcript_ref = json.dumps(transcript_ref)
+
     if not content:
         return _error("content is required")
     if mem_type not in VALID_TYPES:
         return _error(f"type must be one of: {', '.join(sorted(VALID_TYPES))}")
     if not (1 <= importance <= 10):
         return _error("importance must be between 1 and 10")
+
+    # Narratives require a non-empty project
+    if mem_type == "narrative" and not (project and project.strip()):
+        return _error("Narratives require a non-empty project")
 
     conn = get_db()
     try:
@@ -713,6 +757,16 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
                     "status": "duplicate_skipped",
                     "message": "Similar memory already stored recently"
                 }, indent=2))
+
+        # Narrative uniqueness: find and remove any existing narrative for this project
+        old_narrative_uuid = None
+        if mem_type == "narrative":
+            old_row = conn.execute(
+                "SELECT uuid FROM memories WHERE type = 'narrative' AND project = ?",
+                (project,),
+            ).fetchone()
+            if old_row:
+                old_narrative_uuid = old_row["uuid"]
 
         uuid = generate_uuid()
         created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -732,6 +786,13 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
             "connections": [],
         }
 
+        # If superseding an old narrative, record it in the new record's connections
+        if old_narrative_uuid:
+            record["connections"].append({
+                "to_uuid": old_narrative_uuid,
+                "relationship": "supersedes",
+            })
+
         # Process connections for the record file
         for link in connections:
             to_uuid = link.get("to_uuid")
@@ -746,6 +807,13 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
                         "relationship": relationship,
                     })
 
+        # Delete old narrative (file + DB) before storing new one
+        if old_narrative_uuid:
+            delete_record_file(old_narrative_uuid)
+            conn.execute("DELETE FROM connections WHERE from_uuid = ? OR to_uuid = ?",
+                         (old_narrative_uuid, old_narrative_uuid))
+            conn.execute("DELETE FROM memories WHERE uuid = ?", (old_narrative_uuid,))
+
         # Write file FIRST (source of truth), then DB
         write_record_file(record)
 
@@ -756,13 +824,14 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
             (uuid, mem_type, content, project, session_id, created_at, importance, transcript_ref, tags),
         )
 
-        # Insert connections into DB
+        # Insert connections into DB (only for targets that still exist)
         for link in record["connections"]:
-            conn.execute(
-                "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) "
-                "VALUES (?, ?, ?)",
-                (uuid, link["to_uuid"], link["relationship"]),
-            )
+            if conn.execute("SELECT 1 FROM memories WHERE uuid = ?", (link["to_uuid"],)).fetchone():
+                conn.execute(
+                    "INSERT OR IGNORE INTO connections (from_uuid, to_uuid, relationship) "
+                    "VALUES (?, ?, ?)",
+                    (uuid, link["to_uuid"], link["relationship"]),
+                )
 
         conn.commit()
         return _text(json.dumps({"uuid": uuid, "status": "stored"}, indent=2))
@@ -897,12 +966,27 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
             (uuid,),
         ).fetchall()
 
+        outgoing_list = [
+            {"to_uuid": r["to_uuid"], "relationship": r["relationship"],
+             "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
+            for r in outgoing
+        ]
+
+        # Also include connections from the JSON file that aren't in the DB
+        # (e.g. supersedes connections to deleted narratives)
+        db_outgoing_uuids = {r["to_uuid"] for r in outgoing}
+        record_file = read_record_file(uuid)
+        if record_file:
+            for link in record_file.get("connections", []):
+                if link.get("to_uuid") and link["to_uuid"] not in db_outgoing_uuids:
+                    outgoing_list.append({
+                        "to_uuid": link["to_uuid"],
+                        "relationship": link["relationship"],
+                        "memory": None,
+                    })
+
         memory["connections"] = {
-            "outgoing": [
-                {"to_uuid": r["to_uuid"], "relationship": r["relationship"],
-                 "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
-                for r in outgoing
-            ],
+            "outgoing": outgoing_list,
             "incoming": [
                 {"from_uuid": r["from_uuid"], "relationship": r["relationship"],
                  "memory": {"type": r["type"], "content": r["content"], "project": r["project"]}}
@@ -1055,6 +1139,140 @@ def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
         conn.execute("DELETE FROM memories WHERE uuid = ?", (uuid,))
         conn.commit()
         return _text(json.dumps({"uuid": uuid, "status": "deleted"}, indent=2))
+    finally:
+        conn.close()
+
+
+# -- narrative_coverage ----------------------------------------------------
+
+def _find_project_transcripts(project: str) -> set[str]:
+    """Find all .jsonl transcript files on disk for a project.
+
+    Searches ~/.claude/projects/ directories, matching the project name
+    against directory names (handling hyphens/underscores).
+    """
+    projects_dir = Path.home() / ".claude" / "projects"
+    if not projects_dir.exists():
+        return set()
+
+    # Normalize for matching: lowercase, strip hyphens/underscores
+    def normalize(name: str) -> str:
+        return name.lower().replace("-", "").replace("_", "")
+
+    target = normalize(project)
+    found: set[str] = set()
+
+    for proj_dir in projects_dir.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        # Extract project name from dir like "-home-scott-projects-cricket-manager"
+        dir_name = proj_dir.name
+        # Remove the path prefix (everything up to and including "projects-")
+        parts = dir_name.split("projects-", 1)
+        if len(parts) == 2:
+            dir_project = parts[1]
+        else:
+            dir_project = dir_name
+
+        if normalize(dir_project) != target:
+            # Also handle "general" which maps to bare "-home-scott-projects"
+            if not (project == "general" and dir_name.endswith("-projects") and not dir_project):
+                continue
+
+        # Collect main session transcripts
+        for jsonl in proj_dir.glob("*.jsonl"):
+            found.add(str(jsonl))
+
+        # Collect subagent transcripts
+        subagents_dir = proj_dir / "subagents"
+        if subagents_dir.exists():
+            for jsonl in subagents_dir.glob("*.jsonl"):
+                found.add(str(jsonl))
+
+    return found
+
+
+def _parse_transcript_ref(transcript_ref: str | None) -> set[str]:
+    """Parse transcript_ref field into a set of file paths.
+
+    Handles both JSON array format and legacy freeform string format.
+    """
+    if not transcript_ref:
+        return set()
+
+    # Try JSON array first
+    try:
+        parsed = json.loads(transcript_ref)
+        if isinstance(parsed, list):
+            return {str(p) for p in parsed}
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Legacy freeform: comma-separated or newline-separated paths
+    refs: set[str] = set()
+    for part in transcript_ref.replace("\n", ",").split(","):
+        part = part.strip()
+        if part:
+            refs.add(part)
+    return refs
+
+
+def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
+    project = args.get("project", "").strip()
+    if not project:
+        return _error("project is required")
+
+    conn = get_db()
+    try:
+        # Find the current narrative for this project
+        row = conn.execute(
+            "SELECT uuid, transcript_ref, created_at FROM memories "
+            "WHERE type = 'narrative' AND project = ? "
+            "ORDER BY created_at DESC LIMIT 1",
+            (project,),
+        ).fetchone()
+
+        if not row:
+            on_disk = _find_project_transcripts(project)
+            return _text(json.dumps({
+                "project": project,
+                "narrative_uuid": None,
+                "status": "no_narrative",
+                "on_disk": sorted(on_disk),
+                "processed": [],
+                "unprocessed": sorted(on_disk),
+                "summary": f"No narrative exists. {len(on_disk)} transcript(s) on disk.",
+            }, indent=2))
+
+        processed = _parse_transcript_ref(row["transcript_ref"])
+        on_disk = _find_project_transcripts(project)
+
+        # Normalize paths for comparison (expand ~)
+        def expand(p: str) -> str:
+            return str(Path(p).expanduser())
+
+        processed_expanded = {expand(p) for p in processed}
+        on_disk_expanded = {expand(p) for p in on_disk}
+
+        unprocessed = on_disk_expanded - processed_expanded
+        # Also find processed refs that aren't on disk (stale refs)
+        stale = processed_expanded - on_disk_expanded
+
+        return _text(json.dumps({
+            "project": project,
+            "narrative_uuid": row["uuid"],
+            "narrative_updated": row["created_at"],
+            "on_disk_count": len(on_disk),
+            "processed_count": len(processed),
+            "unprocessed_count": len(unprocessed),
+            "unprocessed": sorted(unprocessed),
+            "stale_refs": sorted(stale) if stale else [],
+            "summary": (
+                f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk."
+                if unprocessed else
+                f"All {len(on_disk)} transcript(s) are covered by the narrative."
+            ),
+        }, indent=2))
     finally:
         conn.close()
 
