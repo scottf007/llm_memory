@@ -25,11 +25,13 @@ fi
 
 # Extract project name, turn count, and brief summary from transcript
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-read -r PROJECT TURN_COUNT SUMMARY < <("$SCRIPT_DIR/.venv/bin/python3" -c "
-import json, sys
+PYTHON3="$SCRIPT_DIR/.venv/bin/python3"
+[ -x "$PYTHON3" ] || PYTHON3="python3"
+read -r PROJECT TURN_COUNT SUMMARY < <(TRANSCRIPT_PATH="$TRANSCRIPT" "$PYTHON3" -c "
+import json, sys, os
 from pathlib import Path
 
-transcript_path = '$TRANSCRIPT'
+transcript_path = os.environ['TRANSCRIPT_PATH']
 messages = []
 project = ''
 turn_count = 0
@@ -65,7 +67,7 @@ except:
     sys.exit(0)
 
 if messages:
-    summary = messages[-1][:300].replace(\"'\", \"''\")
+    summary = messages[-1][:300].replace('\t', ' ')
     print(f'{project}\t{turn_count}\t{summary}')
 " 2>/dev/null)
 
