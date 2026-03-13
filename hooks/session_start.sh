@@ -72,9 +72,17 @@ if [ "$SOURCE" = "compact" ]; then
     if [ -n "$PROJECT" ]; then
         NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        # Check if narrative is stale
+        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        if [ -n "$NARRATIVE_DATE" ]; then
+            COMPACT_NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
+        else
+            COMPACT_NEW_SESSIONS="0"
+        fi
     else
         NARRATIVE=""
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        COMPACT_NEW_SESSIONS="0"
     fi
     if [ -n "$NARRATIVE" ] || [ -n "$NOTES" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
@@ -87,6 +95,12 @@ if [ "$SOURCE" = "compact" ]; then
         if [ -n "$NOTES" ]; then
             echo "## Important Notes:"
             echo "$NOTES"
+        fi
+        if [ "$COMPACT_NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
+            echo ""
+            echo "AUTOMATIC TASK: $COMPACT_NEW_SESSIONS new session(s) since last narrative update for project '$PROJECT'."
+            echo "You MUST update the project narrative NOW. Do not ask the user for permission."
+            echo "Use an Agent to do this in the background so the user is not blocked."
         fi
         echo "=== END POST-COMPACTION CONTEXT ==="
     fi
@@ -142,14 +156,14 @@ else
             echo "Read the raw JSONL transcripts from ~/.claude/memory/transcripts/ for this project"
             echo "and store the narrative with memory_store type='narrative', project='$PROJECT'. Use this format:"
             echo ""
-            echo "  ## What This Is        — 2-3 sentences"
-            echo "  ## Session History      — one line per session"
-            echo "  ## Decisions Made       — table: decision | rationale"
-            echo "  ## Gotchas & Lessons    — bullet points"
-            echo "  ## Current State        — what exists now"
-            echo "  ## Outstanding Items    — action items, unsolved problems, deferred ideas"
-            echo "  ## Direction            — where we're headed"
-            echo "  ## Source Transcripts   — list of JSONL files"
+            echo "  ## The Idea             — 2-3 sentences"
+            echo "  ## Approach             — table: non-obvious decision | rationale"
+            echo "  ## What's Done          — current state + key file paths"
+            echo "  ## What We've Learnt    — gotchas that could bite again"
+            echo "  ## What We Want To Do   — user-stated goals only"
+            echo "  ## Suggested Work       — Claude recommendations"
+            echo "  ## Resuming             — last piece of work, status: complete/interrupted"
+            echo "  ## Source Transcripts   — last 5-10 as lookup table + pointer to DB"
         fi
     elif [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
         echo ""
@@ -158,12 +172,23 @@ else
         echo "Use an Agent to do this in the background so the user is not blocked."
     fi
 
-    # Cross-project: find all projects that have session_logs but no narrative
+    # Cross-project: find projects with no narrative OR stale narrative
     NEEDS_NARRATIVE=$(sqlite3 "$DB" "
         SELECT DISTINCT project FROM memories
         WHERE type='session_log' AND project != ''
-        AND project NOT IN (
-            SELECT DISTINCT project FROM memories WHERE type='narrative'
+        AND (
+            project NOT IN (
+                SELECT DISTINCT project FROM memories WHERE type='narrative'
+            )
+            OR project IN (
+                SELECT m.project FROM memories m
+                WHERE m.type='narrative'
+                GROUP BY m.project
+                HAVING MAX(m.created_at) < (
+                    SELECT MAX(s.created_at) FROM memories s
+                    WHERE s.type='session_log' AND s.project = m.project
+                )
+            )
         )
         ORDER BY project;" 2>/dev/null)
     if [ -n "$NEEDS_NARRATIVE" ]; then

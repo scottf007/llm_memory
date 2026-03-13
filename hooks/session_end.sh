@@ -73,7 +73,12 @@ if [ -n "$SUMMARY" ]; then
     CONTENT="Session $SESSION_ID for ${PROJECT:-unknown}, $TURN_COUNT turns. $SUMMARY"
     TRANSCRIPT_REF="~/.claude/memory/transcripts/$ARCHIVE_NAME"
 
-    # Write JSON record file using Python for proper escaping
+    # Write JSON record file using Python with env vars for proper escaping
+    RECORD_CONTENT="$CONTENT" \
+    RECORD_PROJECT="$PROJECT" \
+    RECORD_SESSION_ID="$SESSION_ID" \
+    RECORD_TRANSCRIPT_REF="$TRANSCRIPT_REF" \
+    RECORD_DIR="$RECORDS_DIR" \
     python3 -c "
 import json, os
 from datetime import datetime
@@ -83,16 +88,16 @@ record = {
     'schema_version': 1,
     'uuid': uuid,
     'type': 'session_log',
-    'content': '''$CONTENT''',
-    'project': '$PROJECT' or None,
-    'session_id': '$SESSION_ID',
+    'content': os.environ['RECORD_CONTENT'],
+    'project': os.environ.get('RECORD_PROJECT') or None,
+    'session_id': os.environ['RECORD_SESSION_ID'],
     'importance': 3,
-    'transcript_ref': '$TRANSCRIPT_REF',
+    'transcript_ref': os.environ['RECORD_TRANSCRIPT_REF'],
     'tags': None,
     'created_at': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S'),
     'connections': []
 }
-path = '$RECORDS_DIR/' + uuid + '.json'
+path = os.path.join(os.environ['RECORD_DIR'], uuid + '.json')
 with open(path, 'w') as f:
     json.dump(record, f, indent=2)
 " 2>/dev/null
