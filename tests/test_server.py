@@ -7,8 +7,10 @@ from unittest.mock import patch
 
 import pytest
 
-# We need to patch DB_DIR and DB_PATH before importing handlers
-import server
+try:
+    import server
+except ImportError:
+    pytest.skip("mcp package not installed — run in venv with requirements-dev.txt", allow_module_level=True)
 
 
 @pytest.fixture(autouse=True)
