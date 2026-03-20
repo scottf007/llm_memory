@@ -109,6 +109,17 @@ else
         mkdir -p "$LIB_DIR/tests"
         cp "$EXTRACTED/tests/"*.py "$LIB_DIR/tests/" 2>/dev/null || true
 
+        # Copy skills
+        if [ -d "$EXTRACTED/skills" ]; then
+            cp -r "$EXTRACTED/skills/"* "$LIB_DIR/skills/" 2>/dev/null || true
+        fi
+
+        # Copy agents
+        if [ -d "$EXTRACTED/agents" ]; then
+            mkdir -p "$LIB_DIR/agents"
+            cp "$EXTRACTED/agents/"*.md "$LIB_DIR/agents/" 2>/dev/null || true
+        fi
+
         # Store version
         echo "$REMOTE_SHA" > "$LIB_DIR/VERSION"
 
@@ -175,9 +186,27 @@ else
     log "    claude mcp add-json llm_memory '$SERVER_CONFIG' --scope user"
 fi
 
-# --- Step 6: Install hooks ---
-log "[6/8] Installing lifecycle hooks..."
+# --- Step 6: Install hooks, skills, and agents ---
+log "[6/8] Installing lifecycle hooks, skills, and agents..."
 LLM_MEMORY_INSTALLING=1 bash "$LIB_DIR/hooks/install_hooks.sh"
+
+# Install skills
+if [ -d "$LIB_DIR/skills" ]; then
+    for skill_dir in "$LIB_DIR/skills"/*/; do
+        [ -d "$skill_dir" ] || continue
+        skill_name=$(basename "$skill_dir")
+        mkdir -p "$HOME/.claude/skills/$skill_name"
+        cp "$skill_dir"* "$HOME/.claude/skills/$skill_name/" 2>/dev/null || true
+    done
+    log "  Skills installed to ~/.claude/skills/"
+fi
+
+# Install agents
+if [ -d "$LIB_DIR/agents" ]; then
+    mkdir -p "$HOME/.claude/agents"
+    cp "$LIB_DIR/agents/"*.md "$HOME/.claude/agents/" 2>/dev/null || true
+    log "  Agents installed to ~/.claude/agents/"
+fi
 
 # --- Step 7: Apply shared settings ---
 log "[7/8] Applying shared settings..."
