@@ -111,7 +111,8 @@ else
 
         # Copy skills
         if [ -d "$EXTRACTED/skills" ]; then
-            cp -r "$EXTRACTED/skills/"* "$LIB_DIR/skills/" 2>/dev/null || true
+            mkdir -p "$LIB_DIR/skills"
+            cp -r "$EXTRACTED/skills/"* "$LIB_DIR/skills/"
         fi
 
         # Copy agents
