@@ -22,9 +22,30 @@ current narrative. Read it fully — you're merging into it.
 
 Parse out each section's content. This is your baseline.
 
-### Step 2: Read Transcript
-Read the ONE transcript file you've been assigned. For large files (>1MB),
-read in chunks using offset/limit (never more than 256KB per read).
+### Step 2: Read Conversation
+You were given a raw JSONL path. Read the **stripped conversation** instead —
+it's ~97% smaller and contains all user/assistant text.
+
+1. Derive the conversation path:
+   `~/.claude/memory/conversations/{session_id}.md` where `{session_id}` is
+   the JSONL filename stem (the part before `.jsonl`).
+2. If the `.md` does not yet exist (e.g. a live session the processor hasn't
+   run on), generate it on demand:
+   ```bash
+   python3 /home/scott/projects/llm_memory/extract_conversation.py \
+       <raw_jsonl_path> \
+       --output ~/.claude/memory/conversations/{session_id}.md
+   ```
+3. Read the `.md` top to bottom (it's usually <1MB).
+
+**Format of the .md:**
+- Frontmatter (`---` block) with `session_id`, `project`, `raw` (pointer back
+  to the JSONL), `turns`, `started`, `ended`, optional `parent_session_id`.
+- Alternating `=== user <ts> ===` and `=== assistant <ts> ===` blocks.
+- An assistant block with `[L:N]` in its header means the original turn used
+  tools (tool_use/tool_result dropped). If you need the raw bytes for that
+  turn (rare — the assistant's text usually summarises what it did), open
+  the `raw` JSONL with Read using `offset: N, limit: 10-20` for context.
 
 ### Step 3: Extract Signal
 From the transcript, extract:

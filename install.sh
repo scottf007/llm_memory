@@ -88,6 +88,9 @@ else
         # Copy source files to lib directory
         cp "$EXTRACTED/server.py" "$LIB_DIR/"
         cp "$EXTRACTED/process_transcripts.py" "$LIB_DIR/"
+        cp "$EXTRACTED/extract_conversation.py" "$LIB_DIR/"
+        cp "$EXTRACTED/merger.py" "$LIB_DIR/" 2>/dev/null || true
+        cp "$EXTRACTED/renderer.py" "$LIB_DIR/" 2>/dev/null || true
         cp "$EXTRACTED/dashboard.py" "$LIB_DIR/"
         cp "$EXTRACTED/apply_settings.py" "$LIB_DIR/"
         cp "$EXTRACTED/requirements.txt" "$LIB_DIR/"

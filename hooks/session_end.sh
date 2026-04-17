@@ -15,6 +15,16 @@ mkdir -p "$TRANSCRIPT_DIR"
 ARCHIVE_NAME="${SESSION_ID:-$(date +%Y%m%d_%H%M%S)}.jsonl"
 cp "$TRANSCRIPT" "$TRANSCRIPT_DIR/$ARCHIVE_NAME" 2>/dev/null || true
 
+# Extract stripped conversation text alongside archive (idempotent).
+CONVERSATIONS_DIR="$HOME/.claude/memory/conversations"
+mkdir -p "$CONVERSATIONS_DIR"
+SCRIPT_DIR_EARLY="$(cd "$(dirname "$0")/.." && pwd)"
+PYTHON3_EARLY="$SCRIPT_DIR_EARLY/.venv/bin/python3"
+[ -x "$PYTHON3_EARLY" ] || PYTHON3_EARLY="python3"
+"$PYTHON3_EARLY" "$SCRIPT_DIR_EARLY/extract_conversation.py" \
+    "$TRANSCRIPT_DIR/$ARCHIVE_NAME" \
+    --output "$CONVERSATIONS_DIR/${ARCHIVE_NAME%.jsonl}.md" 2>/dev/null || true
+
 RECORDS_DIR="$HOME/.claude/memory/records"
 mkdir -p "$RECORDS_DIR"
 

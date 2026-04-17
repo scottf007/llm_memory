@@ -13,3 +13,5 @@ build/
 .idea/
 .vscode/
 .claude/
+tmp_*/
+tmp_*

@@ -29,6 +29,7 @@ DB_DIR = Path.home() / ".claude" / "memory"
 DB_PATH = DB_DIR / "memory.db"
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
 ARCHIVE_DIR = DB_DIR / "transcripts"
+CONVERSATIONS_DIR = DB_DIR / "conversations"
 
 MIN_TURNS = 2  # skip trivial sessions
 
@@ -470,6 +471,19 @@ def archive_transcript(path: Path, session_id: str) -> Path:
     return dest
 
 
+def extract_conversation_md(jsonl_path: Path, session_id: str) -> Path:
+    """Write the stripped conversation .md beside the archive. Idempotent —
+    skip if .md already exists and is at least as new as the JSONL."""
+    from extract_conversation import extract
+
+    CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = CONVERSATIONS_DIR / f"{session_id}.md"
+    if dest.exists() and dest.stat().st_mtime >= jsonl_path.stat().st_mtime:
+        return dest
+    dest.write_text(extract(jsonl_path))
+    return dest
+
+
 def store_session_log(
     conn,
     session_id: str,
@@ -555,7 +569,12 @@ def process_transcripts(args, conn, transcripts) -> tuple[int, int]:
                 print(f"  Turns: {data['turn_count']}")
                 print(f"  File: {path} ({path.stat().st_size / 1024:.0f} KB)")
         else:
-            archive_transcript(path, session_id)
+            archive_path = archive_transcript(path, session_id)
+            try:
+                extract_conversation_md(archive_path, session_id)
+            except Exception as e:
+                if args.verbose:
+                    print(f"  WARN: extraction failed for {session_id}: {e}")
             uuid = store_session_log(conn, session_id, data["project"], content, transcript_ref)
             if not args.quiet:
                 print(f"  session_log: {session_id} → {uuid} ({data['project']}, {data['turn_count']} turns)")
