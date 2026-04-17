@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at TEXT DEFAULT (datetime('now')),
     importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
     transcript_ref TEXT,
-    tags TEXT
+    tags TEXT,
+    status TEXT DEFAULT 'active'
 );
 CREATE TABLE IF NOT EXISTS connections (
     from_uuid TEXT NOT NULL REFERENCES memories(uuid),

@@ -321,8 +321,12 @@ class TestNarrativeUniqueness:
         )
         assert supersedes[0]["to_uuid"] == r1["uuid"]
 
-    def test_old_narrative_deleted_after_superseded(self):
-        """Once superseded, the old narrative record should be deleted (not just connected)."""
+    def test_old_narrative_archived_after_superseded(self, tmp_memory_dir):
+        """Once superseded, the old narrative record should be archived (not deleted).
+
+        Archival preserves recoverable history: if the new narrative is a broken
+        skeleton, the old one can still be retrieved via memory_get.
+        """
         r1 = json.loads(server._handle_store({
             "content": "# Obsolete narrative",
             "type": "narrative",
@@ -330,18 +334,76 @@ class TestNarrativeUniqueness:
             "importance": 10,
         })[0].text)
 
-        server._handle_store({
+        r2 = json.loads(server._handle_store({
             "content": "# Current narrative",
             "type": "narrative",
             "project": "cleanproj",
             "importance": 10,
+        })[0].text)
+
+        # The old narrative should still be retrievable via memory_get (it's archived, not deleted)
+        old = json.loads(server._handle_get({"uuid": r1["uuid"]})[0].text)
+        assert old["content"] == "# Obsolete narrative", (
+            "Old narrative content should be preserved after supersede"
+        )
+        assert old["status"] == "archived", (
+            f"Old narrative should be marked archived, got status={old.get('status')!r}"
+        )
+
+        # The old narrative's JSON file should also exist and carry the archive marker
+        old_path = tmp_memory_dir / "records" / f"{r1['uuid']}.json"
+        assert old_path.exists(), "Archived narrative's JSON file should be preserved on disk"
+        old_record = json.loads(old_path.read_text())
+        assert old_record.get("status") == "archived"
+        assert old_record.get("archived_in") == r2["uuid"], (
+            "Archived narrative file should record which new narrative superseded it"
+        )
+
+        # The new narrative should be active
+        new = json.loads(server._handle_get({"uuid": r2["uuid"]})[0].text)
+        assert new["status"] == "active"
+
+    def test_archived_narrative_hidden_from_search(self):
+        """memory_search should not return archived narratives by default."""
+        server._handle_store({
+            "content": "# Obsolete narrative with unique search token zxqtfoo",
+            "type": "narrative",
+            "project": "searchproj",
+            "importance": 10,
+        })
+        server._handle_store({
+            "content": "# Current narrative without the token",
+            "type": "narrative",
+            "project": "searchproj",
+            "importance": 10,
         })
 
-        # The old narrative should no longer exist
-        old = server._handle_get({"uuid": r1["uuid"]})[0].text
-        assert "Error" in old, (
-            "Old narrative should be deleted after being superseded, but it still exists"
+        result = json.loads(server._handle_search({"query": "zxqtfoo"})[0].text)
+        assert len(result) == 0, (
+            f"Archived narrative should be excluded from search results, got {len(result)}"
         )
+
+    def test_archived_narrative_hidden_from_recent(self):
+        """memory_recent should not return archived narratives."""
+        server._handle_store({
+            "content": "# V1 narrative",
+            "type": "narrative",
+            "project": "recentproj",
+            "importance": 10,
+        })
+        server._handle_store({
+            "content": "# V2 narrative",
+            "type": "narrative",
+            "project": "recentproj",
+            "importance": 10,
+        })
+
+        result = json.loads(server._handle_recent({
+            "project": "recentproj",
+            "type": "narrative",
+        })[0].text)
+        assert len(result) == 1
+        assert "V2" in result[0]["content"]
 
     def test_narrative_across_different_projects_independent(self):
         """Narratives for different projects should not interfere with each other."""

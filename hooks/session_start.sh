@@ -70,10 +70,10 @@ fi
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
-        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
         # Check if narrative is stale
-        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
         if [ -n "$NARRATIVE_DATE" ]; then
             COMPACT_NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
         else
@@ -107,12 +107,12 @@ if [ "$SOURCE" = "compact" ]; then
 else
     # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
-        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
+        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
 
         # Check if narrative needs updating (new session_logs since last narrative)
-        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
         if [ -n "$NARRATIVE_DATE" ]; then
             NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
         else
@@ -173,16 +173,18 @@ else
     fi
 
     # Cross-project: find projects with no narrative OR stale narrative
+    # (only considering active narratives — archived ones don't count)
     NEEDS_NARRATIVE=$(sqlite3 "$DB" "
         SELECT DISTINCT project FROM memories
         WHERE type='session_log' AND project != ''
         AND (
             project NOT IN (
-                SELECT DISTINCT project FROM memories WHERE type='narrative'
+                SELECT DISTINCT project FROM memories
+                WHERE type='narrative' AND (status IS NULL OR status != 'archived')
             )
             OR project IN (
                 SELECT m.project FROM memories m
-                WHERE m.type='narrative'
+                WHERE m.type='narrative' AND (m.status IS NULL OR m.status != 'archived')
                 GROUP BY m.project
                 HAVING MAX(m.created_at) < (
                     SELECT MAX(s.created_at) FROM memories s

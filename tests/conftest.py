@@ -47,7 +47,8 @@ def db_conn(db_path):
             created_at TEXT DEFAULT (datetime('now')),
             importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
             transcript_ref TEXT,
-            tags TEXT
+            tags TEXT,
+            status TEXT DEFAULT 'active'
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(

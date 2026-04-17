@@ -51,7 +51,8 @@ CREATE TABLE IF NOT EXISTS memories (
     created_at TEXT DEFAULT (datetime('now')),
     importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
     transcript_ref TEXT,
-    tags TEXT
+    tags TEXT,
+    status TEXT DEFAULT 'active'
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -165,7 +166,11 @@ def init_db() -> None:
                 return
 
             if columns and "uuid" in columns:
-                # Already on new schema, nothing to do
+                # Already on new schema — ensure status column exists (v2 -> v2.1 migration)
+                if "status" not in columns:
+                    conn.execute("ALTER TABLE memories ADD COLUMN status TEXT DEFAULT 'active'")
+                    conn.execute("UPDATE memories SET status = 'active' WHERE status IS NULL")
+                    conn.commit()
                 conn.close()
                 return
         except Exception:
@@ -286,13 +291,14 @@ def _import_record(conn: sqlite3.Connection, record: dict) -> None:
     """Insert a single record from a JSON file into the DB."""
     conn.execute(
         "INSERT OR IGNORE INTO memories (uuid, type, content, project, session_id, "
-        "created_at, importance, transcript_ref, tags) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "created_at, importance, transcript_ref, tags, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             record["uuid"], record["type"], record["content"],
             record.get("project"), record.get("session_id"),
             record.get("created_at"), record.get("importance", 5),
             record.get("transcript_ref"), record.get("tags"),
+            record.get("status") or "active",
         ),
     )
 
@@ -425,21 +431,39 @@ def full_rebuild() -> None:
             except (json.JSONDecodeError, OSError, KeyError):
                 continue
 
-        # Pass 2: Deduplicate narratives — keep only the latest per project
+        # Pass 2: Deduplicate narratives — keep only the latest active per project,
+        # archive older ones (do not delete; preserves recoverable history).
+        # Already-archived records are skipped so they stay out of the "most recent"
+        # selection and keep their status.
         narrative_rows = conn.execute(
-            "SELECT uuid, project, created_at FROM memories WHERE type = 'narrative' AND project IS NOT NULL "
+            "SELECT uuid, project, created_at, status FROM memories "
+            "WHERE type = 'narrative' AND project IS NOT NULL "
             "ORDER BY project, created_at DESC"
         ).fetchall()
         seen_projects: set[str] = set()
+        newest_active_per_project: dict[str, str] = {}
         for row in narrative_rows:
             proj = row["project"]
+            # Skip records already archived — leave them alone
+            if row["status"] == "archived":
+                continue
             if proj in seen_projects:
-                # This is an older duplicate — delete it
+                # Older active duplicate — archive it
                 old_uuid = row["uuid"]
-                conn.execute("DELETE FROM memories WHERE uuid = ?", (old_uuid,))
-                delete_record_file(old_uuid)
+                new_uuid = newest_active_per_project.get(proj)
+                old_record = read_record_file(old_uuid)
+                if old_record is not None:
+                    old_record["status"] = "archived"
+                    if new_uuid:
+                        old_record["archived_in"] = new_uuid
+                    write_record_file(old_record)
+                conn.execute(
+                    "UPDATE memories SET status = 'archived' WHERE uuid = ?",
+                    (old_uuid,),
+                )
             else:
                 seen_projects.add(proj)
+                newest_active_per_project[proj] = row["uuid"]
 
         # Pass 3: Import all connections (all records now exist)
         for path in RECORDS_DIR.glob("*.json"):
@@ -758,11 +782,15 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
                     "message": "Similar memory already stored recently"
                 }, indent=2))
 
-        # Narrative uniqueness: find and remove any existing narrative for this project
+        # Narrative uniqueness: find any existing active narrative for this project.
+        # The old one will be archived (status='archived') after the new one is stored,
+        # rather than deleted — this preserves recoverable history in case the new
+        # narrative was generated as a broken/skeleton record.
         old_narrative_uuid = None
         if mem_type == "narrative":
             old_row = conn.execute(
-                "SELECT uuid FROM memories WHERE type = 'narrative' AND project = ?",
+                "SELECT uuid FROM memories WHERE type = 'narrative' AND project = ? "
+                "AND (status IS NULL OR status = 'active')",
                 (project,),
             ).fetchone()
             if old_row:
@@ -807,21 +835,30 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
                         "relationship": relationship,
                     })
 
-        # Delete old narrative (file + DB) before storing new one
+        # Archive the old narrative (file + DB) before storing the new one.
+        # Archiving (vs deleting) preserves recoverable history — if the new
+        # narrative is a broken/skeleton record, the old content is still on disk
+        # and in the DB, just hidden from default queries.
         if old_narrative_uuid:
-            delete_record_file(old_narrative_uuid)
-            conn.execute("DELETE FROM connections WHERE from_uuid = ? OR to_uuid = ?",
-                         (old_narrative_uuid, old_narrative_uuid))
-            conn.execute("DELETE FROM memories WHERE uuid = ?", (old_narrative_uuid,))
+            old_record = read_record_file(old_narrative_uuid)
+            if old_record is not None:
+                old_record["status"] = "archived"
+                old_record["archived_in"] = uuid
+                write_record_file(old_record)
+            conn.execute(
+                "UPDATE memories SET status = 'archived' WHERE uuid = ?",
+                (old_narrative_uuid,),
+            )
 
         # Write file FIRST (source of truth), then DB
+        record["status"] = "active"
         write_record_file(record)
 
         conn.execute(
             "INSERT INTO memories (uuid, type, content, project, session_id, "
-            "created_at, importance, transcript_ref, tags) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (uuid, mem_type, content, project, session_id, created_at, importance, transcript_ref, tags),
+            "created_at, importance, transcript_ref, tags, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (uuid, mem_type, content, project, session_id, created_at, importance, transcript_ref, tags, "active"),
         )
 
         # Insert connections into DB (only for targets that still exist)
@@ -860,6 +897,7 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
             "FROM memories_fts f "
             "JOIN memories m ON m.rowid = f.rowid "
             "WHERE memories_fts MATCH ? "
+            "AND (m.status IS NULL OR m.status != 'archived') "
         )
         params: list[Any] = [fts_query]
 
@@ -900,7 +938,8 @@ def _handle_recent(args: dict[str, Any]) -> list[types.TextContent]:
     try:
         sql = (
             "SELECT uuid, type, content, project, session_id, created_at, "
-            "importance, transcript_ref, tags FROM memories WHERE 1=1 "
+            "importance, transcript_ref, tags FROM memories "
+            "WHERE (status IS NULL OR status != 'archived') "
         )
         params: list[Any] = []
 
@@ -938,7 +977,7 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
     try:
         row = conn.execute(
             "SELECT uuid, type, content, project, session_id, created_at, "
-            "importance, transcript_ref, tags "
+            "importance, transcript_ref, tags, status "
             "FROM memories WHERE uuid = ?",
             (uuid,),
         ).fetchone()
@@ -947,6 +986,9 @@ def _handle_get(args: dict[str, Any]) -> list[types.TextContent]:
             return _error(f"Memory {uuid} not found")
 
         memory = row_to_dict(row)
+        # Normalize status for existing rows that pre-date the column
+        if memory.get("status") is None:
+            memory["status"] = "active"
 
         outgoing = conn.execute(
             "SELECT c.to_uuid, c.relationship, c.created_at, "
@@ -1224,10 +1266,11 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
 
     conn = get_db()
     try:
-        # Find the current narrative for this project
+        # Find the current (active, non-archived) narrative for this project
         row = conn.execute(
             "SELECT uuid, transcript_ref, created_at FROM memories "
             "WHERE type = 'narrative' AND project = ? "
+            "AND (status IS NULL OR status != 'archived') "
             "ORDER BY created_at DESC LIMIT 1",
             (project,),
         ).fetchone()

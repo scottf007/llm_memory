@@ -36,10 +36,27 @@ files / narratives, so they can run simultaneously.
 **Within-project sequential**: each session's merged state feeds the next
 session's input. Never run two sessions for the same project in parallel.
 
-### 2a. Bootstrap `{project}.json` if missing
+**Bootstrap vs. incremental — important**: there are two distinct
+transcript-selection paths, and picking the wrong one silently destroys
+narrative content. If `{project}.json` does NOT exist, this is a
+**first-time bootstrap** and you must process **every** main-session
+transcript the project has ever had (see 2a). If `{project}.json` already
+exists, this is an **incremental update** and you use `narrative_coverage`'s
+`unprocessed` list as normal. Why: `narrative_coverage` compares against the
+existing narrative memory record's `transcript_ref`. On first bootstrap
+there's no `{project}.json` yet, but an old legacy narrative memory record
+likely exists — so `narrative_coverage` will only report recent transcripts
+as unprocessed, and the resulting `{project}.json` would be built from 1-2
+sessions and then silently supersede the rich legacy narrative with a
+skeleton.
 
-If `~/.claude/memory/projects/{project}.json` does NOT exist, create it with
-an empty stub before doing anything else. No agent required — just write:
+### 2a. Check if this is a first-time bootstrap for the project
+
+If `~/.claude/memory/projects/{project}.json` does NOT exist, this is a
+**first-time bootstrap**. Create the empty stub AND use a different
+transcript-selection path for this run:
+
+- Write the empty stub to `~/.claude/memory/projects/<project>.json`:
 
 ```json
 {
@@ -58,16 +75,36 @@ an empty stub before doing anything else. No agent required — just write:
 }
 ```
 
-Write it to `~/.claude/memory/projects/<project_name>.json` with the project
-name substituted. The delta-extractor and merger take over from there.
+- **Do not use `narrative_coverage` to pick transcripts for a first-time
+  bootstrap.** Instead, find ALL main-session transcripts the project has by
+  running this SQL:
 
-### 2b. Filter transcripts
+```bash
+sqlite3 ~/.claude/memory/memory.db \
+  "SELECT session_id FROM memories WHERE type='session_log' AND project='<project>' AND session_id NOT LIKE 'agent-%' ORDER BY created_at;"
+```
 
-From `unprocessed`, keep only **main-session** transcripts. Skip any file
+- Use THAT list (filtering out `agent-*` if any slipped through, and any
+  where the `~/.claude/memory/conversations/<session_id>.md` file doesn't
+  exist) as the set of transcripts to process chronologically for this
+  project.
+
+If `{project}.json` DOES already exist, use `narrative_coverage`'s
+`unprocessed` list as before — incremental updates from there are correct.
+
+After the bootstrap run finishes, `{project}.json` will have its own
+`transcript_ref` coverage and all subsequent runs follow the normal
+incremental path.
+
+### 2b. Filter transcripts (applies to both paths)
+
+Whichever list you picked in 2a (full history for bootstrap, or `unprocessed`
+for incremental), keep only **main-session** transcripts. Skip any file
 whose session_id starts with `agent-` — those are subagent transcripts and
 must not trigger this pipeline. Sort the survivors chronologically by their
 `started` timestamp (read the first JSONL record's `timestamp`, or derive
-from file mtime if unavailable).
+from file mtime if unavailable). Drop any entries whose
+`~/.claude/memory/conversations/<session_id>.md` file is missing.
 
 ### 2c. For each main-session transcript, in order
 

@@ -20,11 +20,11 @@ if [ -z "$PROJECT" ]; then
     exit 0
 fi
 
-# Query narrative
-NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+# Query narrative (active only — archived narratives are preserved-but-hidden)
+NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
 
 # Query important notes (importance >= 7)
-NOTES=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 7 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
+NOTES=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 7 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
 
 # Build additionalContext string
 CONTEXT="## Project: ${PROJECT}"
