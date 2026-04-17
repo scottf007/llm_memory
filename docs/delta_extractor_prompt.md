@@ -37,6 +37,18 @@ with this shape:
 
   "resume_excerpt_lines": 120,
 
+  "summary_delta": {
+    "what":  "one-sentence description of what the project IS (optional)",
+    "why":   "one-sentence description of why it exists (optional)",
+    "stack": "one-line stack line (optional)",
+    "scope": "one-line scope / constraint line (optional)"
+  },
+
+  "operations_delta": [
+    {"item": "Repo",     "detail": "github.com/scottf007/foo (public)"},
+    {"item": "Hosting",  "detail": "VPS at fairywren.studio :5043"}
+  ],
+
   "ledger_delta": {
     "introduced": {
       "decisions":   [ { "text": "...", "rationale": "...", "quote": "optional verbatim", "importance": "load_bearing|standard|minor" } ],
@@ -55,6 +67,10 @@ with this shape:
   }
 }
 ```
+
+`summary_delta` and `operations_delta` are both **optional**. Only emit
+them when the session actually establishes or refines project identity or
+operational facts. Most sessions will omit both.
 
 **Never invents IDs for new items.** The merger assigns `dec-001`, `goal-XX`
 etc. based on its monotonic counters. New items are keyed positionally in
@@ -95,12 +111,15 @@ the arrays.
 8. **Classify originator on suggestions.** If Scott proposed it, mark
    `originator: "user"` — those should probably be goals, not
    suggestions; flag in the journal if you're unsure.
-9. **Journal is not a summary.** It's a paragraph of narrative that
-   reads cleanly when concatenated with prior sessions' journals.
-   Short is fine. Reference ledger items by ID.
-10. **Output JSON only in the output file.** No wrapping text, no
+9. **Bootstrap project identity from conversation.** If this is the first session for a project (no prior `{project}.json` data) OR the session explicitly establishes what the project is, emit `summary_delta` with whatever of {what, why, stack, scope} can be grounded in conversation content. For `what`: one sentence on what the project does. For `why`: one sentence on purpose/motivation. For `stack`: languages/frameworks if mentioned. For `scope`: explicit constraints Scott states (e.g. "fully local, no cloud"). Don't invent — only emit fields you can point to text for. Sessions that don't talk about project identity leave `summary_delta` empty or omit it.
+10. **Emit `operations_delta` when operational facts surface.** Operational facts = how to access/run/deploy the thing — repo URL, hostnames, ports, deploy commands, credential locations (pointers only, never secrets), dashboards, CI/CD, monitoring. Items should be stable state, not one-time setup actions (`setup_foo.py` ran = done item; "runs on port 5043" = operations item). Dedupe by `item` name — if the same item later changes value, emit the new row with same `item` and the merger will update.
+11. **Refinement semantics.** If a later session modifies summary or operations (e.g. stack evolved from Python to Python+Rust), emit the updated value. Merger applies shallow-merge on summary (changed keys overwrite) and upsert-by-item on operations.
+12. **Journal is not a summary.** It's a paragraph of narrative that
+    reads cleanly when concatenated with prior sessions' journals.
+    Short is fine. Reference ledger items by ID.
+13. **Output JSON only in the output file.** No wrapping text, no
     commentary. The merger parses it as-is.
-11. **Set `closure_status` deliberately.** At session close, read the end of the conversation and decide: was work finished at a natural resting point (`complete`), or was it interrupted (`interrupted`)? Signals for `interrupted`: session ends on an unanswered question, a mid-tool-call, explicit "come back to this" / "let me exit now" / "will pick up later" language, OR the delta itself introduces a goal/suggestion that's still pending at session close. Signals for `complete`: Scott signs off cleanly ("thanks" / "great" / "done" / "exit"), work demonstrably landed, all introduced items either closed in-session or were explicitly parked for another day. When unsure, default to `interrupted` — safer for resumption.
+14. **Set `closure_status` deliberately.** At session close, read the end of the conversation and decide: was work finished at a natural resting point (`complete`), or was it interrupted (`interrupted`)? Signals for `interrupted`: session ends on an unanswered question, a mid-tool-call, explicit "come back to this" / "let me exit now" / "will pick up later" language, OR the delta itself introduces a goal/suggestion that's still pending at session close. Signals for `complete`: Scott signs off cleanly ("thanks" / "great" / "done" / "exit"), work demonstrably landed, all introduced items either closed in-session or were explicitly parked for another day. When unsure, default to `interrupted` — safer for resumption.
 
 ## Process checklist (the agent follows this order)
 
@@ -131,7 +150,8 @@ the arrays.
    conversation.md and note `resume_excerpt_lines: <count>` — the
    renderer will extract the actual content at render time.
 8. Decide `closure_status` based on the end of the conversation.
-9. Emit the JSON blob.
+9. If the session establishes or refines project identity or operational facts, emit `summary_delta` and/or `operations_delta` accordingly. Omit either field entirely when nothing in the session warrants it.
+10. Emit the JSON blob.
 
 ## Edge cases
 

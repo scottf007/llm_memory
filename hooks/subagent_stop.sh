@@ -1,5 +1,5 @@
 #!/bin/bash
-# SubagentStop hook: notifies parent when a narrative-updater agent finishes.
+# SubagentStop hook: notifies parent when a narrative-related agent finishes.
 # Fires when a subagent completes.
 # Does NOT reload the full narrative — that happens at session start / post-compaction.
 # Just tells the parent what changed so it has a lightweight update.

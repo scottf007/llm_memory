@@ -34,6 +34,18 @@ wrapping text, no commentary — the merger parses it as-is.
 
   "resume_excerpt_lines": 120,
 
+  "summary_delta": {
+    "what":  "one-sentence description of what the project IS (optional)",
+    "why":   "one-sentence description of why it exists (optional)",
+    "stack": "one-line stack line (optional)",
+    "scope": "one-line scope / constraint line (optional)"
+  },
+
+  "operations_delta": [
+    {"item": "Repo",     "detail": "github.com/scottf007/foo (public)"},
+    {"item": "Hosting",  "detail": "VPS at fairywren.studio :5043"}
+  ],
+
   "ledger_delta": {
     "introduced": {
       "decisions":   [ { "text": "...", "rationale": "...", "quote": "optional verbatim", "importance": "load_bearing|standard|minor" } ],
@@ -52,6 +64,10 @@ wrapping text, no commentary — the merger parses it as-is.
   }
 }
 ```
+
+`summary_delta` and `operations_delta` are both **optional**. Only emit them
+when the session actually establishes or refines project identity or
+operational facts. Most sessions will omit both.
 
 **Never invent IDs for new items.** The merger assigns `dec-001`, `goal-XX`
 etc. based on its monotonic counters. New items are keyed positionally in
@@ -103,10 +119,32 @@ the arrays. **Always use existing IDs** when referring to prior items in
 8. **Classify suggestion originator.** If Scott proposed it, mark
    `originator: "user"` — those should probably be goals, not suggestions;
    flag the ambiguity in the journal.
-9. **Journal is narrative, not a summary.** 2-4 paragraphs that read
-   cleanly concatenated with prior sessions' journals. Short is fine.
-   Reference ledger items by ID.
-10. **Set `closure_status` deliberately.** Read the end of the conversation
+9. **Bootstrap project identity from conversation.** If this is the first
+   session for a project (no prior `{project}.json` data) OR the session
+   explicitly establishes what the project is, emit `summary_delta` with
+   whatever of {what, why, stack, scope} can be grounded in conversation
+   content. For `what`: one sentence on what the project does. For `why`:
+   one sentence on purpose/motivation. For `stack`: languages/frameworks
+   if mentioned. For `scope`: explicit constraints Scott states (e.g.
+   "fully local, no cloud"). Don't invent — only emit fields you can
+   point to text for. Sessions that don't talk about project identity
+   leave `summary_delta` empty or omit it.
+10. **Emit `operations_delta` when operational facts surface.** Operational
+    facts = how to access/run/deploy the thing — repo URL, hostnames,
+    ports, deploy commands, credential locations (pointers only, never
+    secrets), dashboards, CI/CD, monitoring. Items should be stable state,
+    not one-time setup actions (`setup_foo.py` ran = done item; "runs on
+    port 5043" = operations item). Dedupe by `item` name — if the same
+    item later changes value, emit the new row with same `item` and the
+    merger will update.
+11. **Refinement semantics.** If a later session modifies summary or
+    operations (e.g. stack evolved from Python to Python+Rust), emit the
+    updated value. Merger applies shallow-merge on summary (changed keys
+    overwrite) and upsert-by-item on operations.
+12. **Journal is narrative, not a summary.** 2-4 paragraphs that read
+    cleanly concatenated with prior sessions' journals. Short is fine.
+    Reference ledger items by ID.
+13. **Set `closure_status` deliberately.** Read the end of the conversation
     and decide: was work finished at a natural resting point (`complete`),
     or was it interrupted (`interrupted`)? Signals for `interrupted`:
     session ends on an unanswered question, a mid-tool-call, explicit
@@ -116,7 +154,7 @@ the arrays. **Always use existing IDs** when referring to prior items in
     ("thanks" / "great" / "done" / "exit"), work demonstrably landed,
     all introduced items either closed in-session or explicitly parked.
     When unsure, default to `interrupted` — safer for resumption.
-11. **Output JSON only.** The file you write must be a single valid JSON
+14. **Output JSON only.** The file you write must be a single valid JSON
     object. No markdown fences, no prose around it.
 
 ## Process
@@ -146,6 +184,10 @@ dedicated sweep for completion recognition.
 Draft the journal (2-4 paragraphs). Choose `closure_status`. Read the
 tail ~50-200 lines of conversation.md and set `resume_excerpt_lines` to
 that line count — the renderer extracts the actual content at render time.
+
+If the session establishes or refines project identity or operational
+facts, emit `summary_delta` and/or `operations_delta` accordingly. Omit
+either field entirely when nothing in the session warrants it.
 
 Emit the JSON blob to `output_path` using Write. Use Bash only for
 verification if needed (e.g. `python3 -c "import json; json.load(open('...'))"`).

@@ -1,9 +1,9 @@
 # Narrative Section Specs
 
 This document defines the **required fields, carry-forward rules, and validation
-checks** for each narrative section. The narrative-updater agent MUST follow these
-specs when updating a narrative. If validation fails, the agent must fix the issue
-before storing.
+checks** for each narrative section. The narrative pipeline (delta-extractor →
+merger → renderer) MUST follow these specs when updating a narrative. If
+validation fails, the issue must be fixed before storing.
 
 ## How to Use This Document
 

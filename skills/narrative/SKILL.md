@@ -9,15 +9,11 @@ user_invocable: true
 Update project narratives by processing unprocessed JSONL transcripts into the
 living narrative document. Works across all projects automatically.
 
-Two pipelines are supported, selected **per project**:
-
-- **Path A — structured-state pipeline** (preferred): project has a
-  `~/.claude/memory/projects/{project}.json` file. Sessions are processed by
-  the `delta-extractor` agent, merged into the JSON by `merger.py`, then
-  rendered to markdown by `renderer.py`, then stored as a `narrative` memory.
-- **Path B — legacy pipeline** (fallback): project has no `{project}.json`
-  yet. Sessions are processed by the `narrative-updater` agent exactly as
-  before. Over time, projects move to Path A via a one-time backfill.
+One pipeline, no branching: each session becomes a structured delta
+(`delta-extractor` agent), deltas merge into a per-project JSON state
+(`merger.py`), and the state renders to markdown (`renderer.py`) which is then
+stored as a `narrative` memory. Projects that don't yet have a state JSON are
+bootstrapped with an empty stub — no legacy freeform path exists.
 
 ## Step 1: Discover work
 
@@ -30,12 +26,6 @@ To find all projects with session_logs:
 sqlite3 ~/.claude/memory/memory.db "SELECT DISTINCT project FROM memories WHERE type='session_log' AND project <> '' ORDER BY project;"
 ```
 
-For each project, decide pipeline:
-
-```bash
-test -f ~/.claude/memory/projects/{project}.json && echo "PATH_A" || echo "PATH_B"
-```
-
 If `unprocessed` is empty for a project, skip it.
 
 ## Step 2: Process each project
@@ -46,105 +36,102 @@ files / narratives, so they can run simultaneously.
 **Within-project sequential**: each session's merged state feeds the next
 session's input. Never run two sessions for the same project in parallel.
 
-### Path A — structured-state pipeline
+### 2a. Bootstrap `{project}.json` if missing
 
-1. **Filter transcripts.** From `unprocessed`, keep only **main-session**
-   transcripts. Skip any file whose session_id starts with `agent-` — those
-   are subagent transcripts and must not trigger this pipeline. Sort the
-   survivors chronologically by their `started` timestamp (read the first
-   JSONL record's `timestamp`, or derive from file mtime if unavailable).
+If `~/.claude/memory/projects/{project}.json` does NOT exist, create it with
+an empty stub before doing anything else. No agent required — just write:
 
-2. **For each main-session transcript, in order:**
+```json
+{
+  "schema_version": "0.1",
+  "project": "<project_name>",
+  "last_updated": null,
+  "summary": {},
+  "operations": [],
+  "decisions": [],
+  "goals": [],
+  "suggestions": [],
+  "learnings": [],
+  "done": [],
+  "sessions": [],
+  "narrative": {"rendered_at": null, "record_uuid": null, "drift_audit": null}
+}
+```
 
-   a. Spawn the `delta-extractor` agent with the session's inputs. Wait for
-      it to finish and write its delta JSON before proceeding.
+Write it to `~/.claude/memory/projects/<project_name>.json` with the project
+name substituted. The delta-extractor and merger take over from there.
 
-      ```
-      Agent(
-        description="Delta PROJECT: SESSION_ID",
-        subagent_type="delta-extractor",
-        prompt="""Project: PROJECT_NAME
-      conversation_md_path: ~/.claude/memory/conversations/SESSION_ID.md
-      project_state_path:   ~/.claude/memory/projects/PROJECT_NAME.json
-      session_id:           SESSION_ID
-      session_started_at:   ISO8601_START
-      session_ended_at:     ISO8601_END
-      output_path:          /tmp/tmp_delta_SESSION_ID.json
+### 2b. Filter transcripts
 
-      Read the project state JSON and the conversation markdown. Produce the
-      structured delta per your prompt spec and write it as JSON (only) to
-      output_path. Do not modify the project state — the merger does that.
-      Do NOT use worktree isolation. Do NOT commit anything.""",
-        run_in_background=False
-      )
-      ```
+From `unprocessed`, keep only **main-session** transcripts. Skip any file
+whose session_id starts with `agent-` — those are subagent transcripts and
+must not trigger this pipeline. Sort the survivors chronologically by their
+`started` timestamp (read the first JSONL record's `timestamp`, or derive
+from file mtime if unavailable).
 
-   b. Once the agent completes, run the merger:
+### 2c. For each main-session transcript, in order
 
-      ```bash
-      python3 ~/.claude/memory/lib/merger.py \
-        ~/.claude/memory/projects/PROJECT_NAME.json \
-        /tmp/tmp_delta_SESSION_ID.json
-      ```
-
-      The merge must succeed before the next session — the next
-      delta-extractor needs the updated `{project}.json` as its input.
-
-   c. (Optional) Remove `/tmp/tmp_delta_SESSION_ID.json` after a successful
-      merge. The merger is idempotent per session_id, so leaving it is safe.
-
-3. **Render once per project**, after all deltas for that project have
-   merged:
-
-   ```bash
-   python3 ~/.claude/memory/lib/renderer.py \
-     ~/.claude/memory/projects/PROJECT_NAME.json \
-     ~/.claude/memory/projects/PROJECT_NAME.narrative.md
-   ```
-
-4. **Store the narrative memory**: read the rendered markdown and call:
+1. Spawn the `delta-extractor` agent with the session's inputs. Wait for it
+   to finish and write its delta JSON before proceeding.
 
    ```
-   memory_store(
-     type="narrative",
-     project="PROJECT_NAME",
-     content=<contents of PROJECT_NAME.narrative.md>,
-     transcript_ref=[<all transcript paths now processed>]
+   Agent(
+     description="Delta PROJECT: SESSION_ID",
+     subagent_type="delta-extractor",
+     prompt="""Project: PROJECT_NAME
+   conversation_md_path: ~/.claude/memory/conversations/SESSION_ID.md
+   project_state_path:   ~/.claude/memory/projects/PROJECT_NAME.json
+   session_id:           SESSION_ID
+   session_started_at:   ISO8601_START
+   session_ended_at:     ISO8601_END
+   output_path:          /tmp/tmp_delta_SESSION_ID.json
+
+   Read the project state JSON and the conversation markdown. Produce the
+   structured delta per your prompt spec and write it as JSON (only) to
+   output_path. Do not modify the project state — the merger does that.
+   Do NOT use worktree isolation. Do NOT commit anything.""",
+     run_in_background=False
    )
    ```
 
-   This creates a new narrative row that supersedes the prior one.
+2. Once the agent completes, run the merger:
 
-### Path B — legacy pipeline (no `{project}.json`)
+   ```bash
+   python3 ~/.claude/memory/lib/merger.py \
+     ~/.claude/memory/projects/PROJECT_NAME.json \
+     /tmp/tmp_delta_SESSION_ID.json
+   ```
 
-Use the existing `narrative-updater` agent. One agent per transcript,
-sequential within the project. This is the v1 path; a future backfill will
-migrate the project to Path A.
+   The merge must succeed before launching the next delta-extractor for this
+   project — the next agent reads the updated `{project}.json` as input.
+
+3. (Optional) Remove `/tmp/tmp_delta_SESSION_ID.json` after a successful
+   merge. The merger is idempotent per session_id, so leaving it is safe.
+
+### 2d. Render once per project
+
+After all deltas for the project have merged:
+
+```bash
+python3 ~/.claude/memory/lib/renderer.py \
+  ~/.claude/memory/projects/PROJECT_NAME.json \
+  ~/.claude/memory/projects/PROJECT_NAME.narrative.md
+```
+
+### 2e. Store the narrative memory
+
+Read the rendered markdown and call:
 
 ```
-Agent(
-  description="Narrate PROJECT: FILENAME",
-  subagent_type="narrative-updater",
-  prompt="""Project: PROJECT_NAME
-Project directory: /path/to/project (or best guess from project name)
-Current narrative UUID: UUID_FROM_COVERAGE_RESULT
-
-Process this ONE transcript file:
-  FILE_PATH
-
-Read the current narrative via memory_get, read this transcript, merge the new
-information, and store the updated narrative via memory_store with the updated
-transcript_ref array.
-
-File conventions: work in project dir, prefix temp files with tmp_, clean up when done.
-Do NOT use worktree isolation. Do NOT commit anything.""",
-  run_in_background=True
+memory_store(
+  type="narrative",
+  project="PROJECT_NAME",
+  content=<contents of PROJECT_NAME.narrative.md>,
+  transcript_ref=[<all transcript paths now processed>]
 )
 ```
 
-Wait for each agent to complete before spawning the next for the same project
-(each supersedes the prior narrative; carry the new UUID forward into the
-next prompt).
+This creates a new narrative row that supersedes the prior one.
 
 ## Step 3: Summary
 
@@ -152,8 +139,8 @@ When all projects finish, emit a compact summary:
 
 ```
 Narrative update complete:
-  - PROJECT_A (Path A): N session(s) processed -> ~/.claude/memory/projects/PROJECT_A.narrative.md
-  - PROJECT_B (Path B): M transcript(s) processed -> narrative memory UUID ...
+  - PROJECT_A: N session(s) processed -> ~/.claude/memory/projects/PROJECT_A.narrative.md
+  - PROJECT_B: M session(s) processed -> ~/.claude/memory/projects/PROJECT_B.narrative.md
   - PROJECT_C: no unprocessed transcripts
 ```
 

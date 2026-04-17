@@ -18,9 +18,10 @@ When a narrative approaches the cap, dissolve older content per the rules below.
 Each section has required fields, carry-forward rules, and validation checks.
 Full specs: **[narrative-section-specs.md](narrative-section-specs.md)**.
 
-The narrative-updater agent MUST validate each section against its spec before
-storing. If validation fails, fix and re-validate. After all sections, run the
-**cross-section diff check** (see section specs doc).
+The narrative pipeline (delta-extractor → merger → renderer) MUST produce
+sections that satisfy each spec. The renderer enforces the structure; the
+delta-extractor must extract enough signal per section to keep nothing silently
+dropped across updates. See section specs doc for per-section rules.
 
 ## Sections
 

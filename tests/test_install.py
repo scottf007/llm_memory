@@ -104,8 +104,8 @@ class TestSkillInstall:
 class TestAgentInstall:
     """Test that agent definitions are installed from lib to ~/.claude/agents/."""
 
-    def test_narrative_updater_exists_in_repo(self):
-        agent_path = REPO_DIR / "agents" / "narrative-updater.md"
+    def test_delta_extractor_exists_in_repo(self):
+        agent_path = REPO_DIR / "agents" / "delta-extractor.md"
         assert agent_path.exists(), f"Missing {agent_path}"
 
     def test_memory_aware_exists_in_repo(self):
@@ -114,7 +114,7 @@ class TestAgentInstall:
 
     def test_agent_has_frontmatter(self):
         """Agent files must have frontmatter with name and tools."""
-        for name in ["narrative-updater.md", "memory-aware.md"]:
+        for name in ["delta-extractor.md", "memory-aware.md"]:
             content = (REPO_DIR / "agents" / name).read_text()
             assert content.startswith("---"), f"{name} must start with frontmatter"
             assert "name:" in content, f"{name} missing name field"
@@ -135,7 +135,7 @@ class TestAgentInstall:
         """
         subprocess.run(["bash", "-c", script], check=True)
 
-        for name in ["narrative-updater.md", "memory-aware.md"]:
+        for name in ["delta-extractor.md", "memory-aware.md"]:
             installed = home / ".claude" / "agents" / name
             assert installed.exists(), f"Agent not installed at {installed}"
 

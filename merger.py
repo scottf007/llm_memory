@@ -63,6 +63,32 @@ def apply_delta(state: dict, delta: dict) -> dict:
     if any(s.get("session_id") == session_id for s in state.get("sessions", [])):
         return state
 
+    # Apply summary_delta — shallow merge into state.summary.
+    # Present keys overwrite; absent keys preserve existing values.
+    summary_delta = delta.get("summary_delta") or {}
+    if summary_delta:
+        state.setdefault("summary", {})
+        for k, v in summary_delta.items():
+            if v:  # only overwrite if non-empty
+                state["summary"][k] = v
+
+    # Apply operations_delta — upsert by item name.
+    # If an item already exists, update its detail. If not, append.
+    ops_delta = delta.get("operations_delta") or []
+    if ops_delta:
+        existing_ops = state.setdefault("operations", [])
+        existing_by_item = {row.get("item"): row for row in existing_ops if isinstance(row, dict)}
+        for new_row in ops_delta:
+            if not isinstance(new_row, dict):
+                continue
+            item = new_row.get("item")
+            if not item:
+                continue
+            if item in existing_by_item:
+                existing_by_item[item]["detail"] = new_row.get("detail", existing_by_item[item].get("detail", ""))
+            else:
+                existing_ops.append(dict(new_row))
+
     # Introduced items — mint new IDs, append.
     introduced = delta.get("ledger_delta", {}).get("introduced", {}) or {}
     intro_ids = {k: [] for k in LEDGER_KEYS}
