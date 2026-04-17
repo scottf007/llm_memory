@@ -84,7 +84,7 @@ from file mtime if unavailable).
    session_id:           SESSION_ID
    session_started_at:   ISO8601_START
    session_ended_at:     ISO8601_END
-   output_path:          /tmp/tmp_delta_SESSION_ID.json
+   output_path:          ~/.claude/memory/deltas/SESSION_ID.delta.json
 
    Read the project state JSON and the conversation markdown. Produce the
    structured delta per your prompt spec and write it as JSON (only) to
@@ -99,14 +99,16 @@ from file mtime if unavailable).
    ```bash
    python3 ~/.claude/memory/lib/merger.py \
      ~/.claude/memory/projects/PROJECT_NAME.json \
-     /tmp/tmp_delta_SESSION_ID.json
+     ~/.claude/memory/deltas/SESSION_ID.delta.json
    ```
 
    The merge must succeed before launching the next delta-extractor for this
    project — the next agent reads the updated `{project}.json` as input.
 
-3. (Optional) Remove `/tmp/tmp_delta_SESSION_ID.json` after a successful
-   merge. The merger is idempotent per session_id, so leaving it is safe.
+3. Before the first delta-extractor call for a run, ensure the deltas dir
+   exists: `mkdir -p ~/.claude/memory/deltas`. The merger is idempotent
+   per session_id, so leftover delta files are safe to keep — they're
+   useful for debugging if the render later looks wrong.
 
 ### 2d. Render once per project
 
