@@ -1190,46 +1190,83 @@ def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
 def _find_project_transcripts(project: str) -> set[str]:
     """Find all .jsonl transcript files on disk for a project.
 
-    Searches ~/.claude/projects/ directories, matching the project name
-    against directory names (handling hyphens/underscores).
+    Searches both ~/.claude/projects/ (live project dirs) and
+    ~/.claude/memory/transcripts/ (Syncthing'd archive). For the archive
+    dir, project ownership is determined by looking up each file's
+    session_id in the session_log memories table. Results are deduped
+    by session_id (stem) across both scans.
     """
-    projects_dir = Path.home() / ".claude" / "projects"
-    if not projects_dir.exists():
-        return set()
-
     # Normalize for matching: lowercase, strip hyphens/underscores
     def normalize(name: str) -> str:
         return name.lower().replace("-", "").replace("_", "")
 
     target = normalize(project)
     found: set[str] = set()
+    seen_sessions: set[str] = set()
 
-    for proj_dir in projects_dir.iterdir():
-        if not proj_dir.is_dir():
-            continue
-        # Extract project name from dir like "-home-scott-projects-cricket-manager"
-        dir_name = proj_dir.name
-        # Remove the path prefix (everything up to and including "projects-")
-        parts = dir_name.split("projects-", 1)
-        if len(parts) == 2:
-            dir_project = parts[1]
-        else:
-            dir_project = dir_name
-
-        if normalize(dir_project) != target:
-            # Also handle "general" which maps to bare "-home-scott-projects"
-            if not (project == "general" and dir_name.endswith("-projects") and not dir_project):
+    # Scan ~/.claude/projects/*/
+    projects_dir = Path.home() / ".claude" / "projects"
+    if projects_dir.exists():
+        for proj_dir in projects_dir.iterdir():
+            if not proj_dir.is_dir():
                 continue
+            # Extract project name from dir like "-home-scott-projects-cricket-manager"
+            dir_name = proj_dir.name
+            # Remove the path prefix (everything up to and including "projects-")
+            parts = dir_name.split("projects-", 1)
+            if len(parts) == 2:
+                dir_project = parts[1]
+            else:
+                dir_project = dir_name
 
-        # Collect main session transcripts
-        for jsonl in proj_dir.glob("*.jsonl"):
-            found.add(str(jsonl))
+            if normalize(dir_project) != target:
+                # Also handle "general" which maps to bare "-home-scott-projects"
+                if not (project == "general" and dir_name.endswith("-projects") and not dir_project):
+                    continue
 
-        # Collect subagent transcripts
-        subagents_dir = proj_dir / "subagents"
-        if subagents_dir.exists():
-            for jsonl in subagents_dir.glob("*.jsonl"):
+            # Collect main session transcripts
+            for jsonl in proj_dir.glob("*.jsonl"):
                 found.add(str(jsonl))
+                seen_sessions.add(jsonl.stem)
+
+            # Collect subagent transcripts
+            subagents_dir = proj_dir / "subagents"
+            if subagents_dir.exists():
+                for jsonl in subagents_dir.glob("*.jsonl"):
+                    found.add(str(jsonl))
+                    seen_sessions.add(jsonl.stem)
+
+    # Also scan ~/.claude/memory/transcripts/ for Syncthing'd archive files.
+    # These don't live in a project-named dir, so look up each file's
+    # session_id in the memories table to find its project.
+    archive_dir = Path.home() / ".claude" / "memory" / "transcripts"
+    if archive_dir.exists() and DB_PATH.exists():
+        conn = None
+        try:
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.row_factory = sqlite3.Row
+            for jsonl in archive_dir.glob("*.jsonl"):
+                if not jsonl.is_file():
+                    continue
+                session_id = jsonl.stem
+                if session_id in seen_sessions:
+                    continue
+                row = conn.execute(
+                    "SELECT project FROM memories "
+                    "WHERE type = 'session_log' AND session_id = ? "
+                    "AND (status IS NULL OR status != 'archived') "
+                    "LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    continue
+                if normalize(row["project"] or "") != target:
+                    continue
+                seen_sessions.add(session_id)
+                found.add(str(jsonl))
+        finally:
+            if conn is not None:
+                conn.close()
 
     return found
 
