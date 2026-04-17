@@ -88,6 +88,24 @@ def _project_from_cwd(cwd: str) -> str:
 
 def extract(jsonl_path: Path) -> str:
     session_id = jsonl_path.stem
+
+    # Short-circuit: subagent transcripts don't need their own .md extraction.
+    # Their full content is already captured in the parent session's transcript,
+    # and the raw JSONL is preserved on disk for inspection if needed.
+    if session_id.startswith("agent-"):
+        return (
+            "---\n"
+            f"session_id: {session_id}\n"
+            "agent_session: true\n"
+            "skipped: true\n"
+            f"raw: ~/.claude/memory/transcripts/{session_id}.jsonl\n"
+            "---\n"
+            "\n"
+            "_This is a subagent session. Full conversation is in the parent "
+            "session's transcript; raw JSONL is preserved at the path above "
+            "for inspection._\n"
+        )
+
     project = ""
     parent_session_id = None
     first_ts = None

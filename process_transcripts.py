@@ -473,7 +473,17 @@ def archive_transcript(path: Path, session_id: str) -> Path:
 
 def extract_conversation_md(jsonl_path: Path, session_id: str) -> Path:
     """Write the stripped conversation .md beside the archive. Idempotent —
-    skip if .md already exists and is at least as new as the JSONL."""
+    skip if .md already exists and is at least as new as the JSONL.
+
+    Subagent transcripts (session_id starts with 'agent-') are skipped
+    entirely — no .md is written. Their content lives in the parent
+    session's transcript, and leaving no .md prevents false positives
+    when walking CONVERSATIONS_DIR.
+    """
+    # Policy: skip subagent transcripts entirely — don't create any .md.
+    if session_id.startswith("agent-"):
+        return CONVERSATIONS_DIR / f"{session_id}.md"
+
     from extract_conversation import extract
 
     CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
