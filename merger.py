@@ -40,28 +40,53 @@ def _next_id(state: dict, kind: str) -> str:
     return f"{prefix}-{n:03d}"
 
 
-def _mark_touched(state: dict, kind: str, item_id: str, session_id: str) -> None:
-    for item in state.get(kind, []):
-        if item.get("id") == item_id:
-            item["last_touched_in"] = session_id
-            return
+def _session_ts(state: dict, session_id: str) -> str | None:
+    """Return the ended/started timestamp for a session_id, or None."""
+    for s in state.get("sessions", []):
+        if s.get("session_id") == session_id:
+            return s.get("ended") or s.get("started")
+    return None
 
 
-def _archive_item(state: dict, kind: str, item_id: str, session_id: str, reason: str) -> None:
+def _backfill_last_touched_at(state: dict) -> None:
+    """Populate last_touched_at on any item missing it, using
+    last_touched_in → introduced_in → state.last_updated as fallback chain.
+    Idempotent — a no-op after the first run."""
+    fallback = state.get("last_updated")
+    for kind in LEDGER_KEYS:
+        for item in state.get(kind, []):
+            if item.get("last_touched_at"):
+                continue
+            ts = (
+                _session_ts(state, item.get("last_touched_in", ""))
+                or _session_ts(state, item.get("introduced_in", ""))
+                or fallback
+            )
+            if ts:
+                item["last_touched_at"] = ts
+
+
+def _archive_item(state: dict, kind: str, item_id: str, session_id: str, ts: str, reason: str) -> None:
     for item in state.get(kind, []):
         if item.get("id") == item_id:
             item["status"] = "archived"
             item["archived_in"] = session_id
             item["archived_reason"] = reason
+            item["last_touched_in"] = session_id
+            item["last_touched_at"] = ts
             return
 
 
 def apply_delta(state: dict, delta: dict) -> dict:
     session_id = delta["session_id"]
+    session_ts = delta.get("ended") or delta.get("started") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     # Idempotency — skip if already merged.
     if any(s.get("session_id") == session_id for s in state.get("sessions", [])):
         return state
+
+    # Backfill last_touched_at on any existing items missing it (migration).
+    _backfill_last_touched_at(state)
 
     # Apply summary_delta — shallow merge into state.summary.
     # Present keys overwrite; absent keys preserve existing values.
@@ -100,11 +125,9 @@ def apply_delta(state: dict, delta: dict) -> dict:
             item["status"] = "active"
             item["introduced_in"] = session_id
             item["last_touched_in"] = session_id
+            item["last_touched_at"] = session_ts
             item["archived_in"] = None
             item["archived_reason"] = None
-            # Initialize cycles_pending on items that can stay open.
-            if kind in ("suggestions", "goals"):
-                item["cycles_pending"] = 0
             state[kind].append(item)
             intro_ids[kind].append(item["id"])
 
@@ -146,27 +169,29 @@ def apply_delta(state: dict, delta: dict) -> dict:
                         item["status"] = "archived"
                         item["archived_in"] = session_id
                         item["archived_reason"] = f"closed: {closed.get('evidence', '')}"
+                        item["last_touched_in"] = session_id
+                        item["last_touched_at"] = session_ts
                         res_summary["closed"].append(resolved)
 
     for archived in resolutions.get("archived", []) or []:
         resolved = _resolve_id(archived.get("id", ""), archived.get("text", ""), LEDGER_KEYS)
         if resolved:
             for kind in LEDGER_KEYS:
-                _archive_item(state, kind, resolved, session_id, archived.get("reason", ""))
+                _archive_item(state, kind, resolved, session_id, session_ts, archived.get("reason", ""))
             res_summary["archived"].append(resolved)
 
     for rejected in resolutions.get("rejected", []) or []:
         resolved = _resolve_id(rejected.get("id", ""), rejected.get("text", ""), ("suggestions", "goals"))
         if resolved:
             for kind in ("suggestions", "goals"):
-                _archive_item(state, kind, resolved, session_id, f"rejected: {rejected.get('reason', '')}")
+                _archive_item(state, kind, resolved, session_id, session_ts, f"rejected: {rejected.get('reason', '')}")
             res_summary["rejected"].append(resolved)
 
     for contradiction in resolutions.get("contradictions", []) or []:
         resolved = _resolve_id(contradiction.get("id", ""), contradiction.get("text", ""), LEDGER_KEYS)
         if resolved:
             for kind in LEDGER_KEYS:
-                _archive_item(state, kind, resolved, session_id, f"contradicted by new decision: {contradiction.get('by_decision_text', '')}")
+                _archive_item(state, kind, resolved, session_id, session_ts, f"contradicted by new decision: {contradiction.get('by_decision_text', '')}")
             res_summary["contradictions"].append(resolved)
 
     for drift in resolutions.get("drift", []) or []:
@@ -196,18 +221,6 @@ def apply_delta(state: dict, delta: dict) -> dict:
     for s in state["sessions"][:-1]:
         if "resume_excerpt" in s:
             s.pop("resume_excerpt", None)
-
-    # Increment cycles_pending on every active suggestion/goal that survived this
-    # session without being introduced or resolved. Items introduced this session
-    # stay at 0 (just initialized above); items resolved are no longer active.
-    for kind in ("suggestions", "goals"):
-        for item in state.get(kind, []):
-            if item.get("status") != "active":
-                continue
-            if item.get("introduced_in") == session_id:
-                # Just introduced — leave at 0.
-                continue
-            item["cycles_pending"] = (item.get("cycles_pending") or 0) + 1
 
     state["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return state

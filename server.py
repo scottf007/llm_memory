@@ -702,6 +702,53 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["uuid"],
             },
         ),
+        types.Tool(
+            name="resume",
+            description="Return the last real session's journal and conversation tail for a project. "
+            "Call this when picking up where a previous session left off — the narrative itself only "
+            "carries a pointer to avoid bloating session_start context. Agents typically don't need this.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project name, e.g. 'llm_memory'",
+                    },
+                    "lines": {
+                        "type": "integer",
+                        "description": "Conversation-tail lines to include (default 150)",
+                    },
+                },
+                "required": ["project"],
+            },
+        ),
+        types.Tool(
+            name="project_lookup",
+            description="Fuzzy-search a project's ledger (decisions, learnings, done, goals, suggestions) "
+            "for items matching a query. Use this to drill into the full history without loading the whole "
+            "project JSON. Searches text, rationale, evidence, quote, and tags. Returns both active and "
+            "archived items by default so historical context stays reachable.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "Project name, e.g. 'llm_memory'"},
+                    "query": {"type": "string", "description": "Search query — space-separated keywords"},
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional filter: 'decisions', 'learnings', 'done', 'goals', 'suggestions'",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional filter: 'active' or 'archived' (default: both)",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 10, cap 50)",
+                    },
+                },
+                "required": ["project", "query"],
+            },
+        ),
     ]
 
 
@@ -729,6 +776,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
             "memory_explore": _handle_explore,
             "memory_delete": _handle_delete,
             "narrative_coverage": _handle_narrative_coverage,
+            "resume": _handle_resume,
+            "project_lookup": _handle_project_lookup,
         }
         handler = handlers.get(name)
         if not handler:
@@ -1355,6 +1404,166 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         }, indent=2))
     finally:
         conn.close()
+
+
+# -- resume ----------------------------------------------------------------
+
+def _handle_resume(args: dict[str, Any]) -> list[types.TextContent]:
+    project = (args.get("project") or "").strip()
+    lines_wanted = args.get("lines", 150) or 150
+    if not project:
+        return _error("project is required")
+
+    state_path = DB_DIR / "projects" / f"{project}.json"
+    if not state_path.exists():
+        return _error(f"no project state at {state_path}")
+
+    try:
+        state = json.loads(state_path.read_text())
+    except Exception as exc:
+        return _error(f"failed to read state: {exc}")
+
+    # Skip synthetic sessions (audit-*, agent-*) — same rule as the renderer.
+    sessions = [
+        s for s in state.get("sessions", [])
+        if s.get("status") == "active"
+        and not (s.get("session_id") or "").startswith(("audit-", "agent-"))
+    ]
+    sessions.sort(key=lambda s: s.get("started", ""))
+    if not sessions:
+        return _text(json.dumps({"project": project, "status": "no_sessions"}, indent=2))
+
+    last = sessions[-1]
+    sid = last.get("session_id", "")
+    journal = (last.get("journal") or "").strip()
+    closure = last.get("closure_status") or "unknown"
+
+    conv_rel = last.get("conversation_md") or ""
+    conv_path = Path(conv_rel.replace("~", str(Path.home())))
+    excerpt = ""
+    if conv_path.exists():
+        try:
+            text = conv_path.read_text(errors="replace")
+            excerpt = "\n".join(text.splitlines()[-lines_wanted:])
+        except Exception as exc:
+            excerpt = f"(failed to read conversation.md: {exc})"
+    else:
+        excerpt = f"(conversation.md not found at {conv_path})"
+
+    result = {
+        "project": project,
+        "session_id": sid,
+        "started": last.get("started"),
+        "ended": last.get("ended"),
+        "closure_status": closure,
+        "topic": last.get("topic", ""),
+        "journal": journal,
+        "conversation_tail_lines": lines_wanted,
+        "conversation_tail": excerpt,
+    }
+    return _text(json.dumps(result, indent=2))
+
+
+# -- project_lookup --------------------------------------------------------
+
+_LEDGER_KINDS = ("decisions", "learnings", "done", "goals", "suggestions")
+
+
+def _item_searchable_text(item: dict) -> str:
+    parts = [
+        item.get("text", ""),
+        item.get("rationale", ""),
+        item.get("evidence", "") if isinstance(item.get("evidence"), str) else " ".join(item.get("evidence") or []),
+        item.get("quote", ""),
+        item.get("progress", ""),
+        item.get("archived_reason", ""),
+        " ".join(item.get("tags") or []) if isinstance(item.get("tags"), list) else (item.get("tags") or ""),
+    ]
+    return " ".join(p for p in parts if p).lower()
+
+
+def _handle_project_lookup(args: dict[str, Any]) -> list[types.TextContent]:
+    project = (args.get("project") or "").strip()
+    query = (args.get("query") or "").strip()
+    kind_filter = (args.get("kind") or "").strip() or None
+    status_filter = (args.get("status") or "").strip() or None
+    limit = min(int(args.get("limit", 10) or 10), 50)
+
+    if not project:
+        return _error("project is required")
+    if not query:
+        return _error("query is required")
+    if kind_filter and kind_filter not in _LEDGER_KINDS:
+        return _error(f"kind must be one of: {', '.join(_LEDGER_KINDS)}")
+    if status_filter and status_filter not in ("active", "archived"):
+        return _error("status must be 'active' or 'archived'")
+
+    state_path = DB_DIR / "projects" / f"{project}.json"
+    if not state_path.exists():
+        return _error(f"no project state at {state_path}")
+    try:
+        state = json.loads(state_path.read_text())
+    except Exception as exc:
+        return _error(f"failed to read state: {exc}")
+
+    # Tokenize query. Keep tokens of length >= 2.
+    tokens = [t.lower() for t in query.split() if len(t) >= 2]
+    if not tokens:
+        return _error("query must contain at least one token of length >= 2")
+
+    kinds = (kind_filter,) if kind_filter else _LEDGER_KINDS
+
+    # Score each item: sum of token occurrences across searchable fields.
+    # Tie-break by importance (load_bearing > standard > minor) then by last_touched_at desc.
+    imp_rank = {"load_bearing": 3, "standard": 2, "minor": 1}
+
+    scored: list[tuple[float, dict, str]] = []
+    for kind in kinds:
+        for item in state.get(kind, []):
+            if status_filter and item.get("status", "active") != status_filter:
+                continue
+            text = _item_searchable_text(item)
+            if not text:
+                continue
+            hits = sum(text.count(tok) for tok in tokens)
+            if hits == 0:
+                continue
+            # Bonus for matches in the primary text field (first 200 chars weighted 2x).
+            primary = (item.get("text") or "").lower()
+            primary_hits = sum(primary.count(tok) for tok in tokens)
+            score = hits + primary_hits
+            # Importance tiebreak baked into score.
+            score += 0.01 * imp_rank.get(item.get("importance") or "standard", 2)
+            scored.append((score, item, kind))
+
+    scored.sort(key=lambda x: (-x[0], -(imp_rank.get(x[1].get("importance") or "standard", 2)), x[1].get("last_touched_at") or ""))
+    top = scored[:limit]
+
+    results = []
+    for score, item, kind in top:
+        results.append({
+            "kind": kind,
+            "id": item.get("id"),
+            "status": item.get("status", "active"),
+            "importance": item.get("importance"),
+            "text": item.get("text"),
+            "rationale": item.get("rationale"),
+            "evidence": item.get("evidence"),
+            "quote": item.get("quote"),
+            "introduced_in": item.get("introduced_in"),
+            "last_touched_in": item.get("last_touched_in"),
+            "last_touched_at": item.get("last_touched_at"),
+            "archived_reason": item.get("archived_reason"),
+            "_score": round(score, 2),
+        })
+
+    return _text(json.dumps({
+        "project": project,
+        "query": query,
+        "total_hits": len(scored),
+        "returned": len(results),
+        "results": results,
+    }, indent=2))
 
 
 # ---------------------------------------------------------------------------

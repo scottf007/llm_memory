@@ -51,7 +51,7 @@ wrapping text, no commentary — the merger parses it as-is.
       "decisions":   [ { "text": "...", "rationale": "...", "quote": "optional verbatim", "importance": "load_bearing|standard|minor" } ],
       "goals":       [ { "text": "...", "progress": "optional short status" } ],
       "suggestions": [ { "text": "...", "originator": "claude|user" } ],
-      "learnings":   [ { "text": "...", "evidence": "optional" } ],
+      "learnings":   [ { "text": "...", "evidence": "optional", "importance": "load_bearing|standard|minor" } ],
       "done":        [ { "text": "...", "commit": "optional sha or null", "importance": "load_bearing|standard|minor" } ]
     },
     "resolutions": {
@@ -84,17 +84,36 @@ the arrays. **Always use existing IDs** when referring to prior items in
 3. **Don't re-introduce existing items.** If the session reaffirmed
    `dec-004`, do nothing — the merger updates `last_touched_in` from the
    session_id automatically. Introducing a duplicate creates drift.
-4. **Exhaustive closure check is mandatory.** Iterate over EVERY active
-   goal and suggestion in the prior `{project}.json`. For each, ask: does
-   this session's conversation show evidence it was completed? If yes →
-   add to `resolutions.closed` with a short evidence string (quote or
-   paraphrase from the conversation). If no → leave it active. If unclear
-   → leave it active (conservative — don't auto-close ambiguous cases).
-   Do not wait for Scott to say "that closes goal-X"; evidence of work
-   landing counts: commit SHAs quoted back, `53/53 tests passing`,
-   `commit bfd069f pushed`, files written, features demonstrated working.
-   Never drop an item silently — if it's truly irrelevant, mark it
-   `archived` with a reason. The merger will not touch items the delta
+4. **Exhaustive closure check is mandatory — covers ALL item types.**
+   Iterate over EVERY active `goal`, `suggestion`, `decision`, `learning`,
+   and `done` item in the prior `{project}.json`. Run two passes:
+
+   **Pass A — completion closure (goals & suggestions).** Does this
+   session's work show the goal/suggestion was completed? If yes → add to
+   `resolutions.closed` with a short evidence string. Don't wait for Scott
+   to say "that closes goal-X" — evidence of work landing counts: commit
+   SHAs quoted back, `53/53 tests passing`, `commit bfd069f pushed`, files
+   written, features demonstrated working.
+
+   **Pass B — currency check (decisions, learnings, done).** Is this item
+   still current? An item is NOT current if:
+   - A new decision introduced this session reverses, replaces, or supersedes
+     it (use `resolutions.contradictions` for decision-vs-decision).
+   - The code or architecture has changed such that the item no longer
+     applies (e.g. a "done" item fixing a bug in a file that's been rewritten
+     from scratch — archive the bug-fix done item).
+   - The evidence that motivated a learning no longer holds (e.g. a learning
+     about a tool's quirks when the tool has been replaced).
+   If NOT current → add to `resolutions.archived` with a reason. You are
+   NOT required to find an explicit contradiction — if this session's work
+   reveals an older item is obsolete, archive it.
+
+   Conservative default for both passes: when unclear, leave the item
+   active. Don't auto-archive ambiguous cases. But DO archive clear-cut
+   ones — silent accumulation across sessions is worse than a borderline
+   false-archive (which can be un-archived later).
+
+   Never drop an item silently. The merger will not touch items the delta
    doesn't mention.
 5. **Categorize strictly.** `decisions[]` is for architectural choices
    only — the shape of the system, approaches picked or reversed,
@@ -106,13 +125,55 @@ the arrays. **Always use existing IDs** when referring to prior items in
    operations block. Ask: "would a future Claude need this to understand
    the shape of the system?" If no, it's not a decision. If it's specific
    work that shipped, it's a done item.
-6. **Tag `importance` on decisions and done items.** Default is `standard`.
-   Use `load_bearing` when the item is foundational — a Scott quote drives
-   it, it reverses or shapes the architecture, a future Claude needs it
-   to orient. Use `minor` for conventions, install hygiene, README polish,
-   small fixes. Aim for ~10-20% `load_bearing`, ~60% `standard`, ~20-30%
-   `minor`. If most of your items are `load_bearing`, you're grading
-   too loosely.
+6. **Grade `importance` via the three-part filter.** Every decision,
+   learning, and done item gets an `importance` of `load_bearing`,
+   `standard`, or `minor`. Grade by running three tests.
+
+   An item is `load_bearing` **only if ALL THREE hold**:
+
+   - **Design-shaping** — does this shape how the product thinks or
+     behaves? Or is it maintenance that keeps it running? A bug fix, a
+     dedup path patch, a README polish is NOT design-shaping even when
+     urgent at the time.
+   - **Non-obvious** — would a future Claude re-derive this from reading
+     the current code? If yes, it's obvious — not load_bearing.
+   - **Current** — does this still match the state of the codebase today?
+     A decision that was reversed or an approach that was abandoned is
+     not current; it should be archived via Rule 4, not graded high.
+
+   If all three hold → `load_bearing`. The renderer will always show it.
+
+   If the item is meaningful but fails at least one test (e.g. still
+   current and non-obvious but just plumbing, not design-shaping) →
+   `standard`. The renderer shows it while recent, dissolves it over
+   time as its relevance score decays.
+
+   If it's plumbing hygiene, install fix, README polish, a once-and-done
+   bug fix, or any convention a future Claude can read off the code →
+   `minor`. The renderer collapses these into summary counts.
+
+   **Target distribution: ~10-15% load_bearing, ~40-50% standard, ~40-50%
+   minor.** If more than 20% of your items are load_bearing you're
+   over-grading — run them through the three tests again.
+
+   **Negative examples (NOT load_bearing):**
+   - "Fixed hooks dedup filter checking wrong path" — plumbing fix, once-
+     and-done, future Claude reads the current code. `minor`.
+   - "GitHub tokens accidentally exposed in conversation" — process
+     incident, plumbing. `minor` learning.
+   - "Increased SessionStart timeout 5s → 15s" — tuning fix, once-and-
+     done. `minor`.
+   - "MCP server restart required for schema changes" — was a learning
+     when first hit; now obvious once you understand stdio MCP. `minor`
+     or archived.
+
+   **Positive examples (load_bearing):**
+   - "MCP server name is `llm_memory` not `memory` to avoid collision
+     with built-in" — design-shaping, non-obvious, current. Forever.
+   - "JSONL transcripts are source of truth, not chunk summaries" —
+     architectural pivot, non-obvious, current. `load_bearing`.
+   - "Records are JSON files on disk, SQLite is derived index" —
+     shapes the whole storage layer. `load_bearing`.
 7. **Preserve Scott's voice.** For decisions and suggestions include his
    verbatim quote in `quote` when available. For rejections use his words
    as the reason.
@@ -176,10 +237,13 @@ explicitly rejected by Scott, was superseded by a new decision, or where
 the session drifted from its opening topic.
 
 Run the **exhaustive closure pass** described in Rule 4 — iterate every
-active goal and suggestion from prior state, decide
-closed-by-this-session / still-open / unclear, and add closures with
-evidence. This is separate from the resolution pass above; it's a
-dedicated sweep for completion recognition.
+active `goal`, `suggestion`, `decision`, `learning`, and `done` from prior
+state. Pass A: for goals and suggestions, decide closed / still-open /
+unclear and emit `resolutions.closed` with evidence. Pass B: for decisions,
+learnings, and done, decide still-current / no-longer-current / unclear
+and emit `resolutions.archived` with a reason for items that aren't
+current anymore. This is separate from the introductions pass above —
+it's a dedicated sweep for pruning stale state.
 
 Draft the journal (2-4 paragraphs). Choose `closure_status`. Read the
 tail ~50-200 lines of conversation.md and set `resume_excerpt_lines` to

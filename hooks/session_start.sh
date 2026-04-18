@@ -33,15 +33,26 @@ if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-upd
     fi
 fi
 
-# Sweep: collect transcripts not yet captured by hooks
+# Sweep: collect transcripts not yet captured by hooks.
+# Only look at JSONL files modified since the last sweep (sentinel mtime).
+# This keeps startup fast on machines with thousands of accumulated transcripts.
 if [ "$SOURCE" != "compact" ]; then
     TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
+    SENTINEL="$TRANSCRIPT_DIR/.last_sweep"
     mkdir -p "$TRANSCRIPT_DIR"
-    for src in "$HOME/.claude/projects"/*/*.jsonl; do
-        [ -f "$src" ] || continue
-        base=$(basename "$src")
+    if [ -f "$SENTINEL" ]; then
+        # Incremental: only files newer than the sentinel.
+        FIND_ARGS=(-newer "$SENTINEL")
+    else
+        # First run: full sweep.
+        FIND_ARGS=()
+    fi
+    while IFS= read -r src; do
+        [ -n "$src" ] || continue
+        base="${src##*/}"
         [ -f "$TRANSCRIPT_DIR/$base" ] || cp "$src" "$TRANSCRIPT_DIR/$base" 2>/dev/null
-    done
+    done < <(find "$HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -type f "${FIND_ARGS[@]}" 2>/dev/null)
+    touch "$SENTINEL"
 fi
 
 DB="$HOME/.claude/memory/memory.db"
@@ -70,7 +81,13 @@ fi
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
-        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        # Prefer the rendered .narrative.md file; fall back to DB record.
+        NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        if [ -f "$NARRATIVE_FILE" ]; then
+            NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
+        else
+            NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        fi
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
         # Check if narrative is stale
         NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
@@ -107,7 +124,14 @@ if [ "$SOURCE" = "compact" ]; then
 else
     # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
-        NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        # Prefer the rendered .narrative.md file (built by renderer from {project}.json).
+        # Fall back to the memory DB record if the file isn't there yet.
+        NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        if [ -f "$NARRATIVE_FILE" ]; then
+            NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
+        else
+            NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+        fi
         NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
         LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
 
