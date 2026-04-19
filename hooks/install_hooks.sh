@@ -71,8 +71,14 @@ hook_configs = {
             'hooks': [{
                 'type': 'command',
                 'command': f'{hooks_dir}/session_end.sh',
-                'timeout': 10,
-                'async': True
+                # SessionEnd MUST be synchronous. When async, Claude exits as
+                # soon as the hook launches and the python subprocess that
+                # writes conversations/<sid>.md gets reaped before completing,
+                # silently dropping the session from the /narrative pipeline.
+                # This is especially visible for `claude --resume` chains where
+                # the final session has no follow-on session_start.sh sweep to
+                # recover from the missed SessionEnd.
+                'timeout': 30
             }]
         }
     ],
