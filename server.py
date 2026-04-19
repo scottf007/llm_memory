@@ -38,7 +38,7 @@ DB_DIR = Path.home() / ".claude" / "memory"
 DB_PATH = DB_DIR / "memory.db"
 RECORDS_DIR = DB_DIR / "records"
 
-VALID_TYPES = {"narrative", "note", "session_log"}
+VALID_TYPES: set[str] = set()  # retired — project JSONs are the source of truth
 VALID_RELATIONSHIPS = {"supersedes", "related_to"}
 
 SCHEMA = """
@@ -503,180 +503,43 @@ app = Server("llm-memory")
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
-            name="memory_store",
-            description="Store a memory. Types: 'narrative' (per-project living document), 'note' (atomic fact/decision/correction), 'session_log' (session record).",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "The memory content",
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "One of: narrative, note, session_log",
-                        "enum": list(VALID_TYPES),
-                    },
-                    "project": {
-                        "type": "string",
-                        "description": "Project name, e.g. 'finance_nexus'",
-                    },
-                    "session_id": {
-                        "type": "string",
-                        "description": "Current session ID",
-                    },
-                    "importance": {
-                        "type": "integer",
-                        "description": "1-10 importance scale (default 5)",
-                        "minimum": 1,
-                        "maximum": 10,
-                        "default": 5,
-                    },
-                    "transcript_ref": {
-                        "type": ["string", "array"],
-                        "description": "Transcript files processed to create this memory. "
-                        "Prefer a JSON array of full paths, e.g. "
-                        "['~/.claude/projects/-home-scott-projects-brine/abc123.jsonl']. "
-                        "Legacy string format also accepted.",
-                        "items": {"type": "string"},
-                    },
-                    "tags": {
-                        "type": "string",
-                        "description": "Comma-separated tags for searchability, e.g. 'correction, mcp-config'",
-                    },
-                    "connections": {
-                        "type": "array",
-                        "description": "Connections to existing memories",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "to_uuid": {"type": "string"},
-                                "relationship": {
-                                    "type": "string",
-                                    "enum": list(VALID_RELATIONSHIPS),
-                                },
-                            },
-                            "required": ["to_uuid", "relationship"],
-                        },
-                    },
-                },
-                "required": ["content", "type"],
-            },
-        ),
-        types.Tool(
             name="memory_search",
-            description="Full-text search across all memories. Returns snippets for narratives, full content for notes.",
+            description="Cross-project fuzzy search over per-project ledger items "
+            "(decisions/learnings/done/goals/suggestions). Queries the FTS5 index "
+            "built from ~/.claude/memory/items/. Use project_lookup for single-project "
+            "drill-down; use memory_search when you don't know which project a fact is in.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query",
+                        "description": "Search query — space-separated keywords",
                     },
                     "project": {
                         "type": "string",
-                        "description": "Filter by project",
+                        "description": "Optional: filter to a single project",
                     },
-                    "type": {
+                    "kind": {
                         "type": "string",
-                        "description": "Filter by type",
-                        "enum": list(VALID_TYPES),
+                        "description": "Optional: 'decisions', 'learnings', 'done', 'goals', 'suggestions'",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Optional: 'active' (default) or 'archived'",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Max results (default 10)",
-                        "default": 10,
+                        "description": "Max results (default 20)",
+                        "default": 20,
                     },
                 },
                 "required": ["query"],
             },
         ),
         types.Tool(
-            name="memory_recent",
-            description="Get most recent memories.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "project": {
-                        "type": "string",
-                        "description": "Filter by project",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Max results (default 10)",
-                        "default": 10,
-                    },
-                    "type": {
-                        "type": "string",
-                        "description": "Filter by type",
-                        "enum": list(VALID_TYPES),
-                    },
-                },
-                "required": [],
-            },
-        ),
-        types.Tool(
-            name="memory_get",
-            description="Get a specific memory by UUID with its connections.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "uuid": {
-                        "type": "string",
-                        "description": "Memory UUID (32-char hex string)",
-                    },
-                },
-                "required": ["uuid"],
-            },
-        ),
-        types.Tool(
-            name="memory_connect",
-            description="Create a connection between two memories. Use 'supersedes' for narrative versions, 'related_to' for linked notes.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "from_uuid": {
-                        "type": "string",
-                        "description": "Source memory UUID",
-                    },
-                    "to_uuid": {
-                        "type": "string",
-                        "description": "Target memory UUID",
-                    },
-                    "relationship": {
-                        "type": "string",
-                        "description": "One of: supersedes, related_to",
-                        "enum": list(VALID_RELATIONSHIPS),
-                    },
-                },
-                "required": ["from_uuid", "to_uuid", "relationship"],
-            },
-        ),
-        types.Tool(
-            name="memory_explore",
-            description="Explore connections from a starting memory.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "uuid": {
-                        "type": "string",
-                        "description": "Starting memory UUID",
-                    },
-                    "depth": {
-                        "type": "integer",
-                        "description": "How many hops to traverse (max 3, default 1)",
-                        "minimum": 1,
-                        "maximum": 3,
-                        "default": 1,
-                    },
-                },
-                "required": ["uuid"],
-            },
-        ),
-        types.Tool(
             name="narrative_coverage",
-            description="Check which transcript files have been processed into a project's narrative. "
-            "Compares on-disk .jsonl files against the narrative's transcript_ref field.",
+            description="Return merged vs unprocessed session transcripts for a project. "
+            "Compares on-disk session files against {project}.json.sessions[].",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -686,20 +549,6 @@ async def list_tools() -> list[types.Tool]:
                     },
                 },
                 "required": ["project"],
-            },
-        ),
-        types.Tool(
-            name="memory_delete",
-            description="Delete a memory and its connections.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "uuid": {
-                        "type": "string",
-                        "description": "Memory UUID to delete",
-                    },
-                },
-                "required": ["uuid"],
             },
         ),
         types.Tool(
@@ -768,11 +617,7 @@ def _error(message: str) -> list[types.TextContent]:
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     try:
         handlers = {
-            "memory_store": _handle_store,
             "memory_search": _handle_search,
-            "memory_recent": _handle_recent,
-            "memory_get": _handle_get,
-            "memory_connect": _handle_connect,
             "memory_explore": _handle_explore,
             "memory_delete": _handle_delete,
             "narrative_coverage": _handle_narrative_coverage,
@@ -810,40 +655,20 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
     if not (1 <= importance <= 10):
         return _error("importance must be between 1 and 10")
 
-    # Narratives require a non-empty project
-    if mem_type == "narrative" and not (project and project.strip()):
-        return _error("Narratives require a non-empty project")
-
     conn = get_db()
     try:
-        # Deduplication: skip if similar content stored in the last hour
-        # (skip for narratives — they're meant to be updated)
-        if mem_type != "narrative":
-            existing = conn.execute(
-                "SELECT uuid FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
-                "AND created_at > datetime('now', '-1 hour')",
-                (content,),
-            ).fetchone()
-            if existing:
-                return _text(json.dumps({
-                    "uuid": existing["uuid"],
-                    "status": "duplicate_skipped",
-                    "message": "Similar memory already stored recently"
-                }, indent=2))
-
-        # Narrative uniqueness: find any existing active narrative for this project.
-        # The old one will be archived (status='archived') after the new one is stored,
-        # rather than deleted — this preserves recoverable history in case the new
-        # narrative was generated as a broken/skeleton record.
-        old_narrative_uuid = None
-        if mem_type == "narrative":
-            old_row = conn.execute(
-                "SELECT uuid FROM memories WHERE type = 'narrative' AND project = ? "
-                "AND (status IS NULL OR status = 'active')",
-                (project,),
-            ).fetchone()
-            if old_row:
-                old_narrative_uuid = old_row["uuid"]
+        # Deduplication: skip if similar content stored in the last hour.
+        existing = conn.execute(
+            "SELECT uuid FROM memories WHERE substr(content, 1, 100) = substr(?, 1, 100) "
+            "AND created_at > datetime('now', '-1 hour')",
+            (content,),
+        ).fetchone()
+        if existing:
+            return _text(json.dumps({
+                "uuid": existing["uuid"],
+                "status": "duplicate_skipped",
+                "message": "Similar memory already stored recently"
+            }, indent=2))
 
         uuid = generate_uuid()
         created_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -863,13 +688,6 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
             "connections": [],
         }
 
-        # If superseding an old narrative, record it in the new record's connections
-        if old_narrative_uuid:
-            record["connections"].append({
-                "to_uuid": old_narrative_uuid,
-                "relationship": "supersedes",
-            })
-
         # Process connections for the record file
         for link in connections:
             to_uuid = link.get("to_uuid")
@@ -883,21 +701,6 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
                         "to_uuid": to_uuid,
                         "relationship": relationship,
                     })
-
-        # Archive the old narrative (file + DB) before storing the new one.
-        # Archiving (vs deleting) preserves recoverable history — if the new
-        # narrative is a broken/skeleton record, the old content is still on disk
-        # and in the DB, just hidden from default queries.
-        if old_narrative_uuid:
-            old_record = read_record_file(old_narrative_uuid)
-            if old_record is not None:
-                old_record["status"] = "archived"
-                old_record["archived_in"] = uuid
-                write_record_file(old_record)
-            conn.execute(
-                "UPDATE memories SET status = 'archived' WHERE uuid = ?",
-                (old_narrative_uuid,),
-            )
 
         # Write file FIRST (source of truth), then DB
         record["status"] = "active"
@@ -930,50 +733,30 @@ def _handle_store(args: dict[str, Any]) -> list[types.TextContent]:
 def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
     query = args.get("query", "").strip()
     project = args.get("project")
-    mem_type = args.get("type")
-    limit = min(args.get("limit", 10), 100)
+    kind = args.get("kind")
+    status = args.get("status", "active")
+    limit = min(args.get("limit", 20), 100)
 
     if not query:
         return _error("query is required")
 
     fts_query = " ".join(f'"{token}"' for token in query.split() if token)
 
-    conn = get_db()
     try:
-        sql = (
-            "SELECT m.uuid, m.type, m.content, m.project, m.created_at, "
-            "m.importance, m.transcript_ref, m.tags "
-            "FROM memories_fts f "
-            "JOIN memories m ON m.rowid = f.rowid "
-            "WHERE memories_fts MATCH ? "
-            "AND (m.status IS NULL OR m.status != 'archived') "
+        sys.path.insert(0, str(Path(__file__).parent))
+        import indexer
+        results = indexer.search_items(
+            query=fts_query,
+            project=project,
+            kind=kind,
+            status=status,
+            limit=limit,
+            db_path=DB_PATH,
         )
-        params: list[Any] = [fts_query]
-
-        if project:
-            sql += "AND m.project = ? "
-            params.append(project)
-        if mem_type:
-            sql += "AND m.type = ? "
-            params.append(mem_type)
-
-        sql += "ORDER BY rank LIMIT ?"
-        params.append(limit)
-
-        rows = conn.execute(sql, params).fetchall()
+    except ImportError:
         results = []
-        for row in rows:
-            d = row_to_dict(row)
-            # For notes/session_logs: return full content (they're short)
-            # For narratives: truncate to 500 chars in search results
-            # (use memory_get for full content)
-            if d["type"] == "narrative" and len(d["content"]) > 500:
-                d["content"] = d["content"][:500] + "...\n[Use memory_get for full narrative]"
-            results.append(d)
 
-        return _text(json.dumps(results, indent=2))
-    finally:
-        conn.close()
+    return _text(json.dumps(results, indent=2))
 
 
 # -- memory_recent ---------------------------------------------------------
@@ -1237,15 +1020,12 @@ def _handle_delete(args: dict[str, Any]) -> list[types.TextContent]:
 # -- narrative_coverage ----------------------------------------------------
 
 def _find_project_transcripts(project: str) -> set[str]:
-    """Find all .jsonl transcript files on disk for a project.
+    """Return all .jsonl transcript files on disk for a project.
 
-    Searches both ~/.claude/projects/ (live project dirs) and
-    ~/.claude/memory/transcripts/ (Syncthing'd archive). For the archive
-    dir, project ownership is determined by looking up each file's
-    session_id in the session_log memories table. Results are deduped
-    by session_id (stem) across both scans.
+    Live sessions live under ~/.claude/projects/<dir>/ where <dir> encodes
+    the project. Archived sessions live under ~/.claude/memory/transcripts/
+    and are attributed to a project via their conversation.md frontmatter.
     """
-    # Normalize for matching: lowercase, strip hyphens/underscores
     def normalize(name: str) -> str:
         return name.lower().replace("-", "").replace("_", "")
 
@@ -1253,96 +1033,46 @@ def _find_project_transcripts(project: str) -> set[str]:
     found: set[str] = set()
     seen_sessions: set[str] = set()
 
-    # Scan ~/.claude/projects/*/
     projects_dir = Path.home() / ".claude" / "projects"
     if projects_dir.exists():
         for proj_dir in projects_dir.iterdir():
             if not proj_dir.is_dir():
                 continue
-            # Extract project name from dir like "-home-scott-projects-cricket-manager"
             dir_name = proj_dir.name
-            # Remove the path prefix (everything up to and including "projects-")
             parts = dir_name.split("projects-", 1)
-            if len(parts) == 2:
-                dir_project = parts[1]
-            else:
-                dir_project = dir_name
-
+            dir_project = parts[1] if len(parts) == 2 else dir_name
             if normalize(dir_project) != target:
-                # Also handle "general" which maps to bare "-home-scott-projects"
                 if not (project == "general" and dir_name.endswith("-projects") and not dir_project):
                     continue
-
-            # Collect main session transcripts
             for jsonl in proj_dir.glob("*.jsonl"):
                 found.add(str(jsonl))
                 seen_sessions.add(jsonl.stem)
-
-            # Collect subagent transcripts
             subagents_dir = proj_dir / "subagents"
             if subagents_dir.exists():
                 for jsonl in subagents_dir.glob("*.jsonl"):
                     found.add(str(jsonl))
                     seen_sessions.add(jsonl.stem)
 
-    # Also scan ~/.claude/memory/transcripts/ for Syncthing'd archive files.
-    # These don't live in a project-named dir, so look up each file's
-    # session_id in the memories table to find its project.
+    # Archive dir: derive project from the matching conversation.md frontmatter.
     archive_dir = Path.home() / ".claude" / "memory" / "transcripts"
-    if archive_dir.exists() and DB_PATH.exists():
-        conn = None
+    conv_dir = DB_DIR / "conversations"
+    if archive_dir.exists():
         try:
-            conn = sqlite3.connect(str(DB_PATH))
-            conn.row_factory = sqlite3.Row
-            for jsonl in archive_dir.glob("*.jsonl"):
-                if not jsonl.is_file():
-                    continue
-                session_id = jsonl.stem
-                if session_id in seen_sessions:
-                    continue
-                row = conn.execute(
-                    "SELECT project FROM memories "
-                    "WHERE type = 'session_log' AND session_id = ? "
-                    "AND (status IS NULL OR status != 'archived') "
-                    "LIMIT 1",
-                    (session_id,),
-                ).fetchone()
-                if row is None:
-                    continue
-                if normalize(row["project"] or "") != target:
-                    continue
-                seen_sessions.add(session_id)
+            from conversations import list_sessions as _list_sessions
+            project_sids = set(_list_sessions(project, conv_dir))
+        except ImportError:
+            project_sids = set()
+        for jsonl in archive_dir.glob("*.jsonl"):
+            if not jsonl.is_file():
+                continue
+            sid = jsonl.stem
+            if sid in seen_sessions:
+                continue
+            if sid in project_sids:
                 found.add(str(jsonl))
-        finally:
-            if conn is not None:
-                conn.close()
+                seen_sessions.add(sid)
 
     return found
-
-
-def _parse_transcript_ref(transcript_ref: str | None) -> set[str]:
-    """Parse transcript_ref field into a set of file paths.
-
-    Handles both JSON array format and legacy freeform string format.
-    """
-    if not transcript_ref:
-        return set()
-
-    # Try JSON array first
-    try:
-        parsed = json.loads(transcript_ref)
-        if isinstance(parsed, list):
-            return {str(p) for p in parsed}
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # Legacy freeform: comma-separated or newline-separated paths
-    refs: set[str] = set()
-    for part in transcript_ref.replace("\n", ",").split(","):
-        part = part.strip()
-        if part:
-            refs.add(part)
-    return refs
 
 
 def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
@@ -1350,60 +1080,68 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
     if not project:
         return _error("project is required")
 
-    conn = get_db()
-    try:
-        # Find the current (active, non-archived) narrative for this project
-        row = conn.execute(
-            "SELECT uuid, transcript_ref, created_at FROM memories "
-            "WHERE type = 'narrative' AND project = ? "
-            "AND (status IS NULL OR status != 'archived') "
-            "ORDER BY created_at DESC LIMIT 1",
-            (project,),
-        ).fetchone()
+    on_disk = _find_project_transcripts(project)
+    state_path = DB_DIR / "projects" / f"{project}.json"
+    narrative_path = DB_DIR / "projects" / f"{project}.narrative.md"
 
-        if not row:
-            on_disk = _find_project_transcripts(project)
-            return _text(json.dumps({
-                "project": project,
-                "narrative_uuid": None,
-                "status": "no_narrative",
-                "on_disk": sorted(on_disk),
-                "processed": [],
-                "unprocessed": sorted(on_disk),
-                "summary": f"No narrative exists. {len(on_disk)} transcript(s) on disk.",
-            }, indent=2))
+    # "Processed" is the set of main-session session_ids in {project}.json.sessions[].
+    merged_ids: set[str] = set()
+    state_exists = state_path.exists()
+    if state_exists:
+        try:
+            with state_path.open() as f:
+                state = json.load(f)
+            for session in state.get("sessions", []) or []:
+                sid = str(session.get("session_id") or "")
+                if sid and not sid.startswith(("agent-", "audit-")):
+                    merged_ids.add(sid)
+        except (OSError, json.JSONDecodeError):
+            pass
 
-        processed = _parse_transcript_ref(row["transcript_ref"])
-        on_disk = _find_project_transcripts(project)
+    # Map on-disk paths to session_ids.
+    on_disk_by_sid = {Path(p).stem: p for p in on_disk}
 
-        # Normalize paths for comparison (expand ~)
-        def expand(p: str) -> str:
-            return str(Path(p).expanduser())
+    unprocessed = [
+        p for sid, p in sorted(on_disk_by_sid.items()) if sid not in merged_ids
+    ]
 
-        processed_expanded = {expand(p) for p in processed}
-        on_disk_expanded = {expand(p) for p in on_disk}
+    narrative_mtime = None
+    if narrative_path.exists():
+        try:
+            narrative_mtime = datetime.fromtimestamp(
+                narrative_path.stat().st_mtime, tz=timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%S")
+        except OSError:
+            pass
 
-        unprocessed = on_disk_expanded - processed_expanded
-        # Also find processed refs that aren't on disk (stale refs)
-        stale = processed_expanded - on_disk_expanded
-
+    if not state_exists:
         return _text(json.dumps({
             "project": project,
-            "narrative_uuid": row["uuid"],
-            "narrative_updated": row["created_at"],
+            "status": "no_state",
             "on_disk_count": len(on_disk),
-            "processed_count": len(processed),
-            "unprocessed_count": len(unprocessed),
-            "unprocessed": sorted(unprocessed),
-            "stale_refs": sorted(stale) if stale else [],
+            "processed_count": 0,
+            "unprocessed_count": len(on_disk),
+            "unprocessed": sorted(on_disk),
             "summary": (
-                f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk."
-                if unprocessed else
-                f"All {len(on_disk)} transcript(s) are covered by the narrative."
+                f"No {project}.json yet. {len(on_disk)} transcript(s) on disk — "
+                "run /narrative to bootstrap."
             ),
         }, indent=2))
-    finally:
-        conn.close()
+
+    return _text(json.dumps({
+        "project": project,
+        "narrative_path": str(narrative_path) if narrative_path.exists() else None,
+        "narrative_updated": narrative_mtime,
+        "on_disk_count": len(on_disk),
+        "processed_count": len(merged_ids),
+        "unprocessed_count": len(unprocessed),
+        "unprocessed": unprocessed,
+        "summary": (
+            f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk."
+            if unprocessed else
+            f"All {len(on_disk)} transcript(s) are merged into the narrative."
+        ),
+    }, indent=2))
 
 
 # -- resume ----------------------------------------------------------------

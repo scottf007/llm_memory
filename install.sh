@@ -133,6 +133,10 @@ else
         cp "$EXTRACTED/server.py" "$LIB_DIR/"
         cp "$EXTRACTED/process_transcripts.py" "$LIB_DIR/"
         cp "$EXTRACTED/extract_conversation.py" "$LIB_DIR/"
+        cp "$EXTRACTED/conversations.py" "$LIB_DIR/"
+        cp "$EXTRACTED/indexer.py" "$LIB_DIR/"
+        cp "$EXTRACTED/migrate_item_ids.py" "$LIB_DIR/"
+        cp "$EXTRACTED/resolve_conflicts.py" "$LIB_DIR/"
         cp "$EXTRACTED/merger.py" "$LIB_DIR/" 2>/dev/null || true
         cp "$EXTRACTED/renderer.py" "$LIB_DIR/" 2>/dev/null || true
         cp "$EXTRACTED/dashboard.py" "$LIB_DIR/"
@@ -304,37 +308,54 @@ for src in "$HOME/.claude/projects"/*/*.jsonl; do
     [ -f "$MEMORY_DIR/transcripts/$base" ] || cp "$src" "$MEMORY_DIR/transcripts/$base" 2>/dev/null
 done
 
-# Process transcripts into session logs
+# Ensure every transcript has an archived copy and a conversation.md sibling.
 if [ "$QUIET" = false ]; then
     "$VENV_DIR/bin/python3" -c "
 import sys
 sys.path.insert(0, '$LIB_DIR')
-from process_transcripts import find_transcripts, extract_session_data
+from process_transcripts import find_transcripts
+from conversations import iter_sessions
 from collections import defaultdict
 
 transcripts = find_transcripts()
 if not transcripts:
     print('  No existing transcripts found.')
-    print('  Memories will be created as you use Claude Code.')
     sys.exit(0)
 
-projects = defaultdict(lambda: {'count': 0, 'turns': 0})
-for path, session_id in transcripts:
-    data = extract_session_data(path)
-    p = data['project']
-    projects[p]['count'] += 1
-    projects[p]['turns'] += data['turn_count']
-
+projects = defaultdict(int)
+for fm in iter_sessions():
+    projects[fm.get('project') or 'unknown'] += 1
 print(f'  Found {len(transcripts)} transcripts across {len(projects)} projects:')
-print()
 for name in sorted(projects):
-    info = projects[name]
-    print(f'    {name:25s} {info[\"count\"]:3d} sessions, {info[\"turns\"]:5d} turns')
+    print(f'    {name:25s} {projects[name]:3d} sessions')
 " 2>/dev/null
 fi
 
-"$VENV_DIR/bin/python3" "$LIB_DIR/process_transcripts.py" 2>/dev/null
-log "  Transcripts processed."
+"$VENV_DIR/bin/python3" "$LIB_DIR/process_transcripts.py" --quiet 2>/dev/null
+log "  Transcripts scanned."
+
+# Idempotent migration: rewrite integer-suffix item IDs to UUID suffixes.
+"$VENV_DIR/bin/python3" "$LIB_DIR/migrate_item_ids.py" 2>/dev/null || true
+
+# Fan out items from each {project}.json to ~/.claude/memory/items/ so they
+# can be synced and indexed, then rebuild the FTS5 index that memory_search
+# queries.
+"$VENV_DIR/bin/python3" -c "
+import sys, json
+sys.path.insert(0, '$LIB_DIR')
+from pathlib import Path
+from merger import fan_out_items
+import indexer
+projects_dir = Path.home() / '.claude' / 'memory' / 'projects'
+for p in sorted(projects_dir.glob('*.json')):
+    try:
+        state = json.loads(p.read_text())
+    except Exception:
+        continue
+    fan_out_items(state, p.stem)
+indexer.rebuild_items_index()
+" 2>/dev/null || true
+log "  Items fanned out and index rebuilt."
 
 # --- Convenience symlink for dashboard ---
 mkdir -p "$HOME/.local/bin"

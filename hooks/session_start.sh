@@ -81,38 +81,37 @@ fi
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
-        # Prefer the rendered .narrative.md file; fall back to DB record.
         NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
         if [ -f "$NARRATIVE_FILE" ]; then
             NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
         else
-            NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+            NARRATIVE=""
         fi
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        # Check if narrative is stale
-        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        if [ -n "$NARRATIVE_DATE" ]; then
-            COMPACT_NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
-        else
-            COMPACT_NEW_SESSIONS="0"
-        fi
+        # Staleness: session_logs for this project minus sessions already merged into {project}.json
+        COMPACT_NEW_SESSIONS=$(python3 -c "
+import sys, json, pathlib
+sys.path.insert(0, '$SCRIPT_DIR')
+from conversations import list_sessions
+proj='$PROJECT'
+logged=set(list_sessions(proj))
+try:
+    with open('$HOME/.claude/memory/projects/'+proj+'.json') as f: d=json.load(f)
+    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
+except FileNotFoundError:
+    merged=set()
+print(len(logged - merged))
+" 2>/dev/null)
+        COMPACT_NEW_SESSIONS=${COMPACT_NEW_SESSIONS:-0}
     else
         NARRATIVE=""
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
         COMPACT_NEW_SESSIONS="0"
     fi
-    if [ -n "$NARRATIVE" ] || [ -n "$NOTES" ]; then
+    if [ -n "$NARRATIVE" ]; then
         echo "=== POST-COMPACTION CONTEXT (auto-injected from llm_memory) ==="
         if [ -n "$PROJECT" ]; then
             echo "## Active project: $PROJECT"
         fi
-        if [ -n "$NARRATIVE" ]; then
-            echo "$NARRATIVE"
-        fi
-        if [ -n "$NOTES" ]; then
-            echo "## Important Notes:"
-            echo "$NOTES"
-        fi
+        echo "$NARRATIVE"
         if [ "$COMPACT_NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
             echo ""
             echo "AUTOMATIC TASK: $COMPACT_NEW_SESSIONS new session(s) since last narrative update for project '$PROJECT'."
@@ -124,28 +123,30 @@ if [ "$SOURCE" = "compact" ]; then
 else
     # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
-        # Prefer the rendered .narrative.md file (built by renderer from {project}.json).
-        # Fall back to the memory DB record if the file isn't there yet.
+        # Narrative source of truth is the rendered .narrative.md file.
         NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
         if [ -f "$NARRATIVE_FILE" ]; then
             NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
         else
-            NARRATIVE=$(sqlite3 "$DB" "SELECT content FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
+            NARRATIVE=""
         fi
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND project='$PROJECT' AND importance >= 6 AND (status IS NULL OR status != 'archived') ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
-
-        # Check if narrative needs updating (new session_logs since last narrative)
-        NARRATIVE_DATE=$(sqlite3 "$DB" "SELECT created_at FROM memories WHERE type='narrative' AND project='$PROJECT' AND (status IS NULL OR status != 'archived') ORDER BY created_at DESC LIMIT 1;" 2>/dev/null)
-        if [ -n "$NARRATIVE_DATE" ]; then
-            NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT' AND created_at > '$NARRATIVE_DATE';" 2>/dev/null)
-        else
-            NEW_SESSIONS=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
-        fi
+        # Staleness: count sessions that haven't been merged into {project}.json.sessions[]
+        NEW_SESSIONS=$(python3 -c "
+import sys, json, pathlib
+sys.path.insert(0, '$SCRIPT_DIR')
+from conversations import list_sessions
+proj='$PROJECT'
+logged=set(list_sessions(proj))
+try:
+    with open('$HOME/.claude/memory/projects/'+proj+'.json') as f: d=json.load(f)
+    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
+except FileNotFoundError:
+    merged=set()
+print(len(logged - merged))
+" 2>/dev/null)
+        NEW_SESSIONS=${NEW_SESSIONS:-0}
     else
         NARRATIVE=""
-        NOTES=$(sqlite3 -separator '|' "$DB" "SELECT uuid, substr(content, 1, 300), importance FROM memories WHERE type='note' AND importance >= 6 ORDER BY importance DESC, created_at DESC LIMIT 10;" 2>/dev/null)
-        LOGS=$(sqlite3 -separator '|' "$DB" "SELECT uuid, project, substr(content, 1, 200) FROM memories WHERE type='session_log' ORDER BY created_at DESC LIMIT 3;" 2>/dev/null)
         NEW_SESSIONS="0"
     fi
 
@@ -158,65 +159,52 @@ else
         echo "## Project Narrative:"
         echo "$NARRATIVE"
     fi
-    if [ -n "$LOGS" ]; then
-        echo "## Recent Sessions:"
-        echo "$LOGS"
-    fi
-    if [ -n "$NOTES" ]; then
-        echo "## Important Notes:"
-        echo "$NOTES"
-    fi
-
     # Determine what action is needed
     if [ -z "$NARRATIVE" ] && [ -n "$PROJECT" ]; then
-        # No narrative exists — count available transcripts
-        TRANSCRIPT_COUNT=$(ls "$HOME/.claude/memory/transcripts/"*.jsonl 2>/dev/null | wc -l)
-        SESSION_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE type='session_log' AND project='$PROJECT';" 2>/dev/null)
+        SESSION_COUNT=$(python3 -c "
+import sys; sys.path.insert(0, '$SCRIPT_DIR')
+from conversations import list_sessions
+print(len(list_sessions('$PROJECT')))
+" 2>/dev/null)
         if [ "$SESSION_COUNT" -gt "0" ] 2>/dev/null; then
             echo ""
             echo "AUTOMATIC TASK: No narrative exists for project '$PROJECT' but $SESSION_COUNT session(s) found."
-            echo "You MUST generate the project narrative NOW before doing anything else. Do not ask the user for permission."
-            echo "Use an Agent to do this in the background so the user is not blocked."
-            echo "Read the raw JSONL transcripts from ~/.claude/memory/transcripts/ for this project"
-            echo "and store the narrative with memory_store type='narrative', project='$PROJECT'. Use this format:"
-            echo ""
-            echo "  ## The Idea             — 2-3 sentences"
-            echo "  ## Approach             — table: non-obvious decision | rationale"
-            echo "  ## What's Done          — current state + key file paths"
-            echo "  ## What We've Learnt    — gotchas that could bite again"
-            echo "  ## What We Want To Do   — user-stated goals only"
-            echo "  ## Suggested Work       — Claude recommendations"
-            echo "  ## Resuming             — last piece of work, status: complete/interrupted"
-            echo "  ## Source Transcripts   — last 5-10 as lookup table + pointer to DB"
+            echo "You MUST run the /narrative skill NOW to bootstrap the project narrative. Do not ask the user for permission."
         fi
     elif [ "$NEW_SESSIONS" -gt "0" ] 2>/dev/null; then
         echo ""
         echo "AUTOMATIC TASK: $NEW_SESSIONS new session(s) since last narrative update for project '$PROJECT'."
-        echo "You MUST update the project narrative NOW. Do not ask the user for permission."
-        echo "Use an Agent to do this in the background so the user is not blocked."
+        echo "You MUST run the /narrative skill NOW. Do not ask the user for permission."
     fi
 
-    # Cross-project: find projects with no narrative OR stale narrative
-    # (only considering active narratives — archived ones don't count)
-    NEEDS_NARRATIVE=$(sqlite3 "$DB" "
-        SELECT DISTINCT project FROM memories
-        WHERE type='session_log' AND project != ''
-        AND (
-            project NOT IN (
-                SELECT DISTINCT project FROM memories
-                WHERE type='narrative' AND (status IS NULL OR status != 'archived')
-            )
-            OR project IN (
-                SELECT m.project FROM memories m
-                WHERE m.type='narrative' AND (m.status IS NULL OR m.status != 'archived')
-                GROUP BY m.project
-                HAVING MAX(m.created_at) < (
-                    SELECT MAX(s.created_at) FROM memories s
-                    WHERE s.type='session_log' AND s.project = m.project
-                )
-            )
-        )
-        ORDER BY project;" 2>/dev/null)
+    # Cross-project needs-narrative scan: iterate projects derived from
+    # conversation.md frontmatter, flag any without a rendered narrative or
+    # with session_logs outnumbering merged sessions in {project}.json.
+    NEEDS_NARRATIVE=$(python3 -c "
+import sys, json, pathlib
+sys.path.insert(0, '$SCRIPT_DIR')
+from conversations import iter_sessions
+home='$HOME'
+by_project = {}
+for fm in iter_sessions():
+    proj = fm.get('project')
+    if proj:
+        by_project.setdefault(proj, set()).add(fm.get('session_id'))
+needs=[]
+for proj, logged in sorted(by_project.items()):
+    narr=pathlib.Path(home+'/.claude/memory/projects/'+proj+'.narrative.md')
+    state=pathlib.Path(home+'/.claude/memory/projects/'+proj+'.json')
+    if not narr.exists():
+        needs.append(proj); continue
+    try:
+        d=json.loads(state.read_text())
+        merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
+    except FileNotFoundError:
+        merged=set()
+    if logged - merged:
+        needs.append(proj)
+print('\n'.join(needs))
+" 2>/dev/null)
     if [ -n "$NEEDS_NARRATIVE" ]; then
         OTHER_PROJECTS=""
         while IFS= read -r p; do
@@ -231,7 +219,7 @@ else
         fi
     fi
 
-    echo "Use memory_search/memory_get for more context. Use memory_store to save new memories."
+    echo "Use project_lookup for drill-down into the project JSON. Use resume(project) to pick up prior work."
     echo "=== END LOADED MEMORIES ==="
 fi
 

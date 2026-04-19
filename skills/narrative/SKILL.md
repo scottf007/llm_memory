@@ -11,16 +11,19 @@ living narrative document. Works across all projects automatically.
 
 One pipeline, no branching: each session becomes a structured delta
 (`delta-extractor` agent), deltas merge into a per-project JSON state
-(`merger.py`), and the state renders to markdown (`renderer.py`) which is then
-stored as a `narrative` memory. Projects that don't yet have a state JSON are
-bootstrapped with an empty stub — no legacy freeform path exists.
+(`merger.py`), and the state renders to markdown (`renderer.py`). The rendered
+`~/.claude/memory/projects/{project}.narrative.md` file is the narrative —
+there is no DB record, nothing to call `memory_store` with. Projects that
+don't yet have a state JSON are bootstrapped with an empty stub.
 
 ## Step 1: Discover work
 
 Call `narrative_coverage(project=PROJECT)` for the current project first, then
-for any other projects surfaced by the session_start hook or memory.
+for any other projects surfaced by the session_start hook. `narrative_coverage`
+computes unprocessed transcripts by diffing on-disk session_logs against
+`{project}.json.sessions[]` (i.e. sessions that have already been merged).
 
-To find all projects with session_logs:
+To enumerate all projects with session activity:
 
 ```bash
 sqlite3 ~/.claude/memory/memory.db "SELECT DISTINCT project FROM memories WHERE type='session_log' AND project <> '' ORDER BY project;"
@@ -36,25 +39,13 @@ files / narratives, so they can run simultaneously.
 **Within-project sequential**: each session's merged state feeds the next
 session's input. Never run two sessions for the same project in parallel.
 
-**Bootstrap vs. incremental — important**: there are two distinct
-transcript-selection paths, and picking the wrong one silently destroys
-narrative content. If `{project}.json` does NOT exist, this is a
-**first-time bootstrap** and you must process **every** main-session
-transcript the project has ever had (see 2a). If `{project}.json` already
-exists, this is an **incremental update** and you use `narrative_coverage`'s
-`unprocessed` list as normal. Why: `narrative_coverage` compares against the
-existing narrative memory record's `transcript_ref`. On first bootstrap
-there's no `{project}.json` yet, but an old legacy narrative memory record
-likely exists — so `narrative_coverage` will only report recent transcripts
-as unprocessed, and the resulting `{project}.json` would be built from 1-2
-sessions and then silently supersede the rich legacy narrative with a
-skeleton.
+**Bootstrap vs. incremental**: if `{project}.json` doesn't exist, create the
+empty stub (below) and run `narrative_coverage` — it will report every
+main-session transcript the project has ever had as unprocessed, because the
+merged-sessions list in the JSON is empty. If `{project}.json` already
+exists, `narrative_coverage` returns the usual incremental diff.
 
-### 2a. Check if this is a first-time bootstrap for the project
-
-If `~/.claude/memory/projects/{project}.json` does NOT exist, this is a
-**first-time bootstrap**. Create the empty stub AND use a different
-transcript-selection path for this run:
+### 2a. Create `{project}.json` if it doesn't exist
 
 - Write the empty stub to `~/.claude/memory/projects/<project>.json`:
 
@@ -75,26 +66,12 @@ transcript-selection path for this run:
 }
 ```
 
-- **Do not use `narrative_coverage` to pick transcripts for a first-time
-  bootstrap.** Instead, find ALL main-session transcripts the project has by
-  running this SQL:
+Then call `narrative_coverage(project=PROJECT)` — with an empty
+`sessions[]`, it reports every main-session transcript as unprocessed. Use
+that list.
 
-```bash
-sqlite3 ~/.claude/memory/memory.db \
-  "SELECT session_id FROM memories WHERE type='session_log' AND project='<project>' AND session_id NOT LIKE 'agent-%' ORDER BY created_at;"
-```
-
-- Use THAT list (filtering out `agent-*` if any slipped through, and any
-  where the `~/.claude/memory/conversations/<session_id>.md` file doesn't
-  exist) as the set of transcripts to process chronologically for this
-  project.
-
-If `{project}.json` DOES already exist, use `narrative_coverage`'s
-`unprocessed` list as before — incremental updates from there are correct.
-
-After the bootstrap run finishes, `{project}.json` will have its own
-`transcript_ref` coverage and all subsequent runs follow the normal
-incremental path.
+After the bootstrap run finishes, `sessions[]` is populated and all
+subsequent runs follow the normal incremental path automatically.
 
 ### 2b. Filter transcripts (applies to both paths)
 
@@ -157,20 +134,8 @@ python3 ~/.claude/memory/lib/renderer.py \
   ~/.claude/memory/projects/PROJECT_NAME.narrative.md
 ```
 
-### 2e. Store the narrative memory
-
-Read the rendered markdown and call:
-
-```
-memory_store(
-  type="narrative",
-  project="PROJECT_NAME",
-  content=<contents of PROJECT_NAME.narrative.md>,
-  transcript_ref=[<all transcript paths now processed>]
-)
-```
-
-This creates a new narrative row that supersedes the prior one.
+The rendered `.narrative.md` file is the narrative — session_start + subagent_start
+hooks read it directly. Nothing else to do; the pipeline ends here.
 
 ## Step 3: Summary
 

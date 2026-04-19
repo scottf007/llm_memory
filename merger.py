@@ -10,6 +10,7 @@ re-append if the session_id is already present).
 """
 
 import json
+import secrets
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -24,20 +25,12 @@ ID_PREFIXES = {
     "done": "work",
 }
 
+ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
 
-def _next_id(state: dict, kind: str) -> str:
-    existing = state.get(kind, [])
-    nums = []
-    prefix = ID_PREFIXES[kind]
-    for item in existing:
-        _id = item.get("id", "")
-        if _id.startswith(prefix + "-"):
-            try:
-                nums.append(int(_id.split("-", 1)[1]))
-            except ValueError:
-                continue
-    n = (max(nums) + 1) if nums else 1
-    return f"{prefix}-{n:03d}"
+
+def _new_id(kind: str) -> str:
+    """Mint a UUID-suffix item id, e.g. 'dec-a8c3b4f2'."""
+    return f"{ID_PREFIXES[kind]}-{secrets.token_hex(4)}"
 
 
 def _session_ts(state: dict, session_id: str) -> str | None:
@@ -75,6 +68,67 @@ def _archive_item(state: dict, kind: str, item_id: str, session_id: str, ts: str
             item["last_touched_in"] = session_id
             item["last_touched_at"] = ts
             return
+
+
+def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
+    """Reconcile incoming per-item file changes into state.
+
+    Walks ~/.claude/memory/items/{project}/{kind}/*.json and for each file:
+      - If the item isn't in state[kind], append it.
+      - If the item exists and the file's last_touched_at is newer, replace
+        text/rationale/quote/status/importance/last_touched_at fields.
+      - If the file's status is archived and state's isn't, prefer archived
+        (archive supersedes regardless of timestamp).
+
+    Leaves state["sessions"], state["summary"], state["operations"] alone —
+    those are written only via deltas.
+
+    Returns the number of items added or updated.
+    """
+    proj_dir = items_root / project
+    if not proj_dir.exists():
+        return 0
+
+    updates = 0
+    for kind in LEDGER_KEYS:
+        kind_dir = proj_dir / kind
+        if not kind_dir.exists():
+            continue
+        existing = {item.get("id"): item for item in state.setdefault(kind, [])}
+        for item_file in kind_dir.glob("*.json"):
+            try:
+                incoming = json.loads(item_file.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            iid = incoming.get("id")
+            if not iid:
+                continue
+            current = existing.get(iid)
+            if current is None:
+                state[kind].append({k: v for k, v in incoming.items()
+                                    if k not in ("kind", "project")})
+                updates += 1
+                continue
+            # Archived-wins rule (either direction).
+            cur_archived = current.get("status") == "archived"
+            inc_archived = incoming.get("status") == "archived"
+            if inc_archived and not cur_archived:
+                current["status"] = "archived"
+                current["archived_in"] = incoming.get("archived_in") or current.get("archived_in")
+                current["archived_reason"] = incoming.get("archived_reason") or current.get("archived_reason")
+                current["last_touched_at"] = incoming.get("last_touched_at") or current.get("last_touched_at")
+                updates += 1
+                continue
+            # Newer-wins on text fields.
+            inc_ts = incoming.get("last_touched_at") or ""
+            cur_ts = current.get("last_touched_at") or ""
+            if inc_ts and inc_ts > cur_ts:
+                for field in ("text", "rationale", "quote", "importance",
+                              "last_touched_in", "last_touched_at"):
+                    if field in incoming:
+                        current[field] = incoming[field]
+                updates += 1
+    return updates
 
 
 def apply_delta(state: dict, delta: dict) -> dict:
@@ -121,7 +175,7 @@ def apply_delta(state: dict, delta: dict) -> dict:
         state.setdefault(kind, [])
         for new_item in introduced.get(kind, []) or []:
             item = dict(new_item)
-            item["id"] = _next_id(state, kind)
+            item["id"] = _new_id(kind)
             item["status"] = "active"
             item["introduced_in"] = session_id
             item["last_touched_in"] = session_id
@@ -226,6 +280,48 @@ def apply_delta(state: dict, delta: dict) -> dict:
     return state
 
 
+def fan_out_items(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
+    """Write every ledger item to ~/.claude/memory/items/{project}/{kind}/{id}.json.
+
+    Idempotent — each write overwrites the file in place. Returns the count
+    of files written. Archived items are fanned out too (their status field
+    carries the archive state).
+    """
+    proj_dir = items_root / project
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for kind in LEDGER_KEYS:
+        kind_dir = proj_dir / kind
+        kind_dir.mkdir(exist_ok=True)
+        for item in state.get(kind, []) or []:
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            payload = dict(item)
+            payload["kind"] = kind
+            payload["project"] = project
+            (kind_dir / f"{item_id}.json").write_text(json.dumps(payload, indent=2))
+            written += 1
+    return written
+
+
+def _rebuild_items_index(db_path: Path) -> None:
+    """Invoke the indexer to refresh the FTS5 table. Best-effort — if the
+    indexer isn't available (tests, broken install), skip silently."""
+    try:
+        import indexer
+    except ImportError:
+        try:
+            sys.path.insert(0, str(Path(__file__).parent))
+            import indexer
+        except ImportError:
+            return
+    try:
+        indexer.rebuild_items_index(db_path=db_path)
+    except Exception:
+        pass
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         print("Usage: merger.py <project_json_path> <delta_json_path>", file=sys.stderr)
@@ -237,9 +333,22 @@ def main() -> None:
     state = json.loads(project_path.read_text()) if project_path.exists() else {}
     delta = json.loads(delta_path.read_text())
 
+    project = project_path.stem
+
+    # Reconcile any per-item file changes that Syncthing brought in before
+    # applying this session's delta, so the delta merges against the newest
+    # view of the ledger (not just what the local JSON last knew).
+    inbox = inbox_merge(state, project)
+
     state = apply_delta(state, delta)
+    state["last_rebuilt_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     project_path.write_text(json.dumps(state, indent=2))
-    print(f"Merged {delta['session_id']} into {project_path}")
+
+    fanned = fan_out_items(state, project)
+    _rebuild_items_index(Path.home() / ".claude" / "memory" / "memory.db")
+
+    print(f"Merged {delta['session_id']} into {project_path} "
+          f"({inbox} inbox, {fanned} fanned out)")
 
 
 if __name__ == "__main__":

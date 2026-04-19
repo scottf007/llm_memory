@@ -51,7 +51,9 @@ def _setup_test_home(tmp_path):
     memory_dir.mkdir(parents=True)
     (memory_dir / "records").mkdir()
     (memory_dir / "transcripts").mkdir()
+    (memory_dir / "conversations").mkdir()
     (memory_dir / "config").mkdir()
+    (memory_dir / "projects").mkdir()
 
     # Create DB
     db_path = memory_dir / "memory.db"
@@ -59,6 +61,34 @@ def _setup_test_home(tmp_path):
     conn.executescript(SERVER_SCHEMA)
     conn.commit()
     return home, conn, db_path
+
+
+def _write_narrative(home, project, content="# narrative"):
+    """Write a rendered narrative file to the test home."""
+    path = home / ".claude" / "memory" / "projects" / f"{project}.narrative.md"
+    path.write_text(content)
+    return path
+
+
+def _write_project_state(home, project, merged_session_ids=()):
+    """Write a minimal {project}.json with the given merged session_ids."""
+    path = home / ".claude" / "memory" / "projects" / f"{project}.json"
+    state = {
+        "schema_version": "0.1",
+        "project": project,
+        "sessions": [{"session_id": sid} for sid in merged_session_ids],
+    }
+    path.write_text(json.dumps(state))
+    return path
+
+
+def _register_session(home, session_id, project):
+    """Write a stub conversation.md with the frontmatter the hooks read as the session registry."""
+    path = home / ".claude" / "memory" / "conversations" / f"{session_id}.md"
+    path.write_text(
+        f"---\nsession_id: {session_id}\nproject: {project}\n---\n\n=== user ===\nhi\n"
+    )
+    return path
 
 
 def _run_hook(hook_name, home, input_json, timeout=10):
@@ -101,23 +131,12 @@ class TestPostCompactNarrativeStaleness:
         """Post-compaction with new sessions since narrative should tell Claude to update."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        # Insert a narrative created "yesterday"
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("aaaa" * 8, "narrative", "# Old narrative", "testproj",
-             "2026-03-10T10:00:00", 10),
-        )
-        # Insert session_logs AFTER the narrative
+        # Narrative file exists but {project}.json has no merged sessions yet.
+        _write_narrative(home, "testproj", "# Old narrative")
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        # 3 sessions have happened (conversation.md stubs) that haven't been merged
         for i in range(3):
-            conn.execute(
-                "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (os.urandom(16).hex(), "session_log",
-                 f"Session {i}", "testproj", f"sess-{i}",
-                 "2026-03-11T10:00:00", 3),
-            )
-        conn.commit()
+            _register_session(home, f"sess-{i}", "testproj")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="compact",
@@ -133,14 +152,9 @@ class TestPostCompactNarrativeStaleness:
         """Post-compaction with no new sessions should NOT warn about staleness."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        # Narrative is the most recent thing
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("bbbb" * 8, "narrative", "# Fresh narrative", "testproj",
-             "2026-03-11T10:00:00", 10),
-        )
-        # Session log is BEFORE the narrative
+        # Narrative + project state with the session already merged.
+        _write_narrative(home, "testproj", "# Fresh narrative")
+        _write_project_state(home, "testproj", merged_session_ids=["old-sess"])
         conn.execute(
             "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -170,21 +184,10 @@ class TestStaleNarrativeMandatory:
         """Stale narrative message should say MUST/AUTOMATIC, not 'Consider'."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("cccc" * 8, "narrative", "# Old narrative", "testproj",
-             "2026-03-10T10:00:00", 10),
-        )
+        _write_narrative(home, "testproj", "# Old narrative")
+        _write_project_state(home, "testproj", merged_session_ids=[])
         for i in range(5):
-            conn.execute(
-                "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (os.urandom(16).hex(), "session_log",
-                 f"Session {i}", "testproj", f"sess-{i}",
-                 "2026-03-11T10:00:00", 3),
-            )
-        conn.commit()
+            _register_session(home, f"sess-{i}", "testproj")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
@@ -210,14 +213,7 @@ class TestStaleNarrativeMandatory:
         """Sanity check: missing narrative should already be mandatory."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (os.urandom(16).hex(), "session_log",
-             "Session 1", "testproj", "sess-1",
-             "2026-03-11T10:00:00", 3),
-        )
-        conn.commit()
+        _register_session(home, "sess-1", "testproj")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
@@ -238,19 +234,9 @@ class TestStaleNarrativeAutomaticTask:
         """Stale narrative should trigger 'AUTOMATIC TASK' in output."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("dddd" * 8, "narrative", "# Old narrative", "testproj",
-             "2026-03-10T10:00:00", 10),
-        )
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (os.urandom(16).hex(), "session_log",
-             "New session", "testproj", "new-sess",
-             "2026-03-11T10:00:00", 3),
-        )
+        _write_narrative(home, "testproj", "# Old narrative")
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        _register_session(home, "new-sess", "testproj")
         conn.commit()
         conn.close()
 
@@ -265,15 +251,11 @@ class TestStaleNarrativeAutomaticTask:
         )
 
     def test_fresh_narrative_no_automatic_task(self, tmp_path):
-        """Narrative with no new sessions should NOT trigger AUTOMATIC TASK."""
+        """Narrative with all session_logs merged should NOT trigger AUTOMATIC TASK."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("eeee" * 8, "narrative", "# Fresh narrative", "testproj",
-             "2026-03-11T10:00:00", 10),
-        )
+        _write_narrative(home, "testproj", "# Fresh narrative")
+        _write_project_state(home, "testproj", merged_session_ids=["old-sess"])
         conn.execute(
             "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -303,31 +285,17 @@ class TestCrossProjectStaleness:
         cross-project warning, not just projects with zero narratives."""
         home, conn, _ = _setup_test_home(tmp_path)
 
-        # Current project (testproj) has a current narrative
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (os.urandom(16).hex(), "narrative", "# testproj narrative", "testproj",
-             "2026-03-11T10:00:00", 10),
-        )
+        # Current project (testproj) is fully current: narrative + state with
+        # the only session merged, and a matching conversation.md.
+        _write_narrative(home, "testproj", "# testproj narrative")
+        _write_project_state(home, "testproj", merged_session_ids=["testproj-s1"])
+        _register_session(home, "testproj-s1", "testproj")
 
-        # Other project (otherproj) has a narrative but it's stale
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, created_at, importance) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (os.urandom(16).hex(), "narrative", "# otherproj narrative", "otherproj",
-             "2026-03-08T10:00:00", 10),
-        )
-        # 5 sessions after the narrative for otherproj
+        # otherproj has a narrative + state but 5 new conversation.md stubs → stale.
+        _write_narrative(home, "otherproj", "# otherproj narrative")
+        _write_project_state(home, "otherproj", merged_session_ids=[])
         for i in range(5):
-            conn.execute(
-                "INSERT INTO memories (uuid, type, content, project, session_id, created_at, importance) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (os.urandom(16).hex(), "session_log",
-                 f"Session {i}", "otherproj", f"other-sess-{i}",
-                 "2026-03-11T10:00:00", 3),
-            )
-        conn.commit()
+            _register_session(home, f"other-sess-{i}", "otherproj")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
@@ -363,201 +331,3 @@ class TestPreCompactNarrativeInstruction:
             f"pre_compact should NOT defer narrative update to next session. "
             f"It should say to do it NOW before context is lost. Output:\n{stdout}"
         )
-
-
-# ---- session_end.sh shell injection ----
-
-class TestSessionEndEscaping:
-    """session_end.sh injects $SUMMARY into a triple-quoted Python string.
-    Content with single quotes breaks the Python code silently."""
-
-    def test_summary_with_single_quotes(self, tmp_path):
-        """A transcript whose last assistant message contains single quotes
-        should still produce a valid session_log record."""
-        home, conn, _ = _setup_test_home(tmp_path)
-        conn.close()
-
-        # Create a transcript where the assistant says something with quotes
-        transcript = tmp_path / "transcript.jsonl"
-        entries = [
-            {"type": "user", "timestamp": "2026-03-10T10:00:00Z",
-             "sessionId": "quotetest", "cwd": "/home/scott/projects/testproj",
-             "message": {"content": "How do I fix this?"}},
-            {"type": "assistant", "timestamp": "2026-03-10T10:01:00Z",
-             "message": {"content": [{"type": "text",
-                "text": "It's a common issue — you'll need to update the config. Here's what I'd suggest for the project's setup."}]}},
-        ]
-        with open(transcript, "w") as f:
-            for entry in entries:
-                f.write(json.dumps(entry) + "\n")
-
-        input_json = json.dumps({
-            "session_id": "quotetest",
-            "transcript_path": str(transcript),
-        })
-        stdout, stderr, rc = _run_hook("session_end.sh", home, input_json)
-
-        # Check that a record file was created
-        records_dir = home / ".claude" / "memory" / "records"
-        record_files = list(records_dir.glob("*.json"))
-        assert len(record_files) >= 1, (
-            f"session_end.sh should create a session_log record even when summary "
-            f"contains single quotes, but no record files found. "
-            f"stderr: {stderr}"
-        )
-
-        # Verify the record is valid JSON
-        record = json.loads(record_files[0].read_text())
-        assert record["type"] == "session_log"
-        assert record["session_id"] == "quotetest"
-
-
-# ---- Project derivation ----
-
-class TestProjectDerivation:
-    """Project names should be meaningful, not garbage or empty strings.
-    When cwd doesn't match /projects/X, content should be used to derive
-    a project name rather than falling back to 'general' for long conversations."""
-
-    def test_non_project_cwd_with_themed_content_should_not_be_general(self, tmp_path):
-        """A long conversation about a specific topic from a non-project cwd
-        should derive a meaningful project name, not just 'general'."""
-        # Create a transcript with clear topic but non-project cwd
-        transcript_entries = [
-            {"type": "user", "cwd": "/home/scott",
-             "message": {"content": "Let's set up Home Assistant with Shelly devices"}},
-            {"type": "assistant",
-             "message": {"content": [{"type": "text",
-                "text": "I'll help you configure Home Assistant for your Shelly devices."}]}},
-        ] * 10  # 10 turns about Home Assistant
-
-        # Write to a transcript dir that would produce "general" fallback
-        transcript_dir = tmp_path / "transcripts"
-        transcript_dir.mkdir()
-        path = transcript_dir / "themed-session.jsonl"
-        with open(path, "w") as f:
-            for entry in transcript_entries:
-                f.write(json.dumps(entry) + "\n")
-
-        data = process_transcripts.extract_session_data(path)
-        project = data["project"]
-
-        # "general" or "transcripts" is not acceptable for 10 turns about
-        # a specific topic — should derive from content
-        assert project not in ("general", "transcripts"), (
-            f"A 10-turn conversation about Home Assistant from /home/scott "
-            f"was classified as '{project}'. Should derive a topic-based project name."
-        )
-
-    def test_project_cwd_derivation_works(self):
-        """Standard /projects/X derivation should still work."""
-        result = process_transcripts.derive_project(
-            ["/home/scott/projects/finance_nexus"], Path("/tmp")
-        )
-        assert result == "finance_nexus"
-
-    def test_non_projects_folder_uses_dirname(self):
-        """A cwd like /home/alice/code/myapp should derive project 'myapp',
-        not require a 'projects/' parent. The folder IS the project."""
-        result = process_transcripts.derive_project(
-            ["/home/alice/code/myapp"], Path("/tmp")
-        )
-        assert result == "myapp", (
-            f"cwd '/home/alice/code/myapp' should derive project 'myapp', "
-            f"got '{result}'. Don't require a 'projects/' parent folder."
-        )
-
-    def test_home_dir_cwd_uses_content_not_dirname(self):
-        """A cwd of just /home/scott should not use 'scott' as the project.
-        It should fall through to content-based derivation or 'general'."""
-        result = process_transcripts.derive_project(
-            ["/home/scott"], Path("/tmp")
-        )
-        # 'scott' is a user's home dir, not a project name
-        assert result != "scott", (
-            f"cwd '/home/scott' should not use 'scott' as project name — "
-            f"that's a home directory, not a project."
-        )
-
-    def test_empty_project_never_returned(self):
-        """derive_project should never return an empty string."""
-        result = process_transcripts.derive_project([], Path("/tmp"))
-        assert result, "derive_project should never return empty string"
-
-
-class TestOrphanProjectMatching:
-    """Sessions from non-project cwds (e.g. /home/scott) that are clearly about
-    a known project should be matched to that project, not classified as 'general'."""
-
-    def test_content_about_known_project_matches(self, tmp_path):
-        """A conversation about 'finance nexus' from /home/scott should match
-        the existing finance_nexus project in the DB."""
-        # Set up a DB with known projects
-        db_dir = tmp_path / "memory"
-        db_dir.mkdir()
-        db_path = db_dir / "memory.db"
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript(SERVER_SCHEMA)
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, importance) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("aaaa" * 8, "narrative", "Finance app", "finance_nexus", 10),
-        )
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, importance) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("bbbb" * 8, "narrative", "Memory system", "llm_memory", 10),
-        )
-        conn.commit()
-        conn.close()
-
-        # Monkey-patch DB_DIR to use our test DB
-        original_db_dir = process_transcripts.DB_DIR
-        process_transcripts.DB_DIR = db_dir
-        try:
-            user_texts = [
-                "Let's work on the finance nexus dashboard",
-                "The finance nexus needs better transaction categorization",
-                "Can you check the finance nexus API endpoints?",
-                "I want to add a new report to finance nexus",
-            ]
-            result = process_transcripts.derive_project(
-                ["/home/scott"], Path("/tmp"), user_texts
-            )
-            assert result == "finance_nexus", (
-                f"4 messages about 'finance nexus' from /home/scott should match "
-                f"known project 'finance_nexus', got '{result}'"
-            )
-        finally:
-            process_transcripts.DB_DIR = original_db_dir
-
-    def test_unrelated_content_stays_general(self, tmp_path):
-        """Content that doesn't match any known project should remain 'general'."""
-        db_dir = tmp_path / "memory"
-        db_dir.mkdir()
-        db_path = db_dir / "memory.db"
-        conn = sqlite3.connect(str(db_path))
-        conn.executescript(SERVER_SCHEMA)
-        conn.execute(
-            "INSERT INTO memories (uuid, type, content, project, importance) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("aaaa" * 8, "narrative", "Finance app", "finance_nexus", 10),
-        )
-        conn.commit()
-        conn.close()
-
-        original_db_dir = process_transcripts.DB_DIR
-        process_transcripts.DB_DIR = db_dir
-        try:
-            user_texts = [
-                "How do I cook pasta?",
-                "What temperature for baking bread?",
-            ]
-            result = process_transcripts.derive_project(
-                ["/home/scott"], Path("/home/scott/.claude/memory/transcripts"), user_texts
-            )
-            assert result == "general", (
-                f"Unrelated cooking content should be 'general', got '{result}'"
-            )
-        finally:
-            process_transcripts.DB_DIR = original_db_dir

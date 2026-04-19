@@ -290,7 +290,7 @@ def main():
     stignore = MEMORY_DIR / ".stignore"
     if not stignore.exists():
         if not args.dry_run:
-            stignore.write_text("memory.db\nmemory.db-wal\nmemory.db-shm\n")
+            stignore.write_text("memory.db\nmemory.db-wal\nmemory.db-shm\nlib/.venv\n")
         print("Created .stignore")
 
     # Step 6: Try API first, fall back to direct XML edit
