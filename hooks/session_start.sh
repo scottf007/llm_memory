@@ -66,6 +66,31 @@ if [ -n "$CWD" ]; then
     PROJECT=$(echo "$CWD" | sed -n 's|.*/projects/\([^/]*\).*|\1|p')
 fi
 
+# Seed per-project auto-memory dir so the harness template's "this directory
+# already exists" claim is true — stops Claude from running mkdir -p on first
+# write and getting a permission prompt. Only touches disk when MEMORY.md is
+# missing, so it's effectively once per project.
+if [ "$SOURCE" != "compact" ] && [ -n "$CWD" ]; then
+    ENCODED="${CWD//\//-}"
+    ENCODED="${ENCODED//_/-}"
+    AUTO_MEM_DIR="$HOME/.claude/projects/${ENCODED}/memory"
+    MEMORY_INDEX="$AUTO_MEM_DIR/MEMORY.md"
+    if [ ! -f "$MEMORY_INDEX" ]; then
+        mkdir -p "$AUTO_MEM_DIR"
+        NARR="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        {
+            echo "# Memory Index"
+            echo ""
+            if [ -n "$PROJECT" ] && [ -f "$NARR" ]; then
+                echo "- [Project narrative]($NARR) — living story of $PROJECT, rendered by llm_memory each session. Read for past context."
+            fi
+            if [ -n "$PROJECT" ]; then
+                echo "- Use project_lookup (MCP) to drill into ~/.claude/memory/projects/$PROJECT.json."
+            fi
+        } > "$MEMORY_INDEX"
+    fi
+fi
+
 # Export session ID for other hooks
 if [ -n "$CLAUDE_ENV_FILE" ]; then
     SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
