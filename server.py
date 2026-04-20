@@ -41,51 +41,10 @@ RECORDS_DIR = DB_DIR / "records"
 VALID_TYPES: set[str] = set()  # retired — project JSONs are the source of truth
 VALID_RELATIONSHIPS = {"supersedes", "related_to"}
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS memories (
-    uuid TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
-    content TEXT NOT NULL,
-    project TEXT,
-    session_id TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    importance INTEGER DEFAULT 5 CHECK(importance BETWEEN 1 AND 10),
-    transcript_ref TEXT,
-    tags TEXT,
-    status TEXT DEFAULT 'active'
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-    content, type, project, tags,
-    content='memories',
-    content_rowid='rowid'
-);
-
-CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-    INSERT INTO memories_fts(rowid, content, type, project, tags)
-    VALUES (new.rowid, new.content, new.type, new.project, new.tags);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
-    VALUES('delete', old.rowid, old.content, old.type, old.project, old.tags);
-END;
-
-CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-    INSERT INTO memories_fts(memories_fts, rowid, content, type, project, tags)
-    VALUES('delete', old.rowid, old.content, old.type, old.project, old.tags);
-    INSERT INTO memories_fts(rowid, content, type, project, tags)
-    VALUES (new.rowid, new.content, new.type, new.project, new.tags);
-END;
-
-CREATE TABLE IF NOT EXISTS connections (
-    from_uuid TEXT NOT NULL REFERENCES memories(uuid),
-    to_uuid TEXT NOT NULL REFERENCES memories(uuid),
-    relationship TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (from_uuid, to_uuid, relationship)
-);
-"""
+# Retired: the `memories`, `memories_fts`, and `connections` tables were
+# dropped when types were retired. The DB's sole live table is `items`,
+# managed by indexer.py (CREATE TABLE IF NOT EXISTS items + items_fts).
+SCHEMA = ""
 
 # ---------------------------------------------------------------------------
 # UUID helper
