@@ -24,8 +24,20 @@ if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-upd
     BRANCH="${LLM_MEMORY_BRANCH:-main}"
     if [ -f "$LIB_DIR/VERSION" ]; then
         LOCAL_SHA=$(cat "$LIB_DIR/VERSION")
+        # Token sources for private-repo support: $GH_TOKEN, synced config file, then gh CLI.
+        # No token = unauthenticated curl (still works while repo is public).
+        _tok=""
+        if [ -n "$GH_TOKEN" ]; then
+            _tok="$GH_TOKEN"
+        elif [ -f "$HOME/.claude/memory/config/github_token" ]; then
+            _tok=$(tr -d '[:space:]' < "$HOME/.claude/memory/config/github_token")
+        elif command -v gh >/dev/null 2>&1; then
+            _tok=$(gh auth token 2>/dev/null)
+        fi
+        _auth=()
+        [ -n "$_tok" ] && _auth=(-H "Authorization: token $_tok")
         # Check GitHub API with a short timeout
-        REMOTE_SHA=$(timeout 3 curl -sf "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null | jq -r '.sha' 2>/dev/null)
+        REMOTE_SHA=$(timeout 3 curl -sf "${_auth[@]}" "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null | jq -r '.sha' 2>/dev/null)
         if [ -n "$REMOTE_SHA" ] && [ "$REMOTE_SHA" != "null" ] && [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
             # Update in background so we don't block session start
             (bash "$LIB_DIR/install.sh" --update >/dev/null 2>&1) &

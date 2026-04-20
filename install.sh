@@ -89,18 +89,34 @@ log "  All dependencies found."
 log "[2/8] Downloading latest version from GitHub..."
 mkdir -p "$MEMORY_DIR" "$LIB_DIR"
 
+# Token loader for private-repo support. Tries (1) $GH_TOKEN env var,
+# (2) ~/.claude/memory/config/github_token (synced), (3) `gh auth token`.
+# No token = falls through to unauthenticated curl (public repos only).
+_gh_token() {
+    if [ -n "$GH_TOKEN" ]; then echo "$GH_TOKEN"; return; fi
+    if [ -f "$HOME/.claude/memory/config/github_token" ]; then
+        cat "$HOME/.claude/memory/config/github_token" | tr -d '[:space:]'
+        return
+    fi
+    command -v gh >/dev/null 2>&1 && gh auth token 2>/dev/null
+}
+TOKEN=$(_gh_token)
+AUTH_HEADER=()
+[ -n "$TOKEN" ] && AUTH_HEADER=(-H "Authorization: token $TOKEN")
+
 TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 
 # Get the latest commit hash
-REMOTE_SHA=$(curl -sf "https://api.github.com/repos/$REPO/commits/$BRANCH" | jq -r '.sha' 2>/dev/null)
+REMOTE_SHA=$(curl -sf "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/commits/$BRANCH" | jq -r '.sha' 2>/dev/null)
 if [ -z "$REMOTE_SHA" ] || [ "$REMOTE_SHA" = "null" ]; then
-    # If API fails (rate limit, no network), check if we already have files
+    # If API fails (rate limit, no network, private repo w/o token), check if we already have files
     if [ -f "$LIB_DIR/server.py" ]; then
         log "  Could not reach GitHub. Using existing installation."
     else
         echo "  ERROR: Could not reach GitHub and no existing installation found."
-        echo "  Check your internet connection and try again."
+        echo "  Check your internet connection, and if the repo is private, ensure"
+        echo "  \$GH_TOKEN is set or gh CLI is authenticated, then try again."
         exit 1
     fi
 else
@@ -113,13 +129,13 @@ else
     if [ "$LOCAL_SHA" = "$REMOTE_SHA" ] && [ "$1" != "--force" ]; then
         log "  Already up to date ($REMOTE_SHA)."
     else
-        # Download and extract
-        curl -sL "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" | tar xz -C "$TMPDIR"
-        # GitHub archives use the repo name (after the slash) as the directory prefix
-        REPO_NAME="${REPO##*/}"
-        EXTRACTED="$TMPDIR/${REPO_NAME}-$BRANCH"
+        # Download and extract (api.github.com/tarball endpoint works for both public and private)
+        curl -sL "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/tarball/$BRANCH" | tar xz -C "$TMPDIR"
+        # The api/tarball endpoint names the top dir {user}-{repo}-{sha_short}, so
+        # detect it dynamically rather than assuming the archive/refs/heads name.
+        EXTRACTED=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d | head -1)
 
-        if [ ! -d "$EXTRACTED" ]; then
+        if [ -z "$EXTRACTED" ] || [ ! -d "$EXTRACTED" ]; then
             echo "  ERROR: Download failed or archive structure unexpected."
             exit 1
         fi
