@@ -5,6 +5,7 @@
 INPUT=$(cat)
 SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
 # Sync CLAUDE.md from shared config if newer
 SHARED_CLAUDE_MD="$HOME/.claude/memory/config/CLAUDE.md"
@@ -92,8 +93,7 @@ if [ "$SOURCE" != "compact" ] && [ -n "$CWD" ]; then
 fi
 
 # Export session ID for other hooks
-if [ -n "$CLAUDE_ENV_FILE" ]; then
-    SESSION_ID=$(echo "$INPUT" | jq -r '.session_id')
+if [ -n "$CLAUDE_ENV_FILE" ] && [ -n "$SESSION_ID" ]; then
     echo "export LLM_MEMORY_SESSION_ID='$SESSION_ID'" >> "$CLAUDE_ENV_FILE"
 fi
 
@@ -197,22 +197,28 @@ print(len(logged - merged))
         echo "$NARRATIVE"
     fi
 
-    # Surface stale suggestions (active, last_touched >30d) for review.
-    # Push-forward, not auto-archive: user sees the top-5 oldest each session
-    # until they act or explicitly archive. Capped so context doesn't bloat.
-    if [ -n "$PROJECT" ]; then
-        STALE_SUGGESTIONS=$(python3 -c "
-import json
-from datetime import datetime, timezone, timedelta
+    # Surface a rotating sample of active suggestions — no hard age cutoff.
+    # Weighted-random by age (older → slightly higher chance), but any active
+    # suggestion can appear. Deterministic per session_id so the same session
+    # on resume shows the same picks. Scales to years of accumulation without
+    # burying ideas you pick up and put down.
+    if [ -n "$PROJECT" ] && [ -n "$SESSION_ID" ]; then
+        SUGGESTION_SAMPLE=$(python3 -c "
+import json, random
+from datetime import datetime, timezone
+from pathlib import Path
 
-path = '$HOME/.claude/memory/projects/$PROJECT.json'
-try:
-    with open(path) as f: d = json.load(f)
-except FileNotFoundError:
+path = Path('$HOME/.claude/memory/projects/$PROJECT.json')
+if not path.exists():
     import sys; sys.exit(0)
 
-cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-stale = []
+try:
+    d = json.loads(path.read_text())
+except Exception:
+    import sys; sys.exit(0)
+
+now = datetime.now(timezone.utc)
+pool = []
 for s in d.get('suggestions', []) or []:
     if s.get('status') != 'active': continue
     ts = s.get('last_touched_at') or ''
@@ -220,18 +226,36 @@ for s in d.get('suggestions', []) or []:
         t = datetime.fromisoformat(ts.replace('Z','+00:00'))
     except Exception:
         continue
-    if t < cutoff:
-        age = (datetime.now(timezone.utc) - t).days
-        stale.append((age, s.get('id',''), (s.get('text') or '')[:140]))
+    age = max(1, (now - t).days)
+    pool.append((s, age))
 
-stale.sort(reverse=True)
-for age, sid, text in stale[:5]:
+if not pool:
+    import sys; sys.exit(0)
+
+rng = random.Random('$SESSION_ID')
+k = min(3, len(pool))
+picked = []
+remaining = list(pool)
+for _ in range(k):
+    total = sum(w for _, w in remaining)
+    r = rng.random() * total
+    cum = 0.0
+    for idx, (item, w) in enumerate(remaining):
+        cum += w
+        if cum >= r:
+            picked.append((item, w))
+            remaining.pop(idx)
+            break
+
+for item, age in sorted(picked, key=lambda p: p[1], reverse=True):
+    sid = item.get('id','')
+    text = (item.get('text') or '')[:140]
     print(f'  [{age}d] {sid}: {text}')
 " 2>/dev/null)
-        if [ -n "$STALE_SUGGESTIONS" ]; then
+        if [ -n "$SUGGESTION_SAMPLE" ]; then
             echo ""
-            echo "## Suggestions untouched >30d — act on them or mark them resolved/rejected"
-            echo "$STALE_SUGGESTIONS"
+            echo "## Active suggestions (rotating sample) — act, reject, or leave for next rotation"
+            echo "$SUGGESTION_SAMPLE"
         fi
     fi
 

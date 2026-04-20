@@ -26,8 +26,15 @@ computes unprocessed transcripts by diffing on-disk session_logs against
 To enumerate all projects with session activity:
 
 ```bash
-sqlite3 ~/.claude/memory/memory.db "SELECT DISTINCT project FROM memories WHERE type='session_log' AND project <> '' ORDER BY project;"
+python3 -c "
+from conversations import iter_sessions
+seen = {fm.get('project') for fm in iter_sessions() if fm.get('project')}
+for p in sorted(seen): print(p)
+"
 ```
+
+(Conversations are stamped with their project in frontmatter at extract time;
+the retired `memory_store(type=session_log)` path no longer exists.)
 
 If `unprocessed` is empty for a project, skip it.
 
@@ -85,8 +92,20 @@ from file mtime if unavailable). Drop any entries whose
 
 ### 2c. For each main-session transcript, in order
 
-1. Spawn the `delta-extractor` agent with the session's inputs. Wait for it
-   to finish and write its delta JSON before proceeding.
+1. **Check the delta cache** before spawning an agent:
+
+   ```bash
+   python3 ~/.claude/memory/lib/delta_cache.py check SESSION_ID ISO8601_START
+   ```
+
+   Prints `use_cache` or `reextract` on stdout; decision reason on stderr.
+   Policy: exact hash match → always reuse; hash mismatch → re-extract with
+   probability `exp(-age_days / 14d)`, deterministic per session_id; missing
+   file → re-extract. If `use_cache`, skip step 2 and proceed to step 3.
+
+2. **If `reextract`,** spawn the `delta-extractor` agent. Wait for it to
+   finish and write its delta JSON, then stamp the current extractor hash
+   into the file so subsequent runs can cache-hit it:
 
    ```
    Agent(
@@ -108,7 +127,12 @@ from file mtime if unavailable). Drop any entries whose
    )
    ```
 
-2. Once the agent completes, run the merger:
+   ```bash
+   python3 ~/.claude/memory/lib/delta_cache.py stamp \
+     ~/.claude/memory/deltas/SESSION_ID.delta.json
+   ```
+
+3. **Run the merger** on whichever delta is now on disk (cached or fresh):
 
    ```bash
    python3 ~/.claude/memory/lib/merger.py \
@@ -119,10 +143,11 @@ from file mtime if unavailable). Drop any entries whose
    The merge must succeed before launching the next delta-extractor for this
    project — the next agent reads the updated `{project}.json` as input.
 
-3. Before the first delta-extractor call for a run, ensure the deltas dir
+4. Before the first delta-extractor call for a run, ensure the deltas dir
    exists: `mkdir -p ~/.claude/memory/deltas`. The merger is idempotent
-   per session_id, so leftover delta files are safe to keep — they're
-   useful for debugging if the render later looks wrong.
+   per session_id; the cache is idempotent by `extractor_hash`. Leftover
+   delta files are a feature, not debt — they act as the pre-processed
+   cache so repeat runs skip LLM calls.
 
 ### 2d. Render once per project
 

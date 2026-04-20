@@ -139,6 +139,7 @@ else
         cp "$EXTRACTED/resolve_conflicts.py" "$LIB_DIR/"
         cp "$EXTRACTED/merger.py" "$LIB_DIR/" 2>/dev/null || true
         cp "$EXTRACTED/renderer.py" "$LIB_DIR/" 2>/dev/null || true
+        cp "$EXTRACTED/delta_cache.py" "$LIB_DIR/" 2>/dev/null || true
         cp "$EXTRACTED/dashboard.py" "$LIB_DIR/"
         cp "$EXTRACTED/apply_settings.py" "$LIB_DIR/"
         cp "$EXTRACTED/requirements.txt" "$LIB_DIR/"
