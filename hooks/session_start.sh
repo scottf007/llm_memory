@@ -24,11 +24,17 @@ if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-upd
     BRANCH="${LLM_MEMORY_BRANCH:-main}"
     if [ -f "$LIB_DIR/VERSION" ]; then
         LOCAL_SHA=$(cat "$LIB_DIR/VERSION")
-        # Token sources for private-repo support: $GH_TOKEN, synced config file, then gh CLI.
+        # Token sources for private-repo support. Priority:
+        #   1. $GH_TOKEN
+        #   2. ~/.ssh/github_token (rides the existing ~/.ssh Syncthing sync)
+        #   3. ~/.claude/memory/config/github_token
+        #   4. gh CLI (`gh auth token`)
         # No token = unauthenticated curl (still works while repo is public).
         _tok=""
         if [ -n "$GH_TOKEN" ]; then
             _tok="$GH_TOKEN"
+        elif [ -f "$HOME/.ssh/github_token" ]; then
+            _tok=$(tr -d '[:space:]' < "$HOME/.ssh/github_token")
         elif [ -f "$HOME/.claude/memory/config/github_token" ]; then
             _tok=$(tr -d '[:space:]' < "$HOME/.claude/memory/config/github_token")
         elif command -v gh >/dev/null 2>&1; then

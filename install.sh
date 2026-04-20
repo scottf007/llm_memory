@@ -89,15 +89,20 @@ log "  All dependencies found."
 log "[2/8] Downloading latest version from GitHub..."
 mkdir -p "$MEMORY_DIR" "$LIB_DIR"
 
-# Token loader for private-repo support. Tries (1) $GH_TOKEN env var,
-# (2) ~/.claude/memory/config/github_token (synced), (3) `gh auth token`.
+# Token loader for private-repo support. Priority:
+#   1. $GH_TOKEN env var
+#   2. ~/.ssh/github_token (rides your existing Syncthing ~/.ssh sync)
+#   3. ~/.claude/memory/config/github_token (llm_memory config sync)
+#   4. `gh auth token` (local gh CLI)
 # No token = falls through to unauthenticated curl (public repos only).
 _gh_token() {
     if [ -n "$GH_TOKEN" ]; then echo "$GH_TOKEN"; return; fi
-    if [ -f "$HOME/.claude/memory/config/github_token" ]; then
-        cat "$HOME/.claude/memory/config/github_token" | tr -d '[:space:]'
-        return
-    fi
+    for path in "$HOME/.ssh/github_token" "$HOME/.claude/memory/config/github_token"; do
+        if [ -f "$path" ]; then
+            tr -d '[:space:]' < "$path"
+            return
+        fi
+    done
     command -v gh >/dev/null 2>&1 && gh auth token 2>/dev/null
 }
 TOKEN=$(_gh_token)
