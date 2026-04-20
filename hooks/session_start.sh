@@ -176,6 +176,18 @@ print(len(logged - merged))
     fi
 
     echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
+    # Version banner: shows current SHA every session, loud banner when it changed.
+    VERSION_FILE="$HOME/.claude/memory/lib/VERSION"
+    LAST_SEEN_FILE="$HOME/.claude/memory/.last_seen_sha"
+    if [ -f "$VERSION_FILE" ]; then
+        CURRENT_SHA=$(cat "$VERSION_FILE" 2>/dev/null)
+        LAST_SHA=$(cat "$LAST_SEEN_FILE" 2>/dev/null)
+        if [ -n "$CURRENT_SHA" ] && [ "$CURRENT_SHA" != "$LAST_SHA" ] && [ -n "$LAST_SHA" ]; then
+            echo "## llm_memory UPDATED: ${LAST_SHA:0:8} → ${CURRENT_SHA:0:8} (restart Claude Code if MCP server changed)"
+        fi
+        echo "## llm_memory version: ${CURRENT_SHA:0:8}"
+        echo "$CURRENT_SHA" > "$LAST_SEEN_FILE"
+    fi
     if [ -n "$PROJECT" ]; then
         echo "## Active project: $PROJECT"
     fi
