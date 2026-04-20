@@ -17,39 +17,36 @@ gets applied on session start.
 - Always use Write/Edit tools for large content. Never output large content in conversation.
 
 ## Memory Protocol (MCP tools via llm_memory server)
-You have access to persistent memory tools provided by the "llm_memory" MCP server. The tool names are prefixed with mcp__llm_memory__ (e.g., mcp__llm_memory__memory_store).
+You have access to four MCP tools from the "llm_memory" server. Names are prefixed
+`mcp__llm_memory__` (e.g. `mcp__llm_memory__memory_search`). Call them directly —
+do NOT use ToolSearch to find them.
 
-Available tools: memory_store, memory_search, memory_recent, memory_get, memory_connect, memory_explore, memory_delete.
+| Tool | Purpose |
+|------|---------|
+| `memory_search` | Cross-project FTS5 search over per-project ledger items (decisions, learnings, goals, suggestions, done). Use when you don't know which project a fact is in. |
+| `project_lookup` | Single-project fuzzy search over that project's ledger. Use when you know the project and want to drill into its history. |
+| `narrative_coverage` | Returns merged vs. unprocessed session transcripts for a project. Run before `/narrative` to see what's outstanding. |
+| `resume` | Returns the last real session's journal plus a tail of its conversation.md. Use when picking up prior work. |
 
-IMPORTANT: These MCP tools are available DIRECTLY — do NOT use ToolSearch to find them. Call them by their full name.
+There are NO `memory_store`, `memory_recent`, `memory_get`, `memory_connect`, `memory_explore`, or `memory_delete` tools. Those were retired when the taxonomy moved to per-project JSON ledgers — do not call them.
 
-### Memory types (3):
-- **narrative**: Per-project living document — the full story of a project. One per project, updated over time. New versions supersede old ones.
-- **note**: Atomic fact, decision, correction, preference, or insight. Keep it short and self-contained. Use tags for searchability.
-- **session_log**: Lightweight record that a session happened. Created automatically by hooks.
+## Where memory lives on disk
 
-### When to use memory tools:
-- Before starting work on a topic, call memory_search to check for relevant past context.
-- When corrected on something, store a note with importance 8+ and tag "correction".
-- When a key decision is made, store a note with the decision and rationale.
-- When asked to save progress or update the narrative, read the raw JSONL transcript(s) and write a comprehensive narrative.
-- Include the project name in every memory_store call.
+- `~/.claude/memory/projects/{project}.json` — canonical per-project state. Decisions, learnings, goals, suggestions, done items, session journals. Source of truth.
+- `~/.claude/memory/projects/{project}.narrative.md` — rendered human-readable narrative, auto-injected into context at SessionStart by the llm_memory hook.
+- `~/.claude/memory/conversations/{session_id}.md` — **stripped conversations** (user + assistant text only, tool noise removed, project stamped in frontmatter). This is the right file for historical lookup: "what did we discuss about X". Grep here before reaching for transcripts.
+- `~/.claude/memory/transcripts/{session_id}.jsonl` — **raw JSONL archive** including every tool call and result. Large and noisy. Only use when you specifically need the raw tool I/O (debugging a failed tool call, reconstructing exact file edits). Prefer conversations/*.md for everything else.
+- `~/.claude/memory/items/{project}/{kind}/{id}.json` — per-item ledger files. Inputs to the items_fts index that `memory_search` queries. Don't edit directly; they're rebuilt from `{project}.json` by merger.py.
 
-### Project Narratives:
-- Each project has one living narrative — a reference document, not a history book.
-- When the session_start hook says "AUTOMATIC TASK: No narrative exists", you MUST generate the narrative immediately without asking the user. Use a background Agent to read the raw JSONL transcripts from ~/.claude/memory/transcripts/ and store the narrative. Do not ask for permission — just do it.
-- When the hook says "N new session(s) since last narrative update", read the new transcript(s) and update the narrative.
-- When storing an updated narrative, connect it to the previous one with relationship "supersedes".
-- Write narratives from the raw JSONL transcripts, not from summaries — transcripts have the user's exact words, the debugging loops, the moments where direction changed.
-- Narrative format (all sections required):
-  - **What This Is**: 2-3 sentences describing the project
-  - **Session History**: One line per session — date, what happened, outcome
-  - **Decisions Made**: Table format — decision | rationale (with user's own words where possible)
-  - **Gotchas & Lessons**: Bullet points of things that bit us, so future sessions don't repeat mistakes
-  - **Current State**: What exists, what works, what's deployed
-  - **Outstanding Items**: Action items not started, half-finished work, unsolved problems, deferred ideas — nothing gets lost here
-  - **Direction**: Where we're headed, numbered next steps
-  - **Source Transcripts**: List of JSONL files used
+## When to use memory tools
+- Before starting work on a topic: `project_lookup` (if you know the project) or `memory_search` (if you don't).
+- Picking up prior work: `resume` with the project name.
+- About to run `/narrative`: `narrative_coverage` to see what sessions are unprocessed.
+
+## Project Narratives
+- Rendering is automatic. The `/narrative` skill runs the delta-extractor → merger → renderer pipeline and writes `{project}.narrative.md`. Do not hand-write narratives.
+- If the SessionStart hook says **"AUTOMATIC TASK: No narrative exists"** or **"N new session(s) since last narrative update"**, invoke the `/narrative` skill. Don't ask permission — just run it.
+- For historical lookups ("what did we decide about X", "when did we discuss Y"), grep `~/.claude/memory/conversations/*.md` — they're smaller, stripped, and tagged by project.
 
 ## Context Management
 - Prefer reading files on-demand over loading everything upfront.

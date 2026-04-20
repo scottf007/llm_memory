@@ -196,6 +196,45 @@ print(len(logged - merged))
         echo "## Project Narrative:"
         echo "$NARRATIVE"
     fi
+
+    # Surface stale suggestions (active, last_touched >30d) for review.
+    # Push-forward, not auto-archive: user sees the top-5 oldest each session
+    # until they act or explicitly archive. Capped so context doesn't bloat.
+    if [ -n "$PROJECT" ]; then
+        STALE_SUGGESTIONS=$(python3 -c "
+import json
+from datetime import datetime, timezone, timedelta
+
+path = '$HOME/.claude/memory/projects/$PROJECT.json'
+try:
+    with open(path) as f: d = json.load(f)
+except FileNotFoundError:
+    import sys; sys.exit(0)
+
+cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+stale = []
+for s in d.get('suggestions', []) or []:
+    if s.get('status') != 'active': continue
+    ts = s.get('last_touched_at') or ''
+    try:
+        t = datetime.fromisoformat(ts.replace('Z','+00:00'))
+    except Exception:
+        continue
+    if t < cutoff:
+        age = (datetime.now(timezone.utc) - t).days
+        stale.append((age, s.get('id',''), (s.get('text') or '')[:140]))
+
+stale.sort(reverse=True)
+for age, sid, text in stale[:5]:
+    print(f'  [{age}d] {sid}: {text}')
+" 2>/dev/null)
+        if [ -n "$STALE_SUGGESTIONS" ]; then
+            echo ""
+            echo "## Suggestions untouched >30d — act on them or mark them resolved/rejected"
+            echo "$STALE_SUGGESTIONS"
+        fi
+    fi
+
     # Determine what action is needed
     if [ -z "$NARRATIVE" ] && [ -n "$PROJECT" ]; then
         SESSION_COUNT=$(python3 -c "
