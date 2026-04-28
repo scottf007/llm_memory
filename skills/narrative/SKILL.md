@@ -12,29 +12,26 @@ living narrative document. Works across all projects automatically.
 One pipeline, no branching: each session becomes a structured delta
 (`delta-extractor` agent), deltas merge into a per-project JSON state
 (`merger.py`), and the state renders to markdown (`renderer.py`). The rendered
-`~/.claude/memory/projects/{project}.narrative.md` file is the narrative —
-there is no DB record, nothing to call `memory_store` with. Projects that
-don't yet have a state JSON are bootstrapped with an empty stub.
+`~/.claude/memory/projects/{project}.narrative.md` file is the narrative.
+Projects that don't yet have a state JSON are bootstrapped with an empty stub.
 
 ## Step 1: Discover work
 
 Call `narrative_coverage(project=PROJECT)` for the current project first, then
 for any other projects surfaced by the session_start hook. `narrative_coverage`
-computes unprocessed transcripts by diffing on-disk session_logs against
-`{project}.json.sessions[]` (i.e. sessions that have already been merged).
+computes unprocessed transcripts by diffing on-disk main-session transcripts
+against `{project}.json.sessions[]` (i.e. sessions already merged).
 
 To enumerate all projects with session activity:
 
 ```bash
 python3 -c "
+import sys; sys.path.insert(0, '/home/scott/.claude/memory/lib')
 from conversations import iter_sessions
 seen = {fm.get('project') for fm in iter_sessions() if fm.get('project')}
 for p in sorted(seen): print(p)
 "
 ```
-
-(Conversations are stamped with their project in frontmatter at extract time;
-the retired `memory_store(type=session_log)` path no longer exists.)
 
 If `unprocessed` is empty for a project, skip it.
 
