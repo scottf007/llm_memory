@@ -146,6 +146,14 @@ from file mtime if unavailable). Drop any entries whose
    delta files are a feature, not debt — they act as the pre-processed
    cache so repeat runs skip LLM calls.
 
+5. **If the delta-extractor's Write to `~/.claude/memory/deltas/...` fails
+   or prompts repeatedly,** that's a missing permission, not a sandbox
+   block. Do NOT reroute through `/tmp/` and `mv` — that just multiplies
+   the prompts. Tell the user to add `Write(/home/scott/.claude/memory/**)`
+   to `~/.claude/settings.json`'s `permissions.allow` (it ships in
+   `settings.yaml` as of the post-2026-05-11 install; older installs need
+   to re-run `install.sh` or add it manually) and stop.
+
 ### 2d. Render once per project
 
 After all deltas for the project have merged:

@@ -17,6 +17,12 @@ permissions:
   - "Bash(git:*)"
   - "Bash(python -m pytest:*)"
   - "WebSearch"
+  # File ops on the memory dir — needed by /narrative so the delta-extractor
+  # subagent can write deltas to ~/.claude/memory/deltas/ without prompting.
+  # Without these, every /narrative run prompts ~4× and parent-Claude tends
+  # to invent a /tmp workaround that triggers more prompts.
+  - "Write(/home/scott/.claude/memory/**)"
+  - "Edit(/home/scott/.claude/memory/**)"
   # MCP memory server tools
   - "mcp__llm_memory__memory_store"
   - "mcp__llm_memory__memory_search"
@@ -25,6 +31,9 @@ permissions:
   - "mcp__llm_memory__memory_connect"
   - "mcp__llm_memory__memory_explore"
   - "mcp__llm_memory__memory_delete"
+  - "mcp__llm_memory__narrative_coverage"
+  - "mcp__llm_memory__project_lookup"
+  - "mcp__llm_memory__resume"
 
 # Hook scripts (paths resolved relative to llm_memory install dir at install time)
 hooks:
