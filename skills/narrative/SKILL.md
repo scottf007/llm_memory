@@ -109,12 +109,12 @@ from file mtime if unavailable). Drop any entries whose
      description="Delta PROJECT: SESSION_ID",
      subagent_type="delta-extractor",
      prompt="""Project: PROJECT_NAME
-   conversation_md_path: ~/.claude/memory/conversations/SESSION_ID.md
-   project_state_path:   ~/.claude/memory/projects/PROJECT_NAME.json
+   conversation_md_path: /home/scott/.claude/memory/conversations/SESSION_ID.md
+   project_state_path:   /home/scott/.claude/memory/projects/PROJECT_NAME.json
    session_id:           SESSION_ID
    session_started_at:   ISO8601_START
    session_ended_at:     ISO8601_END
-   output_path:          ~/.claude/memory/deltas/SESSION_ID.delta.json
+   output_path:          /home/scott/.claude/memory/deltas/SESSION_ID.delta.json
 
    Read the project state JSON and the conversation markdown. Produce the
    structured delta per your prompt spec and write it as JSON (only) to
