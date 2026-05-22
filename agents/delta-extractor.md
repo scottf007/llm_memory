@@ -2,6 +2,7 @@
 name: delta-extractor
 description: Reads one session's stripped conversation plus the current project JSON and emits a structured delta the merger applies back into the JSON
 tools: Read, Write, Bash
+model: sonnet
 ---
 
 ## Your Job

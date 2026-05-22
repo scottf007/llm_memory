@@ -2,6 +2,7 @@
 name: state-auditor
 description: One-off audit of a {project}.json. Applies the three-part filter (design-shaping AND non-obvious AND current) to every active decision, learning, and done item, and proposes archives for items that fail the filter. Output is a delta the merger can apply.
 tools: Read, Write, Bash
+model: sonnet
 ---
 
 ## Your Job
