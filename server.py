@@ -89,13 +89,23 @@ async def list_tools() -> list[types.Tool]:
         types.Tool(
             name="narrative_coverage",
             description="Return merged vs unprocessed session transcripts for a project. "
-            "Compares on-disk session files against {project}.json.sessions[].",
+            "Compares on-disk session files against {project}.json.sessions[]. "
+            "Sub-agent transcripts (session_id starting with 'agent-') and short "
+            "one-shot sessions (fewer than min_user_turns substantive user turns, "
+            "default 5) are excluded so the narrative pipeline doesn't burn cycles "
+            "on noise like single-prompt SDK calls.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "project": {
                         "type": "string",
                         "description": "Project name, e.g. 'cricket_manager'",
+                    },
+                    "min_user_turns": {
+                        "type": "integer",
+                        "description": "Drop transcripts with fewer than this many "
+                        "non-sidechain user turns (default 5). Pass 0 to disable.",
+                        "default": 5,
                     },
                 },
                 "required": ["project"],
@@ -213,6 +223,47 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
 
 # -- narrative_coverage ----------------------------------------------------
 
+def _count_substantive_user_turns(jsonl_path: str, cap: int) -> int:
+    """Count top-level user turns that carry a real prompt.
+
+    A "substantive" turn is one where `type == "user"`, `isSidechain` is
+    falsy, `message.role == "user"`, and the content is not exclusively
+    tool_result blocks (which are synthetic user turns the harness emits
+    to feed tool output back to the model).
+
+    Stops counting as soon as `cap` is reached so big transcripts don't
+    pay for a full scan when the threshold is low.
+    """
+    if cap <= 0:
+        return 0
+    n = 0
+    try:
+        with open(jsonl_path, encoding="utf-8") as fp:
+            for line in fp:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") != "user" or rec.get("isSidechain"):
+                    continue
+                msg = rec.get("message") or {}
+                if msg.get("role") != "user":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, list) and content and all(
+                    isinstance(c, dict) and c.get("type") == "tool_result"
+                    for c in content
+                ):
+                    continue
+                n += 1
+                if n >= cap:
+                    return n
+    except OSError:
+        # On read error, fail open: report cap so the caller keeps the file.
+        return cap
+    return n
+
+
 def _find_project_transcripts(project: str) -> set[str]:
     """Return all .jsonl transcript files on disk for a project.
 
@@ -274,6 +325,13 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
     if not project:
         return _error("project is required")
 
+    try:
+        min_user_turns = int(args.get("min_user_turns", 5) or 0)
+    except (TypeError, ValueError):
+        min_user_turns = 5
+    if min_user_turns < 0:
+        min_user_turns = 0
+
     on_disk = _find_project_transcripts(project)
     state_path = DB_DIR / "projects" / f"{project}.json"
     narrative_path = DB_DIR / "projects" / f"{project}.narrative.md"
@@ -295,9 +353,27 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
     # Map on-disk paths to session_ids.
     on_disk_by_sid = {Path(p).stem: p for p in on_disk}
 
-    unprocessed = [
-        p for sid, p in sorted(on_disk_by_sid.items()) if sid not in merged_ids
+    raw_unprocessed = [
+        (sid, p) for sid, p in sorted(on_disk_by_sid.items()) if sid not in merged_ids
     ]
+
+    # Filter: drop sub-agent transcripts (agent-*) and short one-shot sessions
+    # so the narrative pipeline doesn't extract from noise like single-prompt
+    # SDK calls. Counts only need to reach the threshold, so the scan short-
+    # circuits cheaply for sessions that already qualify.
+    unprocessed: list[str] = []
+    skipped_subagent = 0
+    skipped_low_turn = 0
+    for sid, p in raw_unprocessed:
+        if sid.startswith("agent-"):
+            skipped_subagent += 1
+            continue
+        if min_user_turns > 0:
+            turns = _count_substantive_user_turns(p, cap=min_user_turns)
+            if turns < min_user_turns:
+                skipped_low_turn += 1
+                continue
+        unprocessed.append(p)
 
     narrative_mtime = None
     if narrative_path.exists():
@@ -308,17 +384,28 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         except OSError:
             pass
 
+    skipped_total = skipped_subagent + skipped_low_turn
+    filter_note = (
+        f" (excluded {skipped_total}: {skipped_subagent} sub-agent, "
+        f"{skipped_low_turn} <{min_user_turns}-turn)"
+        if skipped_total else ""
+    )
+
     if not state_exists:
         return _text(json.dumps({
             "project": project,
             "status": "no_state",
             "on_disk_count": len(on_disk),
             "processed_count": 0,
-            "unprocessed_count": len(on_disk),
-            "unprocessed": sorted(on_disk),
+            "unprocessed_count": len(unprocessed),
+            "unprocessed": unprocessed,
+            "skipped_subagent_count": skipped_subagent,
+            "skipped_low_turn_count": skipped_low_turn,
+            "min_user_turns": min_user_turns,
             "summary": (
-                f"No {project}.json yet. {len(on_disk)} transcript(s) on disk — "
-                "run /narrative to bootstrap."
+                f"No {project}.json yet. {len(unprocessed)} substantive "
+                f"transcript(s) ready to process out of {len(on_disk)} on disk"
+                f"{filter_note} — run /narrative to bootstrap."
             ),
         }, indent=2))
 
@@ -330,10 +417,13 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         "processed_count": len(merged_ids),
         "unprocessed_count": len(unprocessed),
         "unprocessed": unprocessed,
+        "skipped_subagent_count": skipped_subagent,
+        "skipped_low_turn_count": skipped_low_turn,
+        "min_user_turns": min_user_turns,
         "summary": (
-            f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk."
+            f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk{filter_note}."
             if unprocessed else
-            f"All {len(on_disk)} transcript(s) are merged into the narrative."
+            f"All {len(on_disk)} transcript(s) are merged or filtered out{filter_note}."
         ),
     }, indent=2))
 
