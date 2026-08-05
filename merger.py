@@ -3,10 +3,16 @@ Merger — applies a delta JSON (from the delta-extractor agent) into a
 project state JSON, assigning stable IDs and updating ledger statuses.
 
 Usage:
-    python merger.py <project_json_path> <delta_json_path>
+    python merger.py [--items-root PATH] <project_json_path> <delta_json_path>
 
 Mutates the project JSON in place. Idempotent per delta file (won't
 re-append if the session_id is already present).
+
+The per-item files and the FTS index are derived from where the state JSON
+lives, not hardcoded: a state file inside ~/.claude/memory/projects/ uses the
+real ~/.claude/memory/items/ + memory.db; a state file anywhere else is
+treated as a sandbox and fans out into a sibling items/ directory with its own
+memory.db, so dry-running a copy can never mutate the real memory tree.
 """
 
 import json
@@ -26,6 +32,49 @@ ID_PREFIXES = {
 }
 
 ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
+
+
+def _memory_root() -> Path:
+    """Canonical memory root. Resolved at call time (not import time) so a
+    relocated HOME — tests, alternate installs — is honoured."""
+    return Path.home() / ".claude" / "memory"
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    try:
+        return a.expanduser().resolve() == b.expanduser().resolve()
+    except OSError:
+        return False
+
+
+def resolve_paths(project_path: Path,
+                  items_root_override: Path | None = None) -> tuple[Path, Path, bool]:
+    """Work out where per-item files and the FTS index belong for a state file.
+
+    Returns (items_root, db_path, sandboxed).
+
+    - State file inside ~/.claude/memory/projects/ → the real
+      ~/.claude/memory/items/ and ~/.claude/memory/memory.db. This is the
+      production pipeline path and its behaviour is unchanged.
+    - Anywhere else → a sibling `items/` directory next to the state file plus
+      a `memory.db` alongside it, so merging a scratch copy of a project (even
+      one kept under its real name) cannot touch the real memory tree.
+    - An explicit items_root_override always wins; the DB always sits next to
+      the items root, so pointing the override at the canonical items root
+      reproduces canonical behaviour exactly.
+    """
+    memory_root = _memory_root()
+    canonical_items = memory_root / "items"
+
+    if items_root_override is not None:
+        items_root = Path(items_root_override).expanduser()
+    elif _same_path(Path(project_path).expanduser().parent, memory_root / "projects"):
+        items_root = canonical_items
+    else:
+        items_root = Path(project_path).expanduser().parent / "items"
+
+    db_path = items_root.parent / "memory.db"
+    return items_root, db_path, not _same_path(items_root, canonical_items)
 
 
 def _new_id(kind: str) -> str:
@@ -326,9 +375,14 @@ def fan_out_items(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> i
     return written
 
 
-def _rebuild_items_index(db_path: Path) -> None:
+def _rebuild_items_index(db_path: Path, items_root: Path | None = None) -> None:
     """Invoke the indexer to refresh the FTS5 table. Best-effort — if the
-    indexer isn't available (tests, broken install), skip silently."""
+    indexer isn't available (tests, broken install), skip silently.
+
+    items_root must be passed alongside db_path: indexing defaults to the real
+    items tree, so a sandbox DB built without it would be populated from the
+    user's production items.
+    """
     try:
         import indexer
     except ImportError:
@@ -338,35 +392,72 @@ def _rebuild_items_index(db_path: Path) -> None:
         except ImportError:
             return
     try:
-        indexer.rebuild_items_index(db_path=db_path)
+        indexer.rebuild_items_index(items_root=items_root, db_path=db_path)
     except Exception:
         pass
 
 
-def main() -> None:
-    if len(sys.argv) != 3:
-        print("Usage: merger.py <project_json_path> <delta_json_path>", file=sys.stderr)
+USAGE = "Usage: merger.py [--items-root PATH] <project_json_path> <delta_json_path>"
+
+
+def _parse_args(argv: list[str]) -> tuple[Path, Path, Path | None]:
+    """Positional CLI, unchanged, plus an optional --items-root override."""
+    items_root_override: Path | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--items-root":
+            if i + 1 >= len(argv):
+                print("merger.py: --items-root needs a PATH", file=sys.stderr)
+                print(USAGE, file=sys.stderr)
+                sys.exit(1)
+            items_root_override = Path(argv[i + 1])
+            i += 2
+            continue
+        if arg.startswith("--items-root="):
+            items_root_override = Path(arg.split("=", 1)[1])
+            i += 1
+            continue
+        positional.append(arg)
+        i += 1
+
+    if len(positional) != 2:
+        print(USAGE, file=sys.stderr)
         sys.exit(1)
 
-    project_path = Path(sys.argv[1])
-    delta_path = Path(sys.argv[2])
+    return Path(positional[0]), Path(positional[1]), items_root_override
+
+
+def main(argv: list[str] | None = None) -> None:
+    project_path, delta_path, items_root_override = _parse_args(
+        list(sys.argv[1:] if argv is None else argv))
+
+    items_root, db_path, sandboxed = resolve_paths(project_path, items_root_override)
+    if sandboxed:
+        print(f"merger.py: sandbox mode — {project_path} is outside "
+              f"{_memory_root() / 'projects'}; items → {items_root}, "
+              f"index → {db_path} (real memory tree untouched)", file=sys.stderr)
 
     state = json.loads(project_path.read_text()) if project_path.exists() else {}
     delta = json.loads(delta_path.read_text())
 
     project = project_path.stem
+    if state.get("project") and state["project"] != project:
+        print(f"merger.py: warning — state['project'] is {state['project']!r} but "
+              f"the filename says {project!r}; using {project!r}", file=sys.stderr)
 
     # Reconcile any per-item file changes that Syncthing brought in before
     # applying this session's delta, so the delta merges against the newest
     # view of the ledger (not just what the local JSON last knew).
-    inbox = inbox_merge(state, project)
+    inbox = inbox_merge(state, project, items_root)
 
     state = apply_delta(state, delta)
     state["last_rebuilt_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     project_path.write_text(json.dumps(state, indent=2))
 
-    fanned = fan_out_items(state, project)
-    _rebuild_items_index(Path.home() / ".claude" / "memory" / "memory.db")
+    fanned = fan_out_items(state, project, items_root)
+    _rebuild_items_index(db_path, items_root)
 
     print(f"Merged {delta['session_id']} into {project_path} "
           f"({inbox} inbox, {fanned} fanned out)")
