@@ -9,9 +9,17 @@ The resume_excerpt field on the most recent session is derived from the
 tail of its conversation.md at render time (not stored in the JSON).
 
 Rendering uses a decay-score filter: each item's relevance is
-importance_weight × exp(-age_in_days / half_life). Load-bearing items
-always render (high weight floor); standard items render while recent;
-minor items never render individually.
+importance_weight × exp(-age_in_days / half_life), floored per importance.
+Load-bearing items have a score floor so they sort to the top and stay
+render-eligible indefinitely; standard items render while recent; minor
+items never render individually.
+
+Size is an input, not an emergent output. Every elastic section has a token
+budget: items render in score order until the budget is spent, and the
+remainder collapses into a "N dissolved — use project_lookup" pointer. This
+is what bounds the document. The decay score decides *what* survives the
+budget; the budget decides *how much* does. Without the second half, a
+category that never decays (load_bearing) grows without limit.
 """
 
 import json
@@ -29,8 +37,48 @@ DEFAULT_RESUME_LINES = 150
 # Decay parameters. Tunables; see architecture-redesign-2026-04-18.md.
 HALF_LIFE_DAYS = 30.0
 IMPORTANCE_WEIGHTS = {"load_bearing": 3.0, "standard": 1.0, "minor": 0.3}
-RENDER_THRESHOLD = 0.5  # standard/minor below this dissolve; load_bearing always renders.
+# A score floor keeps load-bearing items ranked above aged standard items
+# without exempting them from the budget. Previously load_bearing bypassed
+# filtering entirely, which made the rendered document unbounded in project
+# age — the single largest cause of narrative bloat.
+IMPORTANCE_FLOORS = {"load_bearing": 1.0, "standard": 0.0, "minor": 0.0}
+RENDER_THRESHOLD = 0.5  # standard/minor below this dissolve.
 STALE_SCORE_THRESHOLD = 0.3  # load_bearing items below this get a stale callout.
+
+# Optional per-item `value` (0.0-1.0) from the delta-extractor, ordering items
+# *within* an importance tier. The bucket is the coarse class an LLM can grade
+# reliably; the float is the fine ordering it can only give relatively. Without
+# it, ranking inside a tier falls back to pure recency — which is backwards for
+# load-bearing items, where the oldest are often the most foundational.
+# Neutral default reproduces pre-value behaviour exactly, so absent values on
+# existing items need no migration.
+VALUE_NEUTRAL = 0.5
+VALUE_SPREAD = 1.0  # multiplier ranges over [1-VALUE_SPREAD/2, 1+VALUE_SPREAD/2]
+
+# Token budgets per elastic section. Rough char→token ratio is fine here:
+# the budget is a ceiling, not an accounting record.
+CHARS_PER_TOKEN = 4
+# The soft budget is a target, not a wall. Between soft and hard, only items
+# scoring above SOFT_OVERFLOW_SCORE get in — so a section carrying unusually
+# valuable material can run over, and a section full of filler cannot.
+HARD_BUDGET_MULTIPLIER = 1.5
+SOFT_OVERFLOW_SCORE = 1.5
+# Minimum items either side of the cut line to hand back for re-valuation, and
+# the overall cap on that list so the extractor's input stays bounded.
+CONTESTED_WINDOW = 8
+CONTESTED_MAX = 40
+TIE_EPSILON = 1e-6
+SECTION_TOKEN_BUDGETS = {
+    "approach": 4500,
+    "done": 2000,
+    "learnings": 2000,
+    # The format spec says never trim goals — closure discipline is meant to
+    # bound them. This is a generous backstop for when it doesn't.
+    "goals": 2500,
+    "suggestions": 1500,
+}
+# "Operations" is deliberately absent: the format spec exempts it from budget
+# pressure, because operational facts change only when infrastructure does.
 
 
 def _parse_ts(ts: str | None) -> datetime | None:
@@ -54,13 +102,45 @@ def _age_days(ts: str | None, now: datetime) -> float | None:
     return max(0.0, (now - dt).total_seconds() / 86400.0)
 
 
+def _value_multiplier(item: dict) -> float:
+    """Scale from the optional per-item `value` float. Absent or malformed
+    values are neutral (1.0), so ungraded items rank exactly as they did
+    before `value` existed."""
+    v = item.get("value")
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return 1.0
+    v = float(v)
+    # NaN survives isinstance and then poisons every comparison downstream,
+    # silently reordering the whole section. Treat it as ungraded.
+    if not math.isfinite(v):
+        return 1.0
+    v = min(1.0, max(0.0, v))
+    return 1.0 + (v - VALUE_NEUTRAL) * VALUE_SPREAD
+
+
 def _score(item: dict, now: datetime) -> float:
     imp = item.get("importance") or "standard"
-    weight = IMPORTANCE_WEIGHTS.get(imp, 1.0)
+    mult = _value_multiplier(item)
+    weight = IMPORTANCE_WEIGHTS.get(imp, 1.0) * mult
+    # The floor scales too — otherwise every aged load-bearing item pins to
+    # the same value and ordering inside the tier collapses back to a tie.
+    floor = IMPORTANCE_FLOORS.get(imp, 0.0) * mult
     age = _age_days(item.get("last_touched_at"), now)
     if age is None:
         # No timestamp — assume fresh-ish so new items don't dissolve on a
         # state that hasn't been migrated yet.
+        return max(weight, floor)
+    return max(weight * math.exp(-age / HALF_LIFE_DAYS), floor)
+
+
+def _raw_score(item: dict, now: datetime) -> float:
+    """Decay score ignoring the importance floor. Used by the stale callout,
+    which exists precisely to surface load-bearing items whose real
+    (unfloored) relevance has decayed."""
+    imp = item.get("importance") or "standard"
+    weight = IMPORTANCE_WEIGHTS.get(imp, 1.0)
+    age = _age_days(item.get("last_touched_at"), now)
+    if age is None:
         return weight
     return weight * math.exp(-age / HALF_LIFE_DAYS)
 
@@ -75,27 +155,147 @@ def _ordered_sessions(state: dict) -> list:
 
 
 def _partition_by_score(items: list, now: datetime) -> tuple[list, list, int]:
-    """Return (always_render, standard_rendered, dissolved_count).
-    - always_render: load_bearing items, regardless of score
-    - standard_rendered: standard items with score >= threshold
-    - dissolved_count: everything else (aged-out standard + all minor + aged-out load_bearing, though load_bearing always renders so it's only the first two)
+    """Return (primary, secondary, dissolved_count).
+    - primary: load_bearing items (score-floored, so always above threshold)
+    - secondary: standard items with score >= threshold
+    - dissolved_count: aged-out standard items + all minor items
+
+    Eligibility only. The caller still has to fit the result inside a token
+    budget via _trim_to_budget — being load_bearing buys rank, not exemption.
     """
-    always = []
-    standard_rendered = []
+    primary = []
+    secondary = []
     dissolved = 0
     for item in items:
         imp = item.get("importance") or "standard"
         s = _score(item, now)
         if imp == "load_bearing":
-            always.append((item, s))
+            primary.append((item, s))
         elif imp == "standard" and s >= RENDER_THRESHOLD:
-            standard_rendered.append((item, s))
+            secondary.append((item, s))
         else:
             dissolved += 1
     # Sort each group by score descending so most-relevant shows first.
-    always.sort(key=lambda x: -x[1])
-    standard_rendered.sort(key=lambda x: -x[1])
-    return [i for i, _ in always], [i for i, _ in standard_rendered], dissolved
+    primary.sort(key=lambda x: -x[1])
+    secondary.sort(key=lambda x: -x[1])
+    return [i for i, _ in primary], [i for i, _ in secondary], dissolved
+
+
+def _trim_to_budget(groups: list[list], fmt, section: str,
+                    now: datetime | None = None,
+                    report: dict | None = None) -> tuple[list[list], int]:
+    """Fit already-ranked groups of items into the section's token budget.
+
+    `groups` is a list of item lists, consumed in order (e.g. load-bearing
+    first, then standard). Returns (kept_groups, dropped_count) with the same
+    group arity, so callers keep their subsection headings.
+
+    The budget is soft. Up to the soft target anything ranked in gets in; from
+    there to the hard ceiling only items scoring above SOFT_OVERFLOW_SCORE do.
+    A section carrying unusually valuable material can run over; a section of
+    filler cannot. Nothing crosses the hard ceiling.
+
+    Walks in rank order and stops at the first item that won't fit — it does
+    not skip ahead to squeeze in a shorter lower-ranked item, so what renders
+    is always a clean prefix of the ranking. Since groups arrive sorted by
+    descending score, an item rejected on score means every item after it
+    would be too. Always keeps at least one item, so an over-long top item
+    can't blank the section.
+
+    When `report` is passed, records the items straddling the cut line under
+    `report[section]` — that's the input to the contested-item re-valuation
+    pass, which asks the extractor to re-grade only what the budget actually
+    had to decide between.
+    """
+    soft = SECTION_TOKEN_BUDGETS.get(section, 0) * CHARS_PER_TOKEN
+    if not soft:
+        return groups, 0
+    hard = int(soft * HARD_BUDGET_MULTIPLIER)
+    now = now or datetime.now(timezone.utc)
+
+    kept: list[list] = []
+    kept_flat: list[dict] = []
+    dropped_flat: list[dict] = []
+    spent = 0
+    overflowed = False
+    for group in groups:
+        kept_group = []
+        for item in group:
+            if overflowed:
+                dropped_flat.append(item)
+                continue
+            cost = len(fmt(item)) + 1
+            fits = (
+                not kept_flat                                   # always keep one
+                or spent + cost <= soft                         # inside soft target
+                or (spent + cost <= hard                        # soft overflow, if
+                    and _score(item, now) >= SOFT_OVERFLOW_SCORE)  # it earns it
+            )
+            if not fits:
+                overflowed = True
+                dropped_flat.append(item)
+                continue
+            kept_group.append(item)
+            kept_flat.append(item)
+            spent += cost
+        kept.append(kept_group)
+
+    if report is not None and dropped_flat:
+        report[section] = {
+            "kept": len(kept_flat),
+            "dropped": len(dropped_flat),
+            "spent_tokens": spent // CHARS_PER_TOKEN,
+            "soft_tokens": soft // CHARS_PER_TOKEN,
+            "contested": _contested_slice(kept_flat, dropped_flat, now),
+        }
+
+    return kept, len(dropped_flat)
+
+
+def _contested_slice(kept_flat: list, dropped_flat: list, now: datetime) -> list[dict]:
+    """The items the ranking could not actually separate at the cut line.
+
+    A fixed window either side would miss the real pathology: when many items
+    share the same floored score, the ranking carries no information and which
+    side of the line they landed on is arbitrary. So take the whole tie band
+    at the boundary — usually a handful, but on a ledger that has never been
+    valued it's the entire over-graded tier, which is exactly what needs
+    grading. It shrinks on its own as values populate.
+
+    A minimum window either side is always included, so the extractor sees the
+    neighbours it's ranking against even when the band is one-sided.
+    """
+    if not dropped_flat:
+        return []
+    boundary = _score(kept_flat[-1], now) if kept_flat else _score(dropped_flat[0], now)
+    half = CONTESTED_MAX // 2
+
+    def select(items: list, window: list) -> list:
+        tied = [i for i in items if abs(_score(i, now) - boundary) <= TIE_EPSILON]
+        seen, out = set(), []
+        for item in tied + window:
+            key = id(item) if item.get("id") is None else item["id"]
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+        return out[:half]
+
+    kept_sel = select(kept_flat, kept_flat[-CONTESTED_WINDOW:])
+    drop_sel = select(dropped_flat, dropped_flat[:CONTESTED_WINDOW])
+    return ([_contested_entry(i, now, "kept") for i in kept_sel]
+            + [_contested_entry(i, now, "dropped") for i in drop_sel])
+
+
+def _contested_entry(item: dict, now: datetime, outcome: str) -> dict:
+    return {
+        "id": item.get("id"),
+        "text": (item.get("text") or "")[:200],
+        "importance": item.get("importance") or "standard",
+        "value": item.get("value"),
+        "score": round(_score(item, now), 3),
+        "outcome": outcome,
+    }
 
 
 def _tail_lines(path: Path, n: int) -> str:
@@ -119,7 +319,8 @@ def _render_summary(s: dict) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def _render_approach(decisions: list, state: dict | None = None, now: datetime | None = None) -> str:
+def _render_approach(decisions: list, state: dict | None = None, now: datetime | None = None,
+                     report: dict | None = None) -> str:
     out = ["## Approach\n"]
     active = _active(decisions)
     if not active:
@@ -137,12 +338,16 @@ def _render_approach(decisions: list, state: dict | None = None, now: datetime |
             rationale = f"{rationale} Scott: \"{q}\""
         return f"| {text} | {rationale} |"
 
-    always, standard_rendered, dissolved = _partition_by_score(active, now)
+    primary, secondary, dissolved = _partition_by_score(active, now)
+    (primary, secondary), over_budget = _trim_to_budget(
+        [primary, secondary], _fmt_row, "approach", now, report
+    )
+    dissolved += over_budget
 
-    if always or standard_rendered:
+    if primary or secondary:
         out.append("| Decision | Rationale |")
         out.append("|----------|-----------|")
-        for d in always + standard_rendered:
+        for d in primary + secondary:
             out.append(_fmt_row(d))
     else:
         out.append("_No load-bearing or currently-active decisions._")
@@ -173,7 +378,8 @@ def _render_operations(ops: list) -> str:
     return "\n".join(out) + "\n"
 
 
-def _render_done(done: list, state: dict | None = None, now: datetime | None = None) -> str:
+def _render_done(done: list, state: dict | None = None, now: datetime | None = None,
+                 report: dict | None = None) -> str:
     out = ["## What's Done\n"]
     active = _active(done)
     if not active:
@@ -191,19 +397,23 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
             line += f" (`{commit}`)"
         return line
 
-    always, standard_rendered, dissolved = _partition_by_score(active, now)
+    primary, secondary, dissolved = _partition_by_score(active, now)
+    (primary, secondary), over_budget = _trim_to_budget(
+        [primary, secondary], _fmt_line, "done", now, report
+    )
+    dissolved += over_budget
 
-    if always:
+    if primary:
         out.append("### Foundations & current state")
         out.append("")
-        for w in always:
+        for w in primary:
             out.append(_fmt_line(w))
         out.append("")
 
-    if standard_rendered:
+    if secondary:
         out.append("### Recent work")
         out.append("")
-        for w in standard_rendered:
+        for w in secondary:
             out.append(_fmt_line(w))
         out.append("")
 
@@ -217,7 +427,8 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
     return "\n".join(out) + "\n"
 
 
-def _render_learnings(learnings: list, state: dict | None = None, now: datetime | None = None) -> str:
+def _render_learnings(learnings: list, state: dict | None = None, now: datetime | None = None,
+                      report: dict | None = None) -> str:
     out = ["## What We've Learnt\n"]
     active = _active(learnings)
     if not active:
@@ -235,9 +446,13 @@ def _render_learnings(learnings: list, state: dict | None = None, now: datetime 
             line += f" — {ev}"
         return line
 
-    always, standard_rendered, dissolved = _partition_by_score(active, now)
+    primary, secondary, dissolved = _partition_by_score(active, now)
+    (primary, secondary), over_budget = _trim_to_budget(
+        [primary, secondary], _fmt, "learnings", now, report
+    )
+    dissolved += over_budget
 
-    for l in always + standard_rendered:
+    for l in primary + secondary:
         out.append(_fmt(l))
 
     if dissolved:
@@ -261,7 +476,7 @@ def _stale_callout(items: list, label: str, now: datetime | None = None) -> list
     for i in items:
         if (i.get("importance") or "standard") != "load_bearing":
             continue
-        if _score(i, now) >= STALE_SCORE_THRESHOLD:
+        if _raw_score(i, now) >= STALE_SCORE_THRESHOLD:
             continue
         stale.append(i)
     if not stale:
@@ -281,34 +496,81 @@ def _stale_callout(items: list, label: str, now: datetime | None = None) -> list
     return lines
 
 
-def _render_goals(goals: list, now: datetime | None = None) -> str:
+def _render_goals(goals: list, state: dict | None = None, now: datetime | None = None,
+                  report: dict | None = None) -> str:
     out = ["## What We Want To Do\n"]
     active = _active(goals)
     if not active:
         out.append("_No open goals._")
         return "\n".join(out) + "\n"
-    for i, g in enumerate(active, 1):
-        text = g.get("text", "")
-        line = f"{i}. {text}"
+
+    state = state or {}
+    now = now or datetime.now(timezone.utc)
+
+    def _fmt(g: dict) -> str:
+        line = g.get("text", "")
         if g.get("progress"):
             line += f" — _{g['progress']}_"
-        out.append(line)
-    out.extend(_stale_callout(active, "goal", now))
+        return line
+
+    # The format spec exempts goals from decay — closure discipline is meant
+    # to bound them. They're ranked anyway so that if the budget backstop
+    # does fire, it drops the least-relevant goals rather than arbitrary ones.
+    ranked = sorted(active, key=lambda g: -_score(g, now))
+    (kept,), over_budget = _trim_to_budget([ranked], _fmt, "goals", now, report)
+
+    for i, g in enumerate(kept, 1):
+        out.append(f"{i}. {_fmt(g)}")
+
+    if over_budget:
+        project = state.get("project", "project")
+        out.append("")
+        out.append(
+            f"_{over_budget} further open goal(s) over section budget — see "
+            f"`{project}.json` `goals[]` or use `project_lookup`. Goals aren't "
+            f"meant to dissolve; this many open suggests closure is lagging._"
+        )
+
+    out.extend(_stale_callout(kept, "goal", now))
     return "\n".join(out) + "\n"
 
 
-def _render_suggestions(suggestions: list, now: datetime | None = None) -> str:
+def _render_suggestions(suggestions: list, state: dict | None = None, now: datetime | None = None,
+                        report: dict | None = None) -> str:
     out = ["## Suggested Work\n"]
     active = _active(suggestions)
     if not active:
         out.append("_No pending suggestions._")
         return "\n".join(out) + "\n"
-    for s in active:
-        text = s.get("text", "")
+
+    state = state or {}
+    now = now or datetime.now(timezone.utc)
+
+    def _fmt(s: dict) -> str:
         who = s.get("originator", "claude")
-        line = f"- ({who}) {text}"
-        out.append(line)
-    out.extend(_stale_callout(active, "suggestion", now))
+        return f"- ({who}) {s.get('text', '')}"
+
+    # Suggestions are the one section the spec explicitly wants to dissolve
+    # ("after 3 narrative cycles if not acted on"), so decay applies here.
+    primary, secondary, dissolved = _partition_by_score(active, now)
+    (primary, secondary), over_budget = _trim_to_budget(
+        [primary, secondary], _fmt, "suggestions", now, report
+    )
+    dissolved += over_budget
+
+    kept = primary + secondary
+    for s in kept:
+        out.append(_fmt(s))
+
+    if dissolved:
+        project = state.get("project", "project")
+        out.append("")
+        out.append(
+            f"_{dissolved} unacted suggestion(s) dissolved — see "
+            f"`{project}.json` `suggestions[]` or use `project_lookup`._"
+        )
+
+    out.extend(_stale_callout(kept, "suggestion", now))
     return "\n".join(out) + "\n"
 
 
@@ -377,29 +639,67 @@ def _render_source_transcripts(state: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def render(state: dict) -> str:
+def render_with_report(state: dict) -> tuple[str, dict]:
+    """Render the narrative and report which sections hit their budget.
+
+    The report is the input to the contested-item re-valuation pass: it names
+    the items the budget actually had to choose between, so the next
+    /narrative run can ask the extractor to re-grade just those rather than
+    re-auditing the whole ledger.
+    """
     now = datetime.now(timezone.utc)
+    sections: dict = {}
     parts = [f"# {state.get('project', 'Project')} — Project Narrative\n"]
     parts.append(_render_summary(state.get("summary", {})))
-    parts.append(_render_approach(state.get("decisions", []), state, now))
+    parts.append(_render_approach(state.get("decisions", []), state, now, sections))
     parts.append(_render_operations(state.get("operations", [])))
-    parts.append(_render_done(state.get("done", []), state, now))
-    parts.append(_render_learnings(state.get("learnings", []), state, now))
-    parts.append(_render_goals(state.get("goals", []), now))
-    parts.append(_render_suggestions(state.get("suggestions", []), now))
+    parts.append(_render_done(state.get("done", []), state, now, sections))
+    parts.append(_render_learnings(state.get("learnings", []), state, now, sections))
+    parts.append(_render_goals(state.get("goals", []), state, now, sections))
+    parts.append(_render_suggestions(state.get("suggestions", []), state, now, sections))
     parts.append(_render_resuming(state))
     parts.append(_render_source_transcripts(state))
-    return "\n".join(parts)
+    md = "\n".join(parts)
+    report = {
+        "project": state.get("project"),
+        "rendered_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "total_tokens": len(md) // CHARS_PER_TOKEN,
+        "sections": sections,
+    }
+    return md, report
+
+
+def render(state: dict) -> str:
+    return render_with_report(state)[0]
 
 
 def main() -> None:
     if len(sys.argv) != 3:
         print("Usage: renderer.py <project_json_path> <output_md_path>", file=sys.stderr)
         sys.exit(1)
-    state = json.loads(Path(sys.argv[1]).read_text())
-    md = render(state)
+    state_path = Path(sys.argv[1])
+    state = json.loads(state_path.read_text())
+    md, report = render_with_report(state)
     Path(sys.argv[2]).write_text(md)
-    print(f"Rendered {len(md)} chars ({len(md.splitlines())} lines) to {sys.argv[2]}")
+
+    # Sidecar next to the state JSON. Written only when something was cut, and
+    # removed when nothing is, so its presence is the signal that a
+    # re-valuation pass has work to do.
+    contested_path = state_path.with_suffix(".contested.json")
+    if report["sections"]:
+        contested_path.write_text(json.dumps(report, indent=2))
+    elif contested_path.exists():
+        contested_path.unlink()
+
+    over = ", ".join(
+        f"{name} {s['spent_tokens']}/{s['soft_tokens']} (-{s['dropped']})"
+        for name, s in report["sections"].items()
+    )
+    print(f"Rendered {len(md)} chars (~{report['total_tokens']} tokens, "
+          f"{len(md.splitlines())} lines) to {sys.argv[2]}")
+    if over:
+        print(f"  at budget: {over}")
+        print(f"  contested items written to {contested_path}")
 
 
 if __name__ == "__main__":

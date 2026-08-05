@@ -189,7 +189,8 @@ def apply_delta(state: dict, delta: dict) -> dict:
     # against just-introduced items when the agent referenced a synthetic
     # id (e.g., same-session rejection of a newly-introduced suggestion).
     resolutions = delta.get("ledger_delta", {}).get("resolutions", {}) or {}
-    res_summary = {"closed": [], "archived": [], "rejected": [], "contradictions": [], "drift": []}
+    res_summary = {"closed": [], "archived": [], "rejected": [], "contradictions": [],
+                   "drift": [], "revalued": []}
 
     def _resolve_id(item_id: str, text_hint: str, kinds_to_search: tuple) -> str | None:
         """Return a real item id. If item_id already matches a prefix/number
@@ -251,6 +252,26 @@ def apply_delta(state: dict, delta: dict) -> dict:
     for drift in resolutions.get("drift", []) or []:
         note = drift.get("note", "") if isinstance(drift, dict) else str(drift)
         res_summary["drift"].append(note)
+
+    # Re-valuations — re-grade existing items the renderer flagged as
+    # contested (near the budget cut line). Deliberately does NOT touch
+    # last_touched_at: re-grading is not activity on the item, and treating it
+    # as such would hand every contested item a recency boost, so it would
+    # survive the next cut and never be reconsidered again.
+    for reval in delta.get("ledger_delta", {}).get("revaluations", []) or []:
+        item_id = reval.get("id")
+        if not item_id:
+            continue
+        for kind in LEDGER_KEYS:
+            for item in state.get(kind, []):
+                if item.get("id") != item_id:
+                    continue
+                if isinstance(reval.get("value"), (int, float)) and not isinstance(reval["value"], bool):
+                    item["value"] = min(1.0, max(0.0, float(reval["value"])))
+                if reval.get("importance") in ("load_bearing", "standard", "minor"):
+                    item["importance"] = reval["importance"]
+                item["revalued_in"] = session_id
+                res_summary["revalued"].append(item_id)
 
     # Append session record.
     session_record = {
