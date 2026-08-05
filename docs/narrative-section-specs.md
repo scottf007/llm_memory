@@ -295,8 +295,14 @@ information loss. The agent MUST either:
 
 ## Token Budget
 
-Target: ≤5,000 tokens for the full narrative. Operations is exempt from
-dissolution pressure — it's reference data, not prose. When trimming:
+Enforced per section by `renderer.py:SECTION_TOKEN_BUDGETS` (~12,500 tokens
+soft across the elastic sections, with a 1.5× overflow ceiling available to
+high-scoring items only). Operations is exempt from dissolution pressure —
+it's reference data, not prose.
+
+The renderer trims by decay score automatically. The priority order below
+still describes what *should* dissolve first, and is what the delta-extractor
+and state-auditor grade against:
 
 1. Drop Source Transcript rows for fully-dissolved sessions
 2. Drop stale Suggested Work (3+ cycles)

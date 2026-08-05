@@ -115,10 +115,14 @@ from file mtime if unavailable). Drop any entries whose
    session_started_at:   ISO8601_START
    session_ended_at:     ISO8601_END
    output_path:          /home/scott/.claude/memory/deltas/SESSION_ID.delta.json
+   contested_path:       /home/scott/.claude/memory/projects/PROJECT_NAME.contested.json
 
    Read the project state JSON and the conversation markdown. Produce the
    structured delta per your prompt spec and write it as JSON (only) to
-   output_path. Do not modify the project state — the merger does that.
+   output_path. If contested_path exists, also emit `revaluations` per your
+   Rule 14 — the renderer wrote it because a section ran out of budget. If it
+   does not exist, skip that rule silently; nothing was cut.
+   Do not modify the project state — the merger does that.
    Do NOT use worktree isolation. Do NOT commit anything.""",
      run_in_background=False
    )
@@ -187,8 +191,9 @@ updates.
 
 ## Narrative Format Reference
 
-Full spec: `docs/narrative-v2-format.md` in the llm_memory repo. Target ≤5,000
-tokens. 8 required sections: The Idea, Approach, What's Done, What We've
+Full spec: `docs/narrative-v2-format.md` in the llm_memory repo. Size is
+enforced by the renderer per section (`SECTION_TOKEN_BUDGETS`), not by you —
+you don't need to trim anything. 8 required sections: The Idea, Approach, What's Done, What We've
 Learnt, What We Want To Do, Suggested Work, Resuming, Source Transcripts.
 
 Key principle: content dissolves from specific sections into standing

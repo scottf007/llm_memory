@@ -10,8 +10,21 @@ metadata. Content from old sessions gets **dissolved** into standing sections an
 entry is dropped.
 
 ## Token Budget
-Target: **≤5,000 tokens**. This is loaded on every session start, so it must stay lean.
-When a narrative approaches the cap, dissolve older content per the rules below.
+Enforced by the renderer, per section, in `renderer.py:SECTION_TOKEN_BUDGETS`
+(currently ~12,500 tokens soft across the elastic sections). This is loaded on
+every session start, so it must stay lean.
+
+The budget is **soft**: a section may run to a hard ceiling of 1.5× its target,
+but only for items scoring above `SOFT_OVERFLOW_SCORE`. Valuable material can
+run over; filler cannot.
+
+This is a mechanism, not an aspiration. The earlier ≤5,000-token target was
+advisory with nothing enforcing it, and `load_bearing` items were exempt from
+filtering entirely — finance_nexus reached ~33,000 tokens. Items now render in
+score order until the budget is spent; the remainder collapses into a pointer.
+The decay score decides *what* survives; the budget decides *how much* does.
+
+Operations is exempt, per the section spec below.
 
 ## Section Specs
 
