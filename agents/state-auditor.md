@@ -1,6 +1,6 @@
 ---
 name: state-auditor
-description: One-off audit of a {project}.json. Applies the three-part filter (design-shaping AND non-obvious AND current) to every active decision, learning, and done item, and proposes archives for items that fail the filter. Output is a delta the merger can apply.
+description: One-off audit of a {project}.json. Applies the three-part filter (design-shaping AND non-obvious AND current) to every active decision and learning, and proposes archives for items that fail the filter. Output is a delta the merger can apply.
 tools: Read, Write, Bash
 model: sonnet
 ---
@@ -48,15 +48,24 @@ If an item fails ANY of the three, archive it.
 2. Optionally (if it helps your judgement) read key repo files to
    ground "current" — e.g. the README, top-level module docs, the
    install script, the architecture doc.
-3. Iterate over every active `decisions[]`, `learnings[]`, and `done[]`
-   item. For each, run the three-part filter.
+3. Iterate over every active `decisions[]` and `learnings[]` item. For
+   each, run the three-part filter.
    - If it passes all three: leave active. Do NOT emit anything for it.
    - If it fails at least one: emit an `archived` entry with the id and
      a short reason citing which test failed ("no longer current —
      renderer rewritten Apr 18", "plumbing fix — not design-shaping",
      "obvious from README").
-4. Do NOT touch goals, suggestions, operations, summary, or sessions.
-   Those are managed by the per-session delta pipeline.
+4. Do NOT touch `done[]`, goals, suggestions, operations, summary, or
+   sessions. Those are managed by the per-session delta pipeline.
+
+   `done[]` is explicitly out of scope. The three-part filter archives
+   every build-log entry it sees — each one is historical by
+   definition, and captured by git — so applying it to `done[]` empties
+   the section wholesale and the narrative ends up claiming the project
+   has shipped nothing. Size is the renderer's problem: it scores and
+   budgets `done[]` per section and collapses the remainder into a
+   "N dissolved" pointer. Archive a done item only when the delta
+   pipeline supersedes it or its subject was physically deleted.
 5. Be generous with archiving when items are clearly stale. Be
    conservative when the answer is genuinely unclear — false archives
    can be un-archived later, silent accumulation is worse.
@@ -77,7 +86,7 @@ Only `resolutions.archived` is populated. Everything else is empty.
   "ended": "2026-04-18T00:00:00Z",
   "topic": "State audit: three-part filter sweep",
   "closure_status": "complete",
-  "journal": "Audit summary: N decisions, M learnings, K done items archived. Breakdown by failed filter: X not-design-shaping, Y not-current, Z obvious.",
+  "journal": "Audit summary: N decisions, M learnings archived. Breakdown by failed filter: X not-design-shaping, Y not-current, Z obvious.",
   "ledger_delta": {
     "introduced": {"decisions": [], "goals": [], "suggestions": [], "learnings": [], "done": []},
     "resolutions": {
@@ -85,8 +94,7 @@ Only `resolutions.archived` is populated. Everything else is empty.
       "archived": [
         {"id": "dec-005", "reason": "plumbing — not design-shaping"},
         {"id": "dec-012", "reason": "no longer current — dashboard rewritten"},
-        {"id": "lrn-017", "reason": "obvious from current README"},
-        {"id": "work-042", "reason": "plumbing fix, once-and-done"}
+        {"id": "lrn-017", "reason": "obvious from current README"}
       ],
       "rejected": [],
       "contradictions": [],
@@ -115,8 +123,8 @@ Only `resolutions.archived` is populated. Everything else is empty.
   suggests Scott thought it worth capturing.
 - **Load-bearing items that clearly shaped the architecture**: always
   keep. "JSONL is source of truth", "3 memory types not 8", etc.
-- **Bug fixes from the done list**: almost always archive. "Fixed
-  hooks dedup filter path" is plumbing. The fix is in the code; the
-  commit message has the context.
+- **Bug fixes in the done list**: leave them. `done[]` is out of scope
+  for this audit (see Process step 4) — the renderer's scoring demotes
+  plumbing entries without deleting the build log.
 - **Operations facts misfiled as decisions**: archive them as "not
   design-shaping — belongs in operations".

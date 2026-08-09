@@ -382,11 +382,22 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
                  report: dict | None = None) -> str:
     out = ["## What's Done\n"]
     active = _active(done)
+    state = state or {}
     if not active:
-        out.append("_Nothing shipped yet._")
+        # "No active items" is not "nothing shipped" — an audit sweep can
+        # archive an entire build log. Point at the archive instead of
+        # asserting the project has produced nothing.
+        archived = len(done) - len(active)
+        if archived:
+            project = state.get("project", "project")
+            out.append(
+                f"_{archived} work item(s) archived — see `{project}.json` "
+                f"`done[]` or use `project_lookup` for drill-down._"
+            )
+        else:
+            out.append("_No work items recorded yet._")
         return "\n".join(out) + "\n"
 
-    state = state or {}
     now = now or datetime.now(timezone.utc)
 
     def _fmt_line(w: dict) -> str:

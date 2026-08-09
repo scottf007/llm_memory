@@ -264,6 +264,95 @@ def _count_substantive_user_turns(jsonl_path: str, cap: int) -> int:
     return n
 
 
+# A session is merged once, but a long-running one keeps accumulating turns for
+# days afterwards. Membership in sessions[] therefore proves the session was
+# merged, not that it was merged in full. Compare the transcript's last message
+# timestamp against the `ended` the extractor recorded: anything materially
+# later is content the narrative has never seen.
+STALE_TAIL_HOURS = 1.0
+
+
+def _transcript_tail_ts(jsonl_path: Path, tail_bytes: int = 200_000) -> datetime | None:
+    """Timestamp of the last message in a transcript, or None.
+
+    Reads only the tail — transcripts run to tens of MB and the coverage call
+    walks every merged session.
+    """
+    try:
+        with jsonl_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            chunk = f.read().decode("utf-8", "ignore")
+    except OSError:
+        return None
+    for line in reversed(chunk.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ts = json.loads(line).get("timestamp")
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if ts:
+            try:
+                return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            except ValueError:
+                continue
+    return None
+
+
+def _stale_session(session: dict) -> dict | None:
+    """Report a merged session whose transcript kept growing after the merge."""
+    session_id = str(session.get("session_id") or "")
+    ended = session.get("ended")
+    if not session_id or not ended:
+        return None
+    try:
+        ended_at = datetime.fromisoformat(str(ended).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ended_at.tzinfo is None:
+        ended_at = ended_at.replace(tzinfo=timezone.utc)
+
+    path = DB_DIR / "transcripts" / f"{session_id}.jsonl"
+    tail_at = _transcript_tail_ts(path)
+    if tail_at is None:
+        return None
+    if tail_at.tzinfo is None:
+        tail_at = tail_at.replace(tzinfo=timezone.utc)
+
+    grew_hours = (tail_at - ended_at).total_seconds() / 3600.0
+    if grew_hours <= STALE_TAIL_HOURS:
+        return None
+    return {
+        "session_id": session_id,
+        "topic": session.get("topic", ""),
+        "merged_through": ended_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "last_activity": tail_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "grew_days": round(grew_hours / 24.0, 2),
+        "path": str(path),
+    }
+
+
+def _coverage_summary(
+    unprocessed: int, on_disk: int, filter_note: str, stale: list[dict]
+) -> str:
+    if unprocessed:
+        head = f"{unprocessed} unprocessed transcript(s) out of {on_disk} on disk{filter_note}."
+    else:
+        head = f"All {on_disk} transcript(s) are merged or filtered out{filter_note}."
+    if not stale:
+        return head
+    worst = stale[0]
+    detail = (
+        f"{len(stale)} merged session(s) have grown since they were merged "
+        f"(worst: {worst['session_id'][:8]} +{worst['grew_days']}d) — re-extract "
+        f"these or the tail of that work stays out of the narrative."
+    )
+    return f"{head} {detail}"
+
+
 def _find_project_transcripts(project: str) -> set[str]:
     """Return all .jsonl transcript files on disk for a project.
 
@@ -338,6 +427,7 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
 
     # "Processed" is the set of main-session session_ids in {project}.json.sessions[].
     merged_ids: set[str] = set()
+    stale: list[dict] = []
     state_exists = state_path.exists()
     if state_exists:
         try:
@@ -347,8 +437,12 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
                 sid = str(session.get("session_id") or "")
                 if sid and not sid.startswith(("agent-", "audit-")):
                     merged_ids.add(sid)
+                    info = _stale_session(session)
+                    if info:
+                        stale.append(info)
         except (OSError, json.JSONDecodeError):
             pass
+    stale.sort(key=lambda s: s["grew_days"], reverse=True)
 
     # Map on-disk paths to session_ids.
     on_disk_by_sid = {Path(p).stem: p for p in on_disk}
@@ -420,10 +514,10 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         "skipped_subagent_count": skipped_subagent,
         "skipped_low_turn_count": skipped_low_turn,
         "min_user_turns": min_user_turns,
-        "summary": (
-            f"{len(unprocessed)} unprocessed transcript(s) out of {len(on_disk)} on disk{filter_note}."
-            if unprocessed else
-            f"All {len(on_disk)} transcript(s) are merged or filtered out{filter_note}."
+        "stale_count": len(stale),
+        "stale": stale,
+        "summary": _coverage_summary(
+            len(unprocessed), len(on_disk), filter_note, stale
         ),
     }, indent=2))
 

@@ -33,7 +33,19 @@ for p in sorted(seen): print(p)
 "
 ```
 
-If `unprocessed` is empty for a project, skip it.
+`narrative_coverage` also returns a `stale` list: sessions that ARE in
+`sessions[]` but whose transcript kept growing after they were merged (a
+multi-day session merged on day 1 and still running on day 6). Membership in
+`sessions[]` only proves a session was merged once, not that it was merged in
+full — so treat every entry in `stale` as work to redo, alongside
+`unprocessed`. Each entry carries `merged_through`, `last_activity` and
+`grew_days`.
+
+Stale sessions take the same path as unprocessed ones, with two differences:
+force a fresh extraction (skip the delta cache — the cached delta is the one
+that already merged), and merge with `--rerun` (step 3).
+
+If both `unprocessed` and `stale` are empty for a project, skip it.
 
 ## Step 2: Process each project
 
@@ -140,6 +152,14 @@ from file mtime if unavailable). Drop any entries whose
      ~/.claude/memory/projects/PROJECT_NAME.json \
      ~/.claude/memory/deltas/SESSION_ID.delta.json
    ```
+
+   For a session from the `stale` list, add `--rerun`. Without it the merger
+   refuses the delta (the session_id is already in `sessions[]`) and prints
+   `Skipped ... (already merged)` — the rebuild still runs, so check the verb:
+   `Merged` / `Re-merged` means the delta was applied, `Skipped` means it was
+   not. With `--rerun` the merger de-duplicates re-emitted items by text,
+   applies the new resolutions and revaluations, and refreshes the session's
+   `ended` watermark so it stops reporting as stale.
 
    The merge must succeed before launching the next delta-extractor for this
    project — the next agent reads the updated `{project}.json` as input.

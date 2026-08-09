@@ -180,12 +180,21 @@ def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int
     return updates
 
 
-def apply_delta(state: dict, delta: dict) -> dict:
+def _norm_text(value: str | None) -> str:
+    """Whitespace/case-normalised item text, for cross-run identity."""
+    return " ".join((value or "").split()).casefold()
+
+
+def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
     session_id = delta["session_id"]
     session_ts = delta.get("ended") or delta.get("started") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Idempotency — skip if already merged.
-    if any(s.get("session_id") == session_id for s in state.get("sessions", [])):
+    # Idempotency — skip if already merged. A session that kept running after
+    # its first merge is the exception: re-extracting it produces a delta
+    # covering the whole session, and `rerun` lets that supersede the first
+    # pass instead of being silently discarded.
+    already_merged = any(s.get("session_id") == session_id for s in state.get("sessions", []))
+    if already_merged and not rerun:
         return state
 
     # Backfill last_touched_at on any existing items missing it (migration).
@@ -220,9 +229,21 @@ def apply_delta(state: dict, delta: dict) -> dict:
     # Introduced items — mint new IDs, append.
     introduced = delta.get("ledger_delta", {}).get("introduced", {}) or {}
     intro_ids = {k: [] for k in LEDGER_KEYS}
+    # On a rerun the extractor re-reads the whole session, so it re-emits the
+    # items the first pass already merged. IDs are minted here rather than by
+    # the extractor, so cross-run identity has to fall back to item text.
+    seen_text: dict[str, set[str]] = {}
+    if already_merged:
+        for kind in LEDGER_KEYS:
+            seen_text[kind] = {_norm_text(i.get("text")) for i in state.get(kind, [])}
     for kind in LEDGER_KEYS:
         state.setdefault(kind, [])
         for new_item in introduced.get(kind, []) or []:
+            if already_merged:
+                key = _norm_text(new_item.get("text"))
+                if key and key in seen_text[kind]:
+                    continue
+                seen_text[kind].add(key)
             item = dict(new_item)
             item["id"] = _new_id(kind)
             item["status"] = "active"
@@ -339,7 +360,23 @@ def apply_delta(state: dict, delta: dict) -> dict:
             "resolutions": res_summary,
         },
     }
-    state.setdefault("sessions", []).append(session_record)
+    existing_record = next(
+        (s for s in state.get("sessions", []) if s.get("session_id") == session_id), None)
+    if existing_record is None:
+        state.setdefault("sessions", []).append(session_record)
+    else:
+        # Refresh the watermark `narrative_coverage` compares against, so a
+        # re-extracted session stops reporting as stale, and keep the newest
+        # journal/topic. Prior passes are retained under `reruns`.
+        for field in ("ended", "closure_status", "resume_excerpt_lines"):
+            existing_record[field] = session_record[field]
+        for field in ("topic", "journal"):
+            if session_record[field]:
+                existing_record[field] = session_record[field]
+        existing_record.setdefault("reruns", []).append({
+            "merged_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ledger_delta_applied": session_record["ledger_delta_applied"],
+        })
 
     # Clear resume_excerpt on older sessions (only newest active session keeps it).
     for s in state["sessions"][:-1]:
@@ -400,13 +437,18 @@ def _rebuild_items_index(db_path: Path, items_root: Path | None = None) -> None:
 USAGE = "Usage: merger.py [--items-root PATH] <project_json_path> <delta_json_path>"
 
 
-def _parse_args(argv: list[str]) -> tuple[Path, Path, Path | None]:
-    """Positional CLI, unchanged, plus an optional --items-root override."""
+def _parse_args(argv: list[str]) -> tuple[Path, Path, Path | None, bool]:
+    """Positional CLI, unchanged, plus --items-root and --rerun."""
     items_root_override: Path | None = None
+    rerun = False
     positional: list[str] = []
     i = 0
     while i < len(argv):
         arg = argv[i]
+        if arg == "--rerun":
+            rerun = True
+            i += 1
+            continue
         if arg == "--items-root":
             if i + 1 >= len(argv):
                 print("merger.py: --items-root needs a PATH", file=sys.stderr)
@@ -426,11 +468,11 @@ def _parse_args(argv: list[str]) -> tuple[Path, Path, Path | None]:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
 
-    return Path(positional[0]), Path(positional[1]), items_root_override
+    return Path(positional[0]), Path(positional[1]), items_root_override, rerun
 
 
 def main(argv: list[str] | None = None) -> None:
-    project_path, delta_path, items_root_override = _parse_args(
+    project_path, delta_path, items_root_override, rerun = _parse_args(
         list(sys.argv[1:] if argv is None else argv))
 
     items_root, db_path, sandboxed = resolve_paths(project_path, items_root_override)
@@ -452,15 +494,30 @@ def main(argv: list[str] | None = None) -> None:
     # view of the ledger (not just what the local JSON last knew).
     inbox = inbox_merge(state, project, items_root)
 
-    state = apply_delta(state, delta)
+    session_id = delta["session_id"]
+    already_merged = any(
+        s.get("session_id") == session_id for s in state.get("sessions", []))
+    skipped = already_merged and not rerun
+
+    state = apply_delta(state, delta, rerun=rerun)
     state["last_rebuilt_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     project_path.write_text(json.dumps(state, indent=2))
 
     fanned = fan_out_items(state, project, items_root)
     _rebuild_items_index(db_path, items_root)
 
-    print(f"Merged {delta['session_id']} into {project_path} "
-          f"({inbox} inbox, {fanned} fanned out)")
+    if skipped:
+        # The fan-out below still runs and still rewrites the file, so this
+        # path used to print an unqualified "Merged ..." for what was a no-op.
+        print(f"merger.py: {session_id} is already in sessions[] — delta NOT "
+              f"applied. Re-run with --rerun if the session grew after its "
+              f"first merge.", file=sys.stderr)
+        print(f"Skipped {session_id} (already merged); rebuilt {project_path} "
+              f"({inbox} inbox, {fanned} fanned out)")
+        return
+
+    print(f"{'Re-merged' if already_merged else 'Merged'} {session_id} into "
+          f"{project_path} ({inbox} inbox, {fanned} fanned out)")
 
 
 if __name__ == "__main__":
