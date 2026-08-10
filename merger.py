@@ -341,6 +341,10 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
                 if reval.get("importance") in ("load_bearing", "standard", "minor"):
                     item["importance"] = reval["importance"]
                 item["revalued_in"] = session_id
+                # Wall-clock, deliberately not `last_touched_at` (see above).
+                # Several sessions in one sweep can re-grade the same contested
+                # item; this records which pass actually settled it.
+                item["revalued_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 res_summary["revalued"].append(item_id)
 
     # Append session record.

@@ -194,9 +194,23 @@ the arrays. **Always use existing IDs** when referring to prior items in
    Grade `value` **relatively, against the other items in this same delta**,
    not on an absolute scale. Rank them, then spread the scores across the
    range. If everything lands between 0.6 and 0.8 you have ranked nothing —
-   push the best to 0.9+ and the weakest below 0.4. Omit `value` entirely if
-   you genuinely can't separate them; absent is treated as neutral, which is
-   honest. A flat 0.7 on everything is not.
+   push the best to 0.9+ and the weakest below 0.4. A flat 0.7 on everything
+   is not a grading.
+
+   **Set `value` on every item you introduce.** The only exception is a
+   delta introducing a single item of that kind, where there is nothing to
+   rank it against. "I can't separate them" is not an exception — two items
+   you cannot separate are two items at the same value, which you should
+   state rather than leave blank.
+
+   Omitting it is not the safe default it looks like. An absent `value` is
+   neutral, so every ungraded item in a tier ties, and the renderer breaks
+   those ties by recency — which is backwards for exactly the foundational
+   items the tier exists to protect. When a section later overflows, the
+   contested pass has to reconstruct a judgement you were better placed to
+   make here, with the session in front of you. Measured across 29 projects,
+   ~89% of ledger items carry no value, and whole sections have been observed
+   pinned at `load_bearing` with identical scores, kept or dropped at random.
 
    `value` does not cross tiers: a 1.0 `minor` still ranks below a 0.0
    `load_bearing`. It cannot rescue a mis-tiered item, so grade the tier

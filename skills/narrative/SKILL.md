@@ -96,8 +96,25 @@ for incremental), keep only **main-session** transcripts. Skip any file
 whose session_id starts with `agent-` — those are subagent transcripts and
 must not trigger this pipeline. Sort the survivors chronologically by their
 `started` timestamp (read the first JSONL record's `timestamp`, or derive
-from file mtime if unavailable). Drop any entries whose
-`~/.claude/memory/conversations/<session_id>.md` file is missing.
+from file mtime if unavailable).
+
+If a session's `~/.claude/memory/conversations/<session_id>.md` is missing,
+**generate it rather than dropping the session**. The sweep in
+`session_start.sh` is lazy — it only runs at session start against files newer
+than its sentinel — so a session that ended after the last session start has
+not been archived yet, and silently skipping it loses the work permanently:
+
+```bash
+# Find the live transcript (it may not be in the archive yet) and strip it.
+SRC=$(find ~/.claude/projects -maxdepth 2 -name 'SESSION_ID.jsonl' | head -1)
+cp -n "$SRC" ~/.claude/memory/transcripts/SESSION_ID.jsonl
+python3 ~/.claude/memory/lib/extract_conversation.py "$SRC" \
+  --output ~/.claude/memory/conversations/SESSION_ID.md --force
+```
+
+Only drop a session when no transcript exists in either location, and say so
+in the Step 3 summary — a silently skipped session looks identical to one
+that had nothing to say.
 
 ### 2c. For each main-session transcript, in order
 
@@ -178,15 +195,25 @@ from file mtime if unavailable). Drop any entries whose
    `settings.yaml` as of the post-2026-05-11 install; older installs need
    to re-run `install.sh` or add it manually) and stop.
 
-### 2d. Render once per project
-
-After all deltas for the project have merged:
+### 2d. Render after every merge
 
 ```bash
 python3 ~/.claude/memory/lib/renderer.py \
   ~/.claude/memory/projects/PROJECT_NAME.json \
   ~/.claude/memory/projects/PROJECT_NAME.narrative.md
 ```
+
+Render after **each** session's merge, not once at the end of the project.
+The renderer is pure code and takes well under a second, and rendering is what
+refreshes `{project}.contested.json`.
+
+That sidecar is the input to the next session's Rule 14 re-valuation pass. It
+is written once per render but consumed once per session, so if a project has
+several sessions in one run and you only render at the end, every extractor
+after the first grades against a snapshot the earlier ones have already acted
+on — re-grading items that are already settled and overwriting judgement with
+a stale view. Rendering each time keeps the sidecar current, and it disappears
+by itself once nothing is being cut.
 
 The rendered `.narrative.md` file is the narrative — session_start + subagent_start
 hooks read it directly. Nothing else to do; the pipeline ends here.
