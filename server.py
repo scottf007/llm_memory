@@ -269,7 +269,13 @@ def _count_substantive_user_turns(jsonl_path: str, cap: int) -> int:
 # merged, not that it was merged in full. Compare the transcript's last message
 # timestamp against the `ended` the extractor recorded: anything materially
 # later is content the narrative has never seen.
-STALE_TAIL_HOURS = 1.0
+#
+# The threshold gates a re-extraction, not just a report, so it is set where
+# the tail is worth an extractor run. A first pass over 29 projects at 1h
+# flagged 32 sessions, 11 of which had grown only a few hours — closing
+# messages, not work. A day of growth is the point where a session reliably
+# contains something the narrative is missing.
+STALE_TAIL_HOURS = 24.0
 
 
 def _transcript_tail_ts(jsonl_path: Path, tail_bytes: int = 200_000) -> datetime | None:
