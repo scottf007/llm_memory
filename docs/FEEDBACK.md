@@ -75,7 +75,7 @@ free number and are **never renumbered**.
 | F-05 | exec bit invisible to git under `core.fileMode=false` — 8 tests fail from a clean checkout | in-flight |
 | F-06 | `install.sh` ships `tools/*.py` only, so the wrapper never reaches the installed lib | in-flight |
 | F-07 | graph one-liners under-reported; `render` collides with two existing symbols | in-flight |
-| F-08 | adapter boilerplate duplication claude/codex — evidence is off-record | open |
+| F-08 | adapter boilerplate duplication claude/codex | open |
 | F-09 | archive-provenance drift (`08d89c12`) — `[L:N]` refs shift and drop | open |
 | F-10 | the stale mid-session `.md` class — a permanent ~10 oracle failures | open |
 | F-11 | `memory_wrap` reports a missing project to the model but not to the user | open |
@@ -89,7 +89,10 @@ free number and are **never renumbered**.
 | F-19 | the rules line has never been observed to work on any client | open |
 | F-20 | transition-update ordering — the old installer always runs the upgrade | deferred |
 | F-21 | Grok `UserPromptSubmit` probe unrun, and its runbook is not executable | deferred |
-| F-22 | three questions to Scott, unanswered | deferred |
+| F-22 | Q1 and Q3 to Scott, unanswered (Q2 closed at `78f45a48`) | deferred |
+| F-23 | the `memory_wrap` real-client spawn incident | open |
+| F-24 | the fixture scrub's two residuals — a pseudonym, and a shape guard that cannot see a bare name | open |
+| F-25 | the `codex-auto` marker is tested on every session, not only codex ones | open |
 
 ---
 
@@ -128,6 +131,31 @@ kill `PONG`/`exit`/bare-id sessions.
 next client will face the same question, and the method is "characterise the
 corpus first, then pick per-client."
 
+**Delivered at `774e859`, gated at `97c8a3cb`, and the corpus characterisation
+above was independently re-measured rather than taken on trust.** Judge ran the
+real `_handle_narrative_coverage` at both SHAs against the real
+`~/.claude/memory`, five real projects: **0 sessions lost, +24 gained**
+(agent-messaging 6 → 29, fletchcorp 0 → 1, the other three unchanged). Codex
+admission goes **8 → 35 of 124**. Every one of the 7 content-gate casualties was
+inspected individually and is `exit`, `PONG`, a bare event-id ping, or a session
+with zero assistant records.
+
+The load-bearing claim — that the `codex-auto` harness's replies are "posted to
+the board verbatim, by construction", so archiving without extracting loses
+nothing — **was tested against the board rather than argued.** Of the 84
+excluded sessions, 28 carry ≥200 characters of assistant prose; **27 of those
+28 were found verbatim** in agent-messaging's 1075 board event files. The single
+miss is a 203-character refusal to act on an assignment addressed to another
+seat. The "27 verbatim" figure in the amended contract is therefore confirmed
+by a second, independent method.
+
+**Stale doc, noted here rather than given its own row:** `docs/adapters.md:121-131`
+still reads "`min_user_turns` is the real gate", "the threshold is a parameter",
+and "**8** clear the default `min_user_turns=5`". That section is the analysis
+that motivated this fix and now describes pre-fix behaviour. The 8 is still
+exactly right as history — it reproduces — but a reader arrives at a document
+arguing for work already done. `adapters.md` was untouched by the fix branch.
+
 ### F-02 — renderer short-id collapse: every codex session renders as `codex-01`
 *source: `0bdcb0c2` · status: in-flight · blocks: human-readable provenance in narratives*
 
@@ -140,6 +168,15 @@ Reported, not fixed, by the seat that caused it — `renderer.py` was out of its
 scope and the fix is a rendering decision. The assigned fix strips a known
 client prefix and shows it separately, which keeps provenance visible; the
 alternative (take the *last* eight characters) loses it.
+
+**Delivered at `a996002`, gated at `97c8a3cb`.** `_display_session_id()` reuses
+the pre-existing `adapters.prefixes()` rather than duplicating the prefix
+table — a genuine GRAPH-HIT, and the second data point in F-07's tally. The
+trigger control was verified the only way that means anything: the five new
+renderer tests were run against **pre-fix** `renderer.py`, where four fail and
+the one that passes is `test_claude_short_ids_in_source_transcripts_are_unchanged`,
+the non-trigger control. `test_two_codex_sessions_render_with_distinct_short_ids`
+does fail against the old `codex-01` collision.
 
 ### F-03 — fixture project names in a public repo: an owner ruling was reversed
 *source: judge `07cf16e8` raised it; Scott ruled KEEP at `3e91071d`; COO reversed at `bee6b19e` · status: in-flight · blocks: publishing the repo*
@@ -163,6 +200,29 @@ like every other string, plus a depth-walk extension so a real project name can
 never ship again. The reversal is the operative instruction and is being
 implemented. **This row does not close on the fix merging.** It closes when
 Scott confirms he accepts the reversal of his own ruling.
+
+**The fix is delivered and has passed its gate. The row still does not close.**
+`aa59930` on `claude/post-ingest` maps the `cwd` project component through a
+deterministic digest placeholder; judged at `97c8a3cb` from a fresh checkout of
+`a996002` — all three names gone, both guards carrying real trigger and
+non-trigger controls, fixtures byte-reproducible. **Five** fixtures leaked and
+were regenerated, not four (01 and 03 agent-messaging, 04 and 09 universalai,
+10 fletchcorp); the delivery's "4 affected fixtures" counts the four
+`.expected.md` files that changed, and `01-compacted`'s `.expected.md` — which
+does exist — is the `skipped: true` subagent stub with no `project:` line, so
+regeneration reproduced it byte for byte.
+
+**The confirmation is still not in the record, and that is the whole point of
+this row.** The delivery at `9dec4d6c` reports that Scott confirmed in-window,
+this sitting, that he personally reversed his own KEEP ruling. Nobody doubts
+the seat. But an in-window confirmation to a single session is exactly what
+rule `a4565f94` was written to stop counting, and F-P5 says a relayed
+instruction is unverified until the record shows it — a standard this ledger
+applied to its own compiler and cannot now waive for a convenient answer.
+**Needs one line on the board from Scott, or from the COO relaying with
+attribution.** Until it exists this row stays open with its fix merged, which
+is an ordinary and untroubling state for it to be in. See also F-24 for what
+the fix does and does not achieve.
 
 ### F-04 — the Gemini wiring recipe does the opposite of what it claims
 *source: judge `52e59524`, proven by sandbox execution · status: in-flight · blocks: anyone wiring Gemini*
@@ -242,34 +302,69 @@ First data point, S3: **1 of 3** new module-level symbols reported.
 **Cost datum for the tally:** graph build plus three `find` calls, ~40 seconds,
 would have caught the collision.
 
+Second data point, post-ingest reuse: **`adapters.__init__.prefixes` is a real
+GRAPH-HIT.** It genuinely pre-exists at `adapters/__init__.py:75-77`, and
+`renderer._display_session_id` reuses it instead of duplicating the prefix
+table, so "single source of truth, not duplicated" is a checkable claim that
+checks out. This is a **better** data point than S3's, because it is the
+practice producing the outcome it was created for rather than the practice
+catching a near-miss.
+
+Third data point, post-ingest symbols: **0 of 6.** The branch adds six new
+production symbols — `renderer._display_session_id`,
+`server._first_user_message_text`, `server._is_codex_auto_participant`,
+`server._has_substantive_assistant_content`, `server._client_by_session`,
+`make_codex_fixtures._placeholder_project`. **None got a posted one-liner.**
+The delivery's only graph statement is the `prefixes()` reuse above, which is a
+HIT on a pre-existing symbol, not a MISS one-liner for anything new. Judge
+checked all six against the convener graph pinned at `a996002` (988 entities /
+4,053 relationships): all six are unique, **zero collisions**, so nothing was
+missed on substance.
+
+**Running tally: 1 of 3, then 0 of 6.** Two consecutive slices under-applied a
+practice whose stated purpose is to be measured, and both times the measurement
+had to be done by the judge afterwards. That is the datum the tally exists to
+produce, and it now points somewhere: the practice keeps finding real things
+(the `render` collision, the `prefixes` reuse) and keeps not being run by the
+seat that owes it. Whoever decides the practice's future should weigh
+"under-applied" separately from "not worth keeping" — this record supports the
+first and not the second.
+
+One near-neighbour the practice would have surfaced this time:
+`_has_substantive_assistant_content` sits beside the pre-existing
+`_count_substantive_user_turns` in the same filter loop, and with
+`_first_user_message_text` that is three separate streaming passes over the same
+file per session. Correct and short-circuited, so not a defect — but exactly the
+shape of thing a `find substantive` was meant to put in front of the author.
+
 ---
 
 ## B. OPEN — duplication and consolidation
 
 ### F-08 — adapter boilerplate duplication claude/codex
-*source: named by the COO at `fba61413` as coming from the four-model cross-vendor round · status: open · trigger: a third adapter*
+*source: `runtime/bakeoffs/` in this job — all eleven cross-vendor review texts, committed at `eafd0b50`; originally named by the COO at `fba61413` · status: open · trigger: a third adapter*
 
 `adapters/claude.py` and `adapters/codex.py` share structure that a third and
 fourth adapter will duplicate again. The natural moment to consolidate is
 **before S4**, with two examples to generalise from and not yet four to
 migrate.
 
-**Admitted on the trigger criterion, not the evidence criterion, and the gap is
-recorded deliberately.** The four-model round (GLM-5.2, gpt-5.6-luna,
-deepseek-v4-flash, nemotron-free) has its full texts in the COO's *session
-scratchpad*, not on the board. The board carries only the six items the COO
-extracted into `ab6e87f8`, and adapter boilerplate duplication is **not among
-them**. So this row rests on the coordinator's recollection, and the underlying
-evidence is not in the immutable job record — which this job's own policy says
-is where evidence belongs.
+**The provenance gap this row used to carry is closed.** It was admitted on the
+trigger criterion while stating plainly that the cross-vendor round's texts
+lived in the COO's session scratchpad and that `ab6e87f8` carried only six
+extracted items, not including this one. At `eafd0b50` the COO put all **eleven**
+texts on the record at `runtime/bakeoffs/` — the exact texts, not summaries
+(S2 round 1: nemotron / glm / luna / deepseek plus worksheet; round 2: those
+plus gemini plus worksheet). The citation above now points at the immutable job
+record, and no re-derivation is needed before the consolidation slice is cut.
 
-**To close, or to strengthen:** the COO posts the cross-vendor texts to the
-board, or a seat re-derives the duplication from the two adapters directly.
-Either way this row should stop resting on an off-record source.
+Recorded because the mechanism matters more than the row: the gap was closed by
+flagging it in a ledger row rather than by quietly trusting the source, and the
+remedy cost the coordinator one commit.
 
 ---
 
-## C. OPEN — product limitations and policy
+## C. OPEN — product limitations, policy, and one incident
 
 ### F-09 — archive-provenance drift (`08d89c12`)
 *source: raised as content loss at `670d410d`, re-characterised by judge `29268c5e` · status: open*
@@ -476,6 +571,111 @@ context. Claude does (`session_start.sh:196-214`). Grok, Codex, Gemini and qwen
 all depend on the model choosing to obey, and **the failure is silent in every
 case** — the model answers with no memory and cannot tell it was missing any.
 
+### F-23 — the `memory_wrap` real-client spawn incident
+*source: `866c89fe` (primary evidence, COO, timestamped); `s3-serving` disputes the incident · status: open · blocks: nothing today; governs how test configs for client-launching tools are written*
+
+**Reserved empty in this ledger's first compilation and opened now that the
+evidence exists.** The compiler was asked for this row, found nothing in the
+53-event log describing it, and refused to open a placeholder on the grounds
+that a row invented by the compiler asserts something it cannot show. That
+refusal is what put the evidence on the record; the row is opened on
+`866c89fe`, not on the request.
+
+**Observed, ~14:33.** (1) `ListAgents` showed ~20 new sessions named
+`llm-memory-*`, **all attached to one tmux pane** — `s3-serving:@304` — every
+one started 11-14 seconds earlier. Fleet seats each own their own window, so
+twenty sessions bound to a single pane within seconds is a process tree
+spawning inside that pane, not a baseline. (2) `ps` counted **54 `claude`
+processes under 120 seconds old, and climbing** between consecutive checks,
+against a fleet of ~8 seats all minutes-to-hours old. (3) Two Escape keys sent
+to that one pane — nothing else — collapsed the under-60s count from dozens to
+2 within seconds; interrupting one seat's turn cannot stop unrelated launches.
+(4) The phantom sessions vanished after targeted kills and `ListAgents`
+returned to the normal roster.
+
+**Likely vector**, consistent with all four observations: the manual testing
+visible in the pane at that moment ("back to testing `memory_wrap` with the
+corrected python resolution") ran `memory_wrap` **outside the fixture config**,
+where a real `clients` entry launches the real `claude` binary once per
+invocation.
+
+**The committed test suite is EXONERATED, explicitly and by the same post.**
+The fixture-fake suite never invokes `claude`; the guard tests in revision
+`1f25dbd1` stand (fixture-only clients in tests, no real binaries reachable
+from the test config). **No fault attaches to the committed suite**, and this
+row should never be cited as if it did.
+
+**Disagreement, kept attributed** per this job's policy: `s3-serving` disputes
+that the incident occurred, having inspected post-cleanup state. The COO's
+position is that the post-cleanup state cannot show what the live observations
+showed. Both are recorded; neither is resolved here. **Room is deliberately
+left in this row for `s3-serving`'s own account of the manual commands it ran**,
+which is the one piece of evidence that would settle it and which only that
+seat holds.
+
+**What it is actually for:** a tool whose job is to launch a client is a tool
+whose test config can launch a client. The durable lesson is that such a tool
+needs its real-binary path unreachable from anything a developer might run by
+hand in a repo checkout, not merely unreachable from the test suite.
+
+### F-24 — the fixture scrub's two residuals: a pseudonym, and a shape guard that cannot see a bare name
+*source: judge `97c8a3cb`, measured against `a996002` · status: open · blocks: nothing; bounds what F-03's fix can be said to have achieved · trigger: a fourth real project name entering the fixture corpus*
+
+The F-03 fix is sound and does what Scott's reversed ruling asked: the three
+names are gone, and `git grep` across `tests/fixtures/codex` returns zero. Two
+things it does **not** do, recorded together because they are one cause — a
+shape-based sanitiser cannot tell a real project name from a placeholder, which
+is the fix's own stated premise.
+
+**1. `project-<sha1:8>` is a pseudonym, not an anonymisation.** The digest is
+unsalted SHA-1 of the plaintext project name truncated to 8 hex characters, so
+the mapping is guess-and-confirm reversible in one line by anyone who tries the
+name: `sha1("fletchcorp")[:8]` = `aad8ac1e`, which is fixture 10. In a public
+repo, for precisely the name flagged as identifying because it matches Scott's
+own email domain. `make_codex_fixtures._placeholder_project`'s docstring calls
+it a "content-free stand-in"; it is content-free to a reader and to `grep`, and
+it is not content-free to a guesser. A committed salt would not help — it ships
+too. **Recommendation: accept this deliberately and correct the docstring**,
+rather than re-engineer it. The ruling was that the names must not ship, and
+they do not ship; determinism was the right trade and F-24 exists so nobody
+later believes a stronger property was bought than was.
+
+**2. The tightened depth walk still cannot catch a bare name.** The new
+predicate pins the exact placeholder cwd shape and genuinely catches all three
+names in `cwd` position — verified by running both predicates side by side, old
+says sanitised / new says not, for all three, with the placeholder still
+passing. But a **bare** project name outside a path is token-shaped and passes
+`_is_sanitised` under both the old and the new predicate.
+`test_no_real_project_name_ships_in_a_fixture` covers exactly that hole for the
+three literals Scott ruled on — so the pair is complete **for these three
+names**, and a **fourth** real project name landing in a token-shaped non-`cwd`
+field would be caught by neither guard.
+
+### F-25 — the `codex-auto` marker is tested on every session, not only codex ones
+*source: judge `97c8a3cb` · status: open · trigger: a claude session whose first user turn quotes the harness preamble*
+
+`_is_codex_auto_participant()` runs in `_handle_narrative_coverage`'s filter
+loop **before** the client is looked up, so its marker string is matched
+against the first user turn of every session regardless of client. A **claude**
+session that quotes the `codex-auto` preamble as its first user turn — pasting
+it to debug the harness, which is plausible in this project family
+specifically — is dropped silently, with no error and no log line, exactly the
+F-01 failure mode in the losing direction.
+
+**Zero of 6,701 non-codex archived sessions match today**, so this is
+prophylactic rather than a live loss, and it is admitted on the trigger
+criterion. The fix is one line: move the `client_by_sid` lookup two lines up
+and gate the marker test on `client == "codex"`.
+
+**While in that function, and not worth its own row:** `_client_by_session()`
+walks all 5,718 conversation `.md` files, and `_find_project_transcripts()`
+already walked the same directory via `list_sessions()`. `narrative_coverage`
+went **0.33s → 0.57s** measured on this machine. Fine for an interactive tool;
+reusing one pass gives it back. Cosmetic, same neighbourhood: `import
+conversations` is now unguarded at module top while the same import inside
+`_find_project_transcripts` is still wrapped in `try/ImportError`, so that guard
+is now decorative.
+
 ---
 
 ## D. DEFERRED — with the condition that reopens them
@@ -546,11 +746,12 @@ declined independently, for the same reason.
 row). Fix both runbook defects first — running it as written can produce a
 false negative that closes D9 wrongly.
 
-### F-22 — three questions to Scott, unanswered
-*source: `93e6d723`; a third question was held and never spent · status: deferred (owner)*
+### F-22 — Q1 and Q3 to Scott, unanswered; Q2 is closed
+*source: `93e6d723`; a third question was held and never spent; Q2 closed against `78f45a48` per `eafd0b50` · status: deferred (owner) on Q1 and Q3*
 
-Neither blocks anything — defaults were picked and the design note is complete
-without answers — but both change recommendations if answered the other way.
+Neither open question blocks anything — defaults were picked and the design note
+is complete without answers — but both change recommendations if answered the
+other way.
 
 **Q1. Does "a generic memory folder for multiple agents" mean the path must
 stop saying `.claude` (optics / open-source), or just that non-Claude agents
@@ -559,19 +760,26 @@ must be able to use it (capability)?** Default taken: capability, hence D1
 (symlink `~/.llm-memory` + `LLM_MEMORY_HOME`) may buy the whole optics win for
 a hundredth of the cost. Cost breakdown in F-18.
 
-**Q2. Is qwen-local a client whose memory Scott wants kept, or a test rig?**
-Ingest is worth doing either way (cheapest adapter of the five). The question
-is *injection*: qwen runs a local 27B model, and obeying a standing rules-file
-instruction unprompted at turn 1 is exactly the behaviour that degrades first
-at that scale. **This is the main justification for building the generic
-wrapper at all** — if qwen is real, the wrapper is load-bearing; if it is a
-test rig, the wrapper could have waited for evidence that Codex or Grok need
-it.
+**Q2 — CLOSED. Is qwen-local a client whose memory Scott wants kept, or a test
+rig?** Answered by the owner on the board at `78f45a48`, found and cited by the
+COO at `eafd0b50`. Scott's ruling, verbatim in the relevant part: qwen is "not
+necessarily" a kept client, **but** "what if I used a cloud qwen at full
+power... It should be able to be done easily by any agent". Read as: **client-
+agnostic extensibility governs**, so the answer does not turn on qwen's status
+at all. Consequence, which was the whole reason the question mattered:
+**`tools/memory_wrap` is load-bearing, not speculative, and D10 is confirmed.**
+
+Worth keeping rather than deleting, because the question was mis-classified
+before it was answered. It was escalated as an unanswered owner question when
+it was in fact already answered on this board — a findable answer, not a
+missing one. The distinction is the coordinator's job and this row is the
+evidence that it is a real distinction.
 
 **Q3.** Held by `mc-design`, never asked. Recorded so the budget is not assumed
 spent.
 
-**Reopen condition:** Scott answers, or Scott says the defaults stand.
+**Reopen condition (Q1 and Q3 only):** Scott answers, or Scott says the
+defaults stand.
 
 ---
 
@@ -684,20 +892,66 @@ excluded four candidates that a blanket intake rule would have admitted:
 
 **One item I could not admit, and it was explicitly requested.** The
 compilation brief named "the `memory_wrap` real-client spawn incident once
-`s3-serving` posts it". **As of this commit `s3-serving` has not posted it, and
-nothing in the 53-event log describes it.** It fails criterion 1 outright — I
-have no evidence, not even a second-hand summary. I have not opened a
-placeholder row, because a row invented by the compiler is worse than no row:
-it would carry an id, appear in the index, and assert that something happened
-that I cannot show. **When `s3-serving` posts it, it takes F-23.**
+`s3-serving` posts it". **As of the first compilation `s3-serving` had not
+posted it, and nothing in the 53-event log described it.** It failed criterion 1
+outright — no evidence, not even a second-hand summary. No placeholder row was
+opened, because a row invented by the compiler is worse than no row: it would
+carry an id, appear in the index, and assert that something happened that the
+compiler cannot show. **It has since taken F-23**, opened on the COO's
+timestamped primary evidence at `866c89fe` and not on the request. The refusal
+is what forced the evidence onto the record, which is the outcome the heuristic
+is for.
 
 **Related, and the same judgement:** F-08 (adapter boilerplate) *was* admitted,
 because it has a checkable trigger and a named source even though its evidence
-is off-record. The difference is that F-08 states a specific, verifiable claim
-about two files in the tree; the spawn incident states nothing yet.
+was off-record. The difference is that F-08 states a specific, verifiable claim
+about two files in the tree; the spawn incident stated nothing yet. F-08's gap
+is now closed too, at `eafd0b50`.
 
-**Counts current as of `e3ae2a7` (main) and `6ab990e` (`claude/s3-serving`):**
-suite 247 passed / 1 skipped on main; 247 passed / 8 failed / 1 skipped from a
-fresh checkout of `6ab990e`, 255 / 1 with F-05's mode bit applied. Graph: 995
-entities / 4,035 relationships. 29 projects with session history; 124 codex
-envelopes, 8 clearing the default turn threshold.
+---
+
+**SECOND PASS — the post-ingest gate (`97c8a3cb`), same sitting.** Four rows
+updated on coordinator instruction and three admitted on the judge's own
+findings.
+
+Updated: **F-08** citation repointed to `runtime/bakeoffs/` and its provenance
+caveat dropped. **F-22** Q2 closed against `78f45a48`; Q1 and Q3 stay open and
+the row stays deferred. **F-23** opened (above). **F-03** deliberately *not*
+closed — its fix is delivered and has passed its gate, and the row is built to
+close on the owner's confirmation, which is not on the board. F-01, F-02 and
+F-07 carry the gate's measurements.
+
+Admitted, three: **F-23** (criterion 1 now satisfied), **F-24** (evidenced by
+demonstration — the digest was inverted, and both predicates were run side by
+side), **F-25** (admitted on a *named trigger*, not on an occurrence: zero of
+6,701 non-codex sessions match today).
+
+Rejected, three, each naming the criterion it failed rather than being dropped
+silently:
+
+- **`docs/adapters.md:121-131` describes pre-fix behaviour** now that F-01's
+  fix has shipped. Fails *consequential* — the numbers in it are still correct
+  as history and nothing breaks. Noted inside F-01 so it is not re-discovered,
+  without a row.
+- **`narrative_coverage` scans the conversations directory twice per call**
+  (0.33s → 0.57s over 5,718 files). Fails *consequential* — it does not block,
+  corrupt, lose or spend. Folded into F-25 as a while-you-are-there note.
+- **The delivery's "4 affected fixtures" is 5.** Fails *consequential* as a
+  finding — the tree is correct and all five were regenerated. It is a
+  reporting error, which is already F-P3, so it is recorded inside F-03 with
+  the reconciliation rather than given a row.
+
+One admitted row was **merged rather than added**: the pseudonym residual and
+the bare-name residual arrived as two findings and are one row, F-24, because
+they are one cause. Two rows for one cause is how a ledger becomes noise.
+
+**Counts current as of `a996002` (`claude/post-ingest`), verified from fresh
+clones of the pushed SHAs per F-P1, not from a worktree:** suite **261 passed /
+1 skipped** at `a996002` against **247 / 1** at main `e3ae2a7`; **+14 test ids,
+0 removed, 0 weakened**. Those 14 run against **pre-fix** source as 16 failures,
+and the only two that pass there are the two non-trigger controls. Convener
+graph pinned at `a996002`: **988 entities / 4,053 relationships**. Fixture tree
+byte-reproducible — two regenerations and the committed tree all hash
+`e23870f2abbd157f…` across 30 files. Codex admission **8 → 35 of 124**; **0
+sessions lost** across five real projects. Earlier counts for `6ab990e`
+(`claude/s3-serving`) stand as written above and were not re-measured here.
