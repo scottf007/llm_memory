@@ -71,9 +71,9 @@ free number and are **never renumbered**.
 | F-01 | `min_user_turns` — codex ingest works, codex work does not reach the narrative | in-flight |
 | F-02 | renderer short-id collapse — every codex session renders as `codex-01` | in-flight |
 | F-03 | fixture project names in a public repo — an owner ruling was reversed | in-flight |
-| F-04 | the Gemini wiring recipe does the opposite of what it claims | in-flight |
-| F-05 | exec bit invisible to git under `core.fileMode=false` — 8 tests fail from a clean checkout | in-flight |
-| F-06 | `install.sh` ships `tools/*.py` only, so the wrapper never reaches the installed lib | in-flight |
+| F-04 | the Gemini wiring recipe does the opposite of what it claims | closed |
+| F-05 | exec bit invisible to git under `core.fileMode=false` — 8 tests fail from a clean checkout | closed |
+| F-06 | `install.sh` ships `tools/*.py` only, so the wrapper never reaches the installed lib | closed |
 | F-07 | graph one-liners under-reported; `render` collides with two existing symbols | in-flight |
 | F-08 | adapter boilerplate duplication claude/codex | open |
 | F-09 | archive-provenance drift (`08d89c12`) — `[L:N]` refs shift and drop | open |
@@ -93,6 +93,7 @@ free number and are **never renumbered**.
 | F-23 | the `memory_wrap` real-client spawn incident | open |
 | F-24 | the fixture scrub's two residuals — a pseudonym, and a shape guard that cannot see a bare name | open |
 | F-25 | the `codex-auto` marker is tested on every session, not only codex ones | open |
+| F-26 | the `mcp<2` pin bought time on escalation `09ea13cb`, it did not fix `server.py`'s mcp-2.x incompatibility | open |
 
 ---
 
@@ -249,6 +250,17 @@ gemini mcp add -s user llm_memory <py> -- <server.py>
 The Codex line in the same file *was* correct, and both were "verified against
 `--help` output". See F-P2 for the process lesson.
 
+**CLOSED at `7b96b22` (S3 delta-verify, judge `s3-judge`).** The corrected form
+was re-run verbatim, not re-read: `gemini mcp add -s user llm_memory
+~/.claude/memory/lib/.venv/bin/python3 -- ~/.claude/memory/lib/server.py` in a
+sandboxed `HOME` (`live ~/.gemini` never touched — the sandbox `HOME` env var
+makes that structurally true, not merely claimed). Result: `MCP server
+"llm_memory" added to user settings. (stdio)`; only
+`$SANDBOX_HOME/.gemini/settings.json` was written, nothing under the scratch
+cwd; the file's `args` array is exactly `["/home/scott/.claude/memory/lib/server.py"]`
+— no stray `-s`/`user` baked into argv. Both halves of the original defect are
+fixed and both are independently confirmed by execution, not inference.
+
 ### F-05 — the exec bit git could not see
 *source: judge `52e59524` · status: in-flight · blocks: reproducibility of every test claim on this repo*
 
@@ -265,6 +277,15 @@ about its own worktree and a false one about the commit.
 Fix is `git update-index --chmod=+x tools/memory_wrap`; the installer test
 extension in F-06 is its regression guard. See F-P1 for the process rule.
 
+**CLOSED at `7b96b22` (S3 delta-verify, judge `s3-judge`).** Reproduced from a
+genuinely fresh `git worktree add` of `7b96b22` — not the author's worktree,
+not a prior verify worktree — so no local `chmod` could contaminate the
+result. `git ls-files -s tools/memory_wrap` reads `100755` in the index, the
+checked-out file is `-rwxr-xr-x`, `core.fileMode` is still `false`, and the 8
+wrapper tests in `tests/test_memory_wrap.py` pass with no local chmod: `8
+passed in 2.04s`. The exec bit survived the rebase onto `7077c0c` exactly as
+claimed.
+
 ### F-06 — `install.sh` ships `tools/*.py` only
 *source: judge `52e59524` · status: in-flight · blocks: the wrapper working outside a repo checkout*
 
@@ -277,6 +298,20 @@ it and no client config to read. Every other path the recipes document is a
 
 The assigned fix extends the copy and asserts both files land **and are
 executable**.
+
+**CLOSED at `7b96b22` (S3 delta-verify, judge `s3-judge`).** From a fresh
+checkout + fresh venv built off declared `requirements.txt`:
+`test_wrapper_and_config_are_installed` and `test_wrapper_is_executable`
+(`tests/test_install.py`) both pass, and both extract and execute the **real**
+lines from `install.sh` (`TestToolsInstall._copy_block()` slices the file
+between the `mkdir -p "$LIB_DIR/tools"` and `chmod +x
+"$LIB_DIR/tools/memory_wrap"` lines) rather than a paraphrase. Confirmed the
+guard is not vacuous: run the identical block-extraction logic against
+`install.sh` as it stood at `6ab990e` (pre-fix) and it fails to even find the
+`chmod +x` boundary — `StopIteration`, because the pre-fix installer has no
+such line at all. A test that can only pass because the artifact under test
+changed underneath it, and that provably cannot pass against the pre-fix
+source, is a live guard.
 
 ### F-07 — graph one-liners under-reported, and `render` collides
 *source: standing practice `062046a8`, audited at `52e59524` · status: in-flight · blocks: the evidence base for keeping the practice*
@@ -321,12 +356,34 @@ checked all six against the convener graph pinned at `a996002` (988 entities /
 4,053 relationships): all six are unique, **zero collisions**, so nothing was
 missed on substance.
 
-**Running tally: 1 of 3, then 0 of 6.** Two consecutive slices under-applied a
-practice whose stated purpose is to be measured, and both times the measurement
-had to be done by the judge afterwards. That is the datum the tally exists to
-produce, and it now points somewhere: the practice keeps finding real things
-(the `render` collision, the `prefixes` reuse) and keeps not being run by the
-seat that owes it. Whoever decides the practice's future should weigh
+**Fourth data point, the S3 revision itself (`7b96b22`), and the sharpest one
+yet.** The `render` collision named in the first data point above is closed in
+code and was never reported as closed. `tools.memory_wrap_resume.render` no
+longer exists; the revision renamed it to `render_resume_block`, exactly the
+name `1f25dbd1` suggested while leaving the final call to the seat. Checked
+against the convener graph pinned at `7b96b22` (1038 entities / 4276
+relationships): `tools.memory_wrap_resume.render_resume_block` is a clean
+GRAPH-MISS with **no** collision, and the only two `render` entities left
+anywhere in the graph are the two pre-existing ones — `renderer.render`
+(`renderer.py:703-704`) and `adapters.__init__.render`
+(`adapters/__init__.py:109-112`). Separately, `tools.memory_wrap_resume.main`
+is confirmed trivially new: 14 modules in the graph now define a `.main`
+function, 13 of them pre-existing. **Neither one-liner was posted for this
+revision either** — the seat fixed the substance the practice exists to catch
+and still did not run the practice that would have let it say so. That is the
+practice working in the code and failing in the reporting, in the same
+commit, which is a sharper data point for whoever decides F-07's future than
+either half alone: "under-applied" cannot be read as "not worth keeping" when
+the thing it would have surfaced here is a clean bill of health, not a new
+defect.
+
+**Running tally: 1 of 3, then 0 of 6, then 0 of 2.** Three consecutive slices
+under-applied a practice whose stated purpose is to be measured, and every
+time the measurement had to be done by the judge afterwards. That is the
+datum the tally exists to produce, and it now points somewhere: the practice
+keeps finding real things (the `render` collision, the `prefixes` reuse, and
+now the collision's own closure) and keeps not being run by the seat that
+owes it. Whoever decides the practice's future should weigh
 "under-applied" separately from "not worth keeping" — this record supports the
 first and not the second.
 
@@ -676,9 +733,33 @@ conversations` is now unguarded at module top while the same import inside
 `_find_project_transcripts` is still wrapped in `try/ImportError`, so that guard
 is now decorative.
 
----
+### F-26 — the `mcp<2` pin bought time, it did not fix anything
+*source: escalation `09ea13cb`, closed by `7077c0c`; row opened at S3
+delta-verify (`s3-judge`) · status: open · trigger: anything that forces `mcp`
+2.x back into this project's resolved dependency set*
 
-## D. DEFERRED — with the condition that reopens them
+**Say this precisely, because the escalation's own closure invites the wrong
+reading.** `09ea13cb` is closed — `requirements.txt` now pins `mcp>=1.0,<2`,
+a fresh venv resolves `mcp==1.29.0`, and the suite passes. **That is a ceiling
+on the symptom, not a fix to the cause.** `server.py:54` still calls
+`@app.list_tools()`, an API `mcp` 2.0.0 removed
+(`AttributeError: 'Server' object has no attribute 'list_tools'`, reproduced
+directly against this machine's `mcp` 2.0.0 during this delta-verify).
+Nothing in `7077c0c` touches `server.py`'s use of that API — the moment
+something forces `mcp>=2` back into the resolved set (a transitive dependency
+bump, a future package that needs a 2.x-only feature, someone editing the pin
+without checking why it exists), the exact `AttributeError` this escalation
+was opened for comes back, on a codebase that by then may no longer carry
+anyone's memory of why the ceiling was there.
+
+**No trigger date, and that is the honest state of it, not a gap in this
+row.** There is no scheduled moment this becomes due — the pin holds for as
+long as nobody needs `mcp` 2.x for an unrelated reason. The checkable trigger
+condition is behavioural, not calendar: *if `pip show mcp` in this project's
+venv ever reports `2.x`, `server.py` breaks at import, immediately, the same
+way it did before `7077c0c`.* Anyone auditing dependency bumps should treat a
+`mcp` major-version change as a required trigger to re-open this row and
+either migrate `server.py` off `list_tools()` or re-pin with a stated reason.
 
 ### F-20 — transition-update ordering: the old installer always runs the upgrade
 *source: incident `512d16a6`, declined with reasons at `c237eb21` · status: deferred*
@@ -745,6 +826,23 @@ declined independently, for the same reason.
 **or** a project-scoped hook surface for Grok (which would deserve its own
 row). Fix both runbook defects first — running it as written can produce a
 false negative that closes D9 wrongly.
+
+**Runbook defects: CLOSED at `7b96b22` (S3 delta-verify, judge `s3-judge`).
+The probe itself stays unrun — the reopen condition above has not changed and
+was not attempted.** Checked statically, per the deferral, not by running the
+probe: `docs/grok-userpromptsubmit-probe.md` step 3 now reads `grok -p
+"..." --output-format plain`, and this machine's `grok --help` confirms both
+flags exist exactly as used — `-p, --single <PROMPT>` ("Single-turn prompt.
+Prints the response to stdout and exits") and `--output-format
+<OUTPUT_FORMAT>` with `plain` a valid (and default) value; the multi-line
+quoted string syntax checks clean under `bash -n`. The positive control is
+now present in the procedure: the sentinel hook has a side effect
+(`date >> /tmp/grok-probe-fired.log`) independent of whether stdout reaches
+the model, and step 4 explicitly reads an empty log as inconclusive rather
+than as a negative. Both defects named above are fixed in the doc as written;
+whether `UserPromptSubmit` stdout actually reaches Grok's context is still
+unknown and stays that way until someone runs it under the stated reopen
+condition.
 
 ### F-22 — Q1 and Q3 to Scott, unanswered; Q2 is closed
 *source: `93e6d723`; a third question was held and never spent; Q2 closed against `78f45a48` per `eafd0b50` · status: deferred (owner) on Q1 and Q3*
@@ -825,13 +923,29 @@ adversarial delta pass, not by the author's report.
 
 These are not defects in the product. They are how work on it goes wrong.
 
-- **F-P1 — A test count is a claim about the commit, not about your worktree.**
-  Verify it from a **fresh clone or worktree of the pushed SHA**, and say that
-  is how you ran it. This repo sets `core.fileMode=false`, so file modes are
-  one specific thing a worktree will lie to you about (F-05: 255/1 in the
-  author's worktree, 247/8/1 from the commit) — but the rule is general.
-  `git update-index --chmod=+x <file>` is how you fix a mode when
-  `core.fileMode` is off.
+- **F-P1 — A test count is a claim about the commit, not about your worktree —
+  and about the environment running it, not only the tree checked out.**
+  Verify it from a **fresh clone or worktree of the pushed SHA run in a fresh
+  environment built from the repo's own declared dependencies**, and say both
+  of those — which tree, which environment — in the same sentence as the
+  number. A fresh checkout is necessary but not sufficient; it is not the same
+  claim as a fresh environment, and conflating them is exactly the mistake
+  this rule exists to block. This repo sets `core.fileMode=false`, so file
+  modes are one specific thing a worktree will lie to you about (F-05: 255/1
+  in the author's worktree, 247/8/1 from the commit) — but the rule is
+  general. `git update-index --chmod=+x <file>` is how you fix a mode when
+  `core.fileMode` is off. **Widened at the S3 delta-verify (`s3-judge`,
+  `7b96b22`): today the identical commit gave three different results on one
+  machine depending only on which venv ran it.** A fresh venv built from
+  `requirements.txt` resolves `mcp==1.29.0` and the suite passes clean
+  (271 passed, 1 skipped). This repo's own long-lived `.venv` (F-13) resolves
+  `mcp==2.0.0` and does not merely fail tests — it fails to even **collect**
+  them: `AttributeError: 'Server' object has no attribute 'list_tools'` at
+  `server.py:54`, reproduced directly during this verify. A third venv could
+  easily land somewhere else again depending on when it was built against a
+  moving `mcp` release line. None of the three is "the wrong tree" — the tree
+  was identical in every case. State the venv's provenance (what it was built
+  from, and when) with every count, not just the git ref.
 - **F-P2 — Reading a `--help` and running the command are different acts of
   verification.** F-04's Gemini line and the Codex line beside it were both
   "verified against `--help` output"; one was right and one did the opposite of
@@ -955,3 +1069,47 @@ byte-reproducible — two regenerations and the committed tree all hash
 `e23870f2abbd157f…` across 30 files. Codex admission **8 → 35 of 124**; **0
 sessions lost** across five real projects. Earlier counts for `6ab990e`
 (`claude/s3-serving`) stand as written above and were not re-measured here.
+
+---
+
+**THIRD PASS — the S3 delta-verify (`s3-judge`) on `claude/s3-serving-rebased`
+at `7b96b22`, same sitting as the PASS verdict.** Three rows closed, one
+deferred row's sub-defects closed with the row itself staying deferred, one
+row's in-flight status advanced, one row opened, one process rule widened.
+
+Closed: **F-04**, **F-05**, **F-06** — all three re-verified by execution, not
+by re-reading the prior verdict as settled. F-21's two runbook defects closed;
+the row itself stays **deferred**, its reopen condition unchanged, because the
+probe was — correctly, per this job's standing instruction — still not run.
+Advanced: **F-07** took a fourth data point, the sharpest so far — the S3
+revision closed the exact collision the first data point flagged and still
+did not post either graph one-liner for the revision itself. Opened: **F-26**,
+the `mcp<2` pin, worded so the closed escalation `09ea13cb` cannot be
+mistaken for a solved incompatibility. Widened: **F-P1**, from "verify against
+a fresh checkout" to "verify against a fresh checkout **run in a fresh
+environment**" — the two are different claims, and today's identical commit
+produced three different results on one machine purely by venv.
+
+**Rebase integrity, checked rather than trusted.** `claude/s3-serving`'s
+original two commits (`6ab990e`, `76391c7`) sit on `e3ae2a7`;
+`claude/s3-serving-rebased`'s two commits (`16be5e0`, `7b96b22`) sit on
+`7077c0c`. `git diff e3ae2a7 76391c7` and `git diff 7077c0c 7b96b22` are
+**byte-identical** (same sha256, 883 lines each). The file set the S3 branch
+touches and the file set main gained between `e3ae2a7` and `7077c0c` **do not
+overlap** — checked by set intersection, not by inspection. Nothing was
+dropped or silently absorbed in the rebase.
+
+**Counts current as of `7b96b22` (`claude/s3-serving-rebased`), verified from
+a fresh `git worktree add` of the pushed SHA and a fresh venv built from
+`requirements.txt` (`mcp==1.29.0` resolved) per F-P1 as widened above, not
+from any prior worktree and not from this repo's own `.venv`:** suite **271
+passed / 1 skipped** against main `7077c0c` at **261 passed / 1 skipped** —
+**+10 test ids**, matching the claimed 8 wrapper (`tests/test_memory_wrap.py`)
+plus 2 installer (`tests/test_install.py`) tests exactly, 0 removed, 0
+weakened. `tools/memory_wrap` is `100755` in the index and on disk from a
+genuinely fresh checkout, `core.fileMode=false` confirmed. Convener graph
+pinned at `7b96b22`: **1038 entities / 4,276 relationships**, matching the
+metadata this row's citations are checked against. `F-23` was not touched by
+this pass — it is out of the ledger custodian scope handed to this sitting —
+and the S3 verdict posted to the board says explicitly that it closes with
+`F-23` resting on one side's evidence plus an unelaborated dispute.
