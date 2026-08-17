@@ -164,3 +164,73 @@ class TestInstallScript:
         """install.sh must mkdir -p before copying agents."""
         content = (REPO_DIR / "install.sh").read_text()
         assert 'mkdir -p "$LIB_DIR/agents"' in content or "mkdir -p" in content
+
+
+class TestFixturesInstall:
+    """The fixtures tree gained subdirectories when the codex adapter landed.
+
+    A flat `cp` of a tree that now has directories in it is where repeat
+    installs go wrong, and the installed copy self-updates on every session
+    start, so "repeat install" is the normal case, not an edge case.
+    """
+
+    def _copy_block(self) -> list[str]:
+        """The real lines from install.sh, not a paraphrase of them."""
+        content = (REPO_DIR / "install.sh").read_text().splitlines()
+        start = next(i for i, line in enumerate(content)
+                     if 'rm -rf "$LIB_DIR/tests/fixtures"' in line)
+        end = next(i for i, line in enumerate(content[start:], start)
+                   if 'cp -r "$EXTRACTED/tests/fixtures/."' in line)
+        return content[start:end + 1]
+
+    def _run(self, tmp_path, times: int) -> Path:
+        lib_dir = tmp_path / "lib"
+        extracted = tmp_path / "extracted"
+        (extracted / "tests" / "fixtures" / "codex").mkdir(parents=True)
+        (extracted / "tests" / "fixtures" / "codex" / "01-a.jsonl").write_text("{}\n")
+        (extracted / "tests" / "fixtures" / "oracle_sample.txt").write_text("x\n")
+        (lib_dir / "tests").mkdir(parents=True)
+
+        script = "\n".join([
+            "set -e",
+            f'LIB_DIR="{lib_dir}"',
+            f'EXTRACTED="{extracted}"',
+            *(line for _ in range(times) for line in self._copy_block()),
+        ])
+        subprocess.run(["bash", "-c", script], check=True, capture_output=True)
+        return lib_dir
+
+    def test_single_install_places_fixtures(self, tmp_path):
+        lib_dir = self._run(tmp_path, times=1)
+        assert (lib_dir / "tests" / "fixtures" / "codex" / "01-a.jsonl").is_file()
+        assert (lib_dir / "tests" / "fixtures" / "oracle_sample.txt").is_file()
+
+    def test_repeat_install_does_not_nest_fixture_directories(self, tmp_path):
+        """`cp -r src/* dst/` merges under GNU cp and nests under others.
+
+        Whichever it does, a second run must leave the same tree as the first.
+        """
+        lib_dir = self._run(tmp_path, times=3)
+        fixtures = lib_dir / "tests" / "fixtures"
+        assert not (fixtures / "codex" / "codex").exists(), "repeat install nested the tree"
+        assert not (fixtures / "fixtures").exists(), "repeat install nested the tree"
+        assert sorted(p.relative_to(fixtures).as_posix() for p in fixtures.rglob("*")) == [
+            "codex", "codex/01-a.jsonl", "oracle_sample.txt",
+        ]
+
+    def test_retired_fixture_does_not_linger(self, tmp_path):
+        """A fixture removed from the repo must not stay behind and be collected."""
+        lib_dir = self._run(tmp_path, times=1)
+        stale = lib_dir / "tests" / "fixtures" / "codex" / "99-retired.jsonl"
+        stale.write_text("{}\n")
+
+        extracted = tmp_path / "extracted"
+        script = "\n".join([
+            "set -e", f'LIB_DIR="{lib_dir}"', f'EXTRACTED="{extracted}"', *self._copy_block()])
+        subprocess.run(["bash", "-c", script], check=True, capture_output=True)
+        assert not stale.exists()
+
+    def test_installer_copies_the_fixtures_subtree(self):
+        """The codex fixtures live in a subdirectory; a flat copy would skip them."""
+        content = (REPO_DIR / "install.sh").read_text()
+        assert 'cp -r "$EXTRACTED/tests/fixtures/." "$LIB_DIR/tests/fixtures/"' in content

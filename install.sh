@@ -194,8 +194,16 @@ else
         # tools/ and is imported by tests/test_adapter_oracle.py).
         mkdir -p "$LIB_DIR/tests"
         cp "$EXTRACTED/tests/"*.py "$LIB_DIR/tests/" 2>/dev/null || true
+        # Fixtures are fully llm_memory-owned and now have subdirectories, so
+        # the tree is wiped before copying rather than merged into. Two
+        # reasons: `cp -r src/* dst/` where dst already holds a directory of
+        # the same name merges under GNU cp and nests under some other cp
+        # implementations, so a repeat install could leave fixtures/codex/codex
+        # on one platform and not another; and a retired fixture would
+        # otherwise linger forever and keep being collected by pytest.
+        rm -rf "$LIB_DIR/tests/fixtures"
         mkdir -p "$LIB_DIR/tests/fixtures"
-        cp -r "$EXTRACTED/tests/fixtures/"* "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
+        cp -r "$EXTRACTED/tests/fixtures/." "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
         mkdir -p "$LIB_DIR/tools"
         rm -f "$LIB_DIR/tools/"*.py
         cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/" 2>/dev/null || true
