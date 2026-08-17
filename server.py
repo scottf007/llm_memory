@@ -22,6 +22,8 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 import mcp.types as types
 
+import conversations
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -90,10 +92,14 @@ async def list_tools() -> list[types.Tool]:
             name="narrative_coverage",
             description="Return merged vs unprocessed session transcripts for a project. "
             "Compares on-disk session files against {project}.json.sessions[]. "
-            "Sub-agent transcripts (session_id starting with 'agent-') and short "
-            "one-shot sessions (fewer than min_user_turns substantive user turns, "
-            "default 5) are excluded so the narrative pipeline doesn't burn cycles "
-            "on noise like single-prompt SDK calls.",
+            "Sub-agent transcripts (session_id starting with 'agent-'), the "
+            "codex-auto board-polling harness's own sessions, low-content sessions "
+            "(assistant reply under ~50 chars, e.g. PONG/exit), and short one-shot "
+            "sessions (fewer than min_user_turns substantive user turns — per-client "
+            "default: 5 for claude, 1 for codex, read from each session's "
+            "conversation frontmatter) are excluded so the narrative pipeline "
+            "doesn't burn cycles on noise like single-prompt SDK calls or "
+            "automation traffic.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -103,9 +109,10 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "min_user_turns": {
                         "type": "integer",
-                        "description": "Drop transcripts with fewer than this many "
-                        "non-sidechain user turns (default 5). Pass 0 to disable.",
-                        "default": 5,
+                        "description": "Override the per-client turn threshold "
+                        "(claude: 5, codex: 1) uniformly for every session. Pass 0 "
+                        "to disable turn filtering entirely. Omit to use the "
+                        "per-client defaults.",
                     },
                 },
                 "required": ["project"],
@@ -222,6 +229,106 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
 
 
 # -- narrative_coverage ----------------------------------------------------
+
+# Short Claude sessions are usually noise, but codex's own corpus is mostly
+# single-prompt `codex exec` runs that still carry real work — a flat
+# threshold either buries codex or lets Claude noise through. Read per
+# session from the `client:` frontmatter S1 added; anything without a
+# recorded client (nothing did, before that) is treated as claude.
+_MIN_USER_TURNS_BY_CLIENT = {"codex": 1}
+_DEFAULT_MIN_USER_TURNS = 5
+
+# Below this many characters of assistant prose, a session is structurally
+# indistinguishable from a health check: PONG, exit, a bare id. Real work
+# has more to say than that.
+_MIN_ASSISTANT_CHARS = 50
+
+# The multi-agent board's own `codex-auto` polling harness launches a codex
+# session per board event with this fixed instruction preamble as the first
+# user turn. Structural, not content-based: the harness either replies
+# NO_REPLY or its reply is posted to the board verbatim by construction, so
+# nothing it produces is otherwise-unrecorded narrative material either way.
+_CODEX_AUTO_MARKER = "You are the managed `codex-auto` participant"
+
+
+def _first_user_message_text(jsonl_path: str) -> str:
+    """Text of the first substantive user turn, or "" if none is found."""
+    try:
+        with open(jsonl_path, encoding="utf-8") as fp:
+            for line in fp:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") != "user" or rec.get("isSidechain"):
+                    continue
+                msg = rec.get("message") or {}
+                if msg.get("role") != "user":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
+                    texts = [c.get("text", "") for c in content
+                             if isinstance(c, dict) and c.get("type") == "text"]
+                    if texts:
+                        return "".join(texts)
+                    continue
+                return ""
+    except OSError:
+        return ""
+    return ""
+
+
+def _is_codex_auto_participant(jsonl_path: str) -> bool:
+    return _CODEX_AUTO_MARKER in _first_user_message_text(jsonl_path)
+
+
+def _has_substantive_assistant_content(jsonl_path: str, min_chars: int) -> bool:
+    """True once total assistant prose reaches `min_chars`.
+
+    Stops counting as soon as the threshold is reached. On a read error,
+    fails open — a session isn't dropped just because it couldn't be read.
+    """
+    if min_chars <= 0:
+        return True
+    total = 0
+    try:
+        with open(jsonl_path, encoding="utf-8") as fp:
+            for line in fp:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") != "assistant" or rec.get("isSidechain"):
+                    continue
+                msg = rec.get("message") or {}
+                if msg.get("role") != "assistant":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, str):
+                    total += len(content.strip())
+                elif isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            total += len(str(c.get("text", "")).strip())
+                if total >= min_chars:
+                    return True
+    except OSError:
+        return True
+    return total >= min_chars
+
+
+def _client_by_session(conv_dir: Path) -> dict[str, str]:
+    """session_id -> client, from conversation frontmatter.
+
+    A session not yet archived (no conversation.md) or predating the
+    adapter refactor (no `client:` line) defaults to 'claude', the only
+    client that existed before per-client attribution was added.
+    """
+    return {fm["session_id"]: fm.get("client", "claude")
+            for fm in conversations.iter_sessions(conv_dir)}
+
 
 def _count_substantive_user_turns(jsonl_path: str, cap: int) -> int:
     """Count top-level user turns that carry a real prompt.
@@ -420,12 +527,23 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
     if not project:
         return _error("project is required")
 
-    try:
-        min_user_turns = int(args.get("min_user_turns", 5) or 0)
-    except (TypeError, ValueError):
-        min_user_turns = 5
-    if min_user_turns < 0:
-        min_user_turns = 0
+    raw_min_user_turns = args.get("min_user_turns")
+    min_user_turns_override: int | None = None
+    if raw_min_user_turns is not None:
+        try:
+            min_user_turns_override = int(raw_min_user_turns)
+        except (TypeError, ValueError):
+            min_user_turns_override = None
+        else:
+            if min_user_turns_override < 0:
+                min_user_turns_override = 0
+
+    min_user_turns_by_client = {
+        "claude": _DEFAULT_MIN_USER_TURNS,
+        "codex": _MIN_USER_TURNS_BY_CLIENT["codex"],
+    }
+    if min_user_turns_override is not None:
+        min_user_turns_by_client = {c: min_user_turns_override for c in min_user_turns_by_client}
 
     on_disk = _find_project_transcripts(project)
     state_path = DB_DIR / "projects" / f"{project}.json"
@@ -457,22 +575,38 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         (sid, p) for sid, p in sorted(on_disk_by_sid.items()) if sid not in merged_ids
     ]
 
-    # Filter: drop sub-agent transcripts (agent-*) and short one-shot sessions
-    # so the narrative pipeline doesn't extract from noise like single-prompt
-    # SDK calls. Counts only need to reach the threshold, so the scan short-
-    # circuits cheaply for sessions that already qualify.
+    client_by_sid = _client_by_session(DB_DIR / "conversations")
+
+    # Filter: drop sub-agent transcripts (agent-*), the codex-auto board
+    # harness's own sessions, short one-shot sessions (per-client turn
+    # threshold), and sessions whose only assistant output is a health-check
+    # reply — so the narrative pipeline doesn't extract from noise like
+    # single-prompt SDK calls, board-polling automation, or a bare PONG.
+    # Counts only need to reach the threshold, so each scan short-circuits
+    # cheaply for sessions that already qualify.
     unprocessed: list[str] = []
     skipped_subagent = 0
+    skipped_codex_auto = 0
     skipped_low_turn = 0
+    skipped_low_content = 0
     for sid, p in raw_unprocessed:
         if sid.startswith("agent-"):
             skipped_subagent += 1
             continue
-        if min_user_turns > 0:
-            turns = _count_substantive_user_turns(p, cap=min_user_turns)
-            if turns < min_user_turns:
+        if _is_codex_auto_participant(p):
+            skipped_codex_auto += 1
+            continue
+        client = client_by_sid.get(sid, "claude")
+        threshold = (min_user_turns_override if min_user_turns_override is not None
+                     else _MIN_USER_TURNS_BY_CLIENT.get(client, _DEFAULT_MIN_USER_TURNS))
+        if threshold > 0:
+            turns = _count_substantive_user_turns(p, cap=threshold)
+            if turns < threshold:
                 skipped_low_turn += 1
                 continue
+        if not _has_substantive_assistant_content(p, min_chars=_MIN_ASSISTANT_CHARS):
+            skipped_low_content += 1
+            continue
         unprocessed.append(p)
 
     narrative_mtime = None
@@ -484,10 +618,11 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         except OSError:
             pass
 
-    skipped_total = skipped_subagent + skipped_low_turn
+    skipped_total = skipped_subagent + skipped_codex_auto + skipped_low_turn + skipped_low_content
     filter_note = (
         f" (excluded {skipped_total}: {skipped_subagent} sub-agent, "
-        f"{skipped_low_turn} <{min_user_turns}-turn)"
+        f"{skipped_codex_auto} codex-auto harness, {skipped_low_turn} low-turn, "
+        f"{skipped_low_content} low-content)"
         if skipped_total else ""
     )
 
@@ -500,8 +635,11 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
             "unprocessed_count": len(unprocessed),
             "unprocessed": unprocessed,
             "skipped_subagent_count": skipped_subagent,
+            "skipped_codex_auto_count": skipped_codex_auto,
             "skipped_low_turn_count": skipped_low_turn,
-            "min_user_turns": min_user_turns,
+            "skipped_low_content_count": skipped_low_content,
+            "min_user_turns": min_user_turns_override,
+            "min_user_turns_by_client": min_user_turns_by_client,
             "summary": (
                 f"No {project}.json yet. {len(unprocessed)} substantive "
                 f"transcript(s) ready to process out of {len(on_disk)} on disk"
@@ -518,8 +656,11 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         "unprocessed_count": len(unprocessed),
         "unprocessed": unprocessed,
         "skipped_subagent_count": skipped_subagent,
+        "skipped_codex_auto_count": skipped_codex_auto,
         "skipped_low_turn_count": skipped_low_turn,
-        "min_user_turns": min_user_turns,
+        "skipped_low_content_count": skipped_low_content,
+        "min_user_turns": min_user_turns_override,
+        "min_user_turns_by_client": min_user_turns_by_client,
         "stale_count": len(stale),
         "stale": stale,
         "summary": _coverage_summary(
