@@ -85,6 +85,14 @@ python3 tools/adapter_oracle.py --all        # the whole corpus
 python3 tools/adapter_oracle.py --select 20 --write-sample --list
 ```
 
+**The test file is the CI gate, not the script.** `tools/adapter_oracle.py`
+exits 0 when there is no corpus to check — correct for a local tool, useless
+as a gate, since a machine without `~/.claude/memory` would pass vacuously.
+`tests/test_adapter_oracle.py` is what CI runs: the corpus cases skip when the
+corpus is absent, and 21 synthetic golden fixtures still run and still bite
+(dropping a turn, reordering blocks, truncating one character of body text or
+dropping an `[L:N]` ref each fail fixtures with no corpus present).
+
 The comparison is on bytes, not decoded text: transcripts contain bare `\r`
 from captured progress bars, and universal-newline translation on read
 invents differences that are not on disk.
@@ -92,15 +100,33 @@ invents differences that are not on disk.
 One difference is declared and allowed: the `client:` frontmatter line, which
 did not exist before adapters. The oracle removes exactly that line from the
 regenerated text and requires everything else to match, so the allowance
-cannot hide a second change.
+cannot hide a second change. The excuse is deliberately narrow — **exactly one
+line, carrying exactly the expected client name**. An earlier version excused
+any number of `client:` lines saying anything, which meant a duplicated line
+or `client: nonsense` passed while the oracle printed a reassuring byte count.
+`client:` is the one line a second adapter changes, so its value is asserted.
+A stored file that already carries `client:` needs no excuse and is held to
+plain byte equality.
 
 ### Known pre-existing drift
 
-`--all` reports 10 sessions out of 5,543 that do not reproduce. They fail on
-`main` too, from before this refactor: their stored `.md` was written while
-the transcript was still growing, so regeneration legitimately produces more
-turns and a later `ended`. That is the stale-session problem, not a parser
-bug, and it belongs to whoever fixes staleness.
+`--all` reports 10 sessions that do not reproduce (out of ~5,540 — the corpus
+grows daily, so the denominator moves). All 10 fail on `main` too, and the two
+extractors produce byte-identical output for each of them, so the refactor
+changes nothing about them. Three kinds:
+
+- **Eight are stale**: the stored `.md` was written while the transcript was
+  still growing, so regeneration produces *more* turns and a later `ended`
+  (`810372f1`: 15 → 116 turns). That is the stale-session problem, and it
+  belongs to whoever fixes staleness.
+- **`7a8a83ff`** differs only in `ended`, by 118 ms. Same turns, same bytes.
+- **`08d89c12`** is the odd one, and worth stating precisely because it is
+  easy to mis-file as data loss. Of 8,554 lines, 66 differ, and every one of
+  the 66 is an `=== assistant … [L:N] ===` header: 53 where the ref shifts by
+  1–6 lines, 13 where a ref disappears. No line of conversation text differs
+  and no timestamp differs. It is `[L:N]` provenance drift from an archived
+  transcript structurally offset from the one that produced the `.md` — an
+  archive-integrity question, not lost narrative.
 
 They are not suppressed anywhere. The sample is drawn blind — by age, size and
 project, with no knowledge of which sessions pass — and simply did not land on

@@ -259,6 +259,61 @@ def test_oracle_accepts_only_the_declared_client_line():
     assert "client: claude" in detail
 
 
+def test_oracle_rejects_a_duplicated_client_line():
+    """Trigger (s1-judge M5): two excused lines instead of one.
+
+    The stripper removes every `client:` line in the frontmatter, so without a
+    count assertion a duplicate is excused and the oracle still reports the
+    session as byte identical.
+    """
+    stored = "---\nsession_id: s\nraw: r\nturns: 1\n---\n\nbody\n"
+    produced = "---\nsession_id: s\nclient: claude\nclient: claude\nraw: r\nturns: 1\n---\n\nbody\n"
+
+    ok, detail, _ = adapter_oracle.compare(stored.encode(), produced)
+    assert not ok
+    assert "exactly" in detail
+
+
+def test_oracle_rejects_a_wrong_client_value():
+    """Trigger (s1-judge M5): the excused line says something else.
+
+    This is the line the next adapter changes, so its value has to be checked
+    before a second adapter exists.
+    """
+    stored = "---\nsession_id: s\nraw: r\nturns: 1\n---\n\nbody\n"
+    produced = "---\nsession_id: s\nclient: claude\nclient: totally-bogus-value\nraw: r\nturns: 1\n---\n\nbody\n"
+
+    ok, _, _ = adapter_oracle.compare(stored.encode(), produced)
+    assert not ok
+
+    single_bogus = "---\nsession_id: s\nclient: totally-bogus-value\nraw: r\nturns: 1\n---\n\nbody\n"
+    ok2, _, _ = adapter_oracle.compare(stored.encode(), single_bogus)
+    assert not ok2
+
+
+def test_oracle_checks_the_client_value_it_was_told_to_expect():
+    """Non-trigger control: the same line passes or fails on `expected_client`."""
+    stored = "---\nsession_id: s\nraw: r\nturns: 1\n---\n\nbody\n"
+    produced = "---\nsession_id: s\nclient: codex\nraw: r\nturns: 1\n---\n\nbody\n"
+
+    ok, _, _ = adapter_oracle.compare(stored.encode(), produced, expected_client="codex")
+    assert ok
+
+    ok2, _, _ = adapter_oracle.compare(stored.encode(), produced, expected_client="claude")
+    assert not ok2
+
+
+def test_oracle_excuses_nothing_when_the_stored_file_already_has_provenance():
+    """Once the corpus carries `client:`, there is nothing left to excuse."""
+    both = "---\nsession_id: s\nclient: claude\nraw: r\nturns: 1\n---\n\nbody\n"
+    ok, _, _ = adapter_oracle.compare(both.encode(), both)
+    assert ok
+
+    dropped = "---\nsession_id: s\nraw: r\nturns: 1\n---\n\nbody\n"
+    ok2, _, _ = adapter_oracle.compare(both.encode(), dropped)
+    assert not ok2
+
+
 def test_oracle_rejects_any_other_difference():
     """Trigger control: one changed byte in the body must fail."""
     stored = "---\nsession_id: s\nraw: r\nturns: 1\n---\n\nbody\n"

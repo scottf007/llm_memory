@@ -73,7 +73,12 @@ def regenerate(session_id: str) -> str:
     return adapters.render(claude_adapter.ref_for_path(ARCHIVE_DIR / f"{session_id}.jsonl"))
 
 
-def compare(stored: bytes, produced: str, label: str = "session") -> tuple[bool, str, list[str]]:
+def compare(
+    stored: bytes,
+    produced: str,
+    label: str = "session",
+    expected_client: str = adapters.DEFAULT,
+) -> tuple[bool, str, list[str]]:
     """Compare a regenerated conversation against the stored one.
 
     The comparison is on raw bytes, deliberately. Reading the stored file as
@@ -83,21 +88,47 @@ def compare(stored: bytes, produced: str, label: str = "session") -> tuple[bool,
     do not exist on disk. Bytes are the thing the acceptance criterion is
     about, so bytes are what this compares.
 
-    Equality is byte equality after removing the declared `client:`
-    frontmatter line. Nothing else is normalised: whitespace, ordering and
-    encoding differences all fail.
+    Equality is byte equality after excusing the `client:` frontmatter line.
+    The excuse is narrow on purpose: exactly one line, carrying exactly the
+    expected client name. Excusing "any number of client: lines, saying
+    anything" would let the one line this oracle exists to permit become a
+    place to hide — a duplicated line, or `client: nonsense`, would both pass
+    while the oracle still printed a reassuring byte count. That matters most
+    at the next adapter, since `client:` is precisely the line a second client
+    changes.
+
+    A stored file that already carries provenance needs no excuse at all, so
+    it is held to plain byte equality.
     """
-    compared, removed = strip_client_line(produced)
+    stored_text = stored.decode("utf-8", errors="replace")
+    _, stored_client = strip_client_line(stored_text)
+    expected = f"client: {expected_client}"
+
+    if stored_client:
+        # Already-migrated corpus: nothing to excuse, compare as-is.
+        compared, removed = produced, []
+    else:
+        compared, removed = strip_client_line(produced)
+
     compared_bytes = compared.encode("utf-8", errors="surrogatepass")
-    if compared_bytes == stored:
+    excuse_ok = removed == ([] if stored_client else [expected])
+
+    if compared_bytes == stored and excuse_ok:
         detail = f"identical ({len(stored)} bytes)"
         if removed:
-            detail += f"; declared addition: {', '.join(removed)}"
+            detail += f"; declared addition: {removed[0]}"
         return True, detail, []
+
+    if not excuse_ok:
+        found = ", ".join(removed) if removed else "none"
+        detail = f"excused frontmatter must be exactly [{expected}]; found: {found}"
+        if compared_bytes != stored:
+            detail += " (and the rest differs too)"
+        return False, detail, [f"- {expected}\n", f"+ {found}\n"]
 
     diff = list(
         difflib.unified_diff(
-            stored.decode("utf-8", errors="replace").splitlines(keepends=True),
+            stored_text.splitlines(keepends=True),
             compared.splitlines(keepends=True),
             fromfile=f"stored/{label}.md",
             tofile=f"regenerated/{label}.md",
@@ -116,7 +147,12 @@ def check(session_id: str) -> tuple[bool, str, list[str]]:
     if not jsonl_path.exists():
         return False, "no archived transcript", []
 
-    return compare(stored_path.read_bytes(), regenerate(session_id), session_id)
+    return compare(
+        stored_path.read_bytes(),
+        regenerate(session_id),
+        session_id,
+        expected_client=claude_adapter.client_name(),
+    )
 
 
 def _stored_field(path: Path, field: str) -> str:
