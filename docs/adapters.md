@@ -203,3 +203,24 @@ it — four checks, because no single one is sufficient:
    empty file, a missing sessions directory. Skip and continue, never crash:
    discovery that dies on one bad file reports zero sessions, which is worse
    than reporting the rest.
+
+## The transition-update trap
+
+Every upgrade is performed by the `install.sh` already on disk — the old one.
+So a release that adds a file the pipeline imports gets the new code and the
+old copy instructions. That is not hypothetical: it happened when `adapters/`
+was introduced, the transition update installed the new
+`extract_conversation.py` without the package, and VERSION was stamped so
+`--update` skipped the repair.
+
+`hooks/session_start.sh` now imports `extract_conversation` and `adapters` at
+every session start and reports loudly on both stdout and stderr if that
+fails. It is a detector, not a fix; the root-cause fix is for `install.sh` to
+re-exec the freshly extracted copy of itself before its copy phase, so a
+release's own copy instructions run its own upgrade. That change is worth
+making and belongs with someone who can test a real transition — a self-check
+that fires is worth more than an untested re-exec that might break every
+update.
+
+When adding a file the pipeline imports, add its copy block to `install.sh`
+**and** assume the first upgrade to it will not run that block.

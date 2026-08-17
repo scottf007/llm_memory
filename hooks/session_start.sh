@@ -52,6 +52,51 @@ if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-upd
     fi
 fi
 
+# Post-update self-check: can the installed lib still extract a conversation?
+#
+# Every upgrade is performed by the OLD install.sh — it is what is on disk when
+# the update fires — so a release that adds a new file the pipeline imports gets
+# the new code and the old copy instructions. That happened on 2026-08-17: the
+# adapters/ package was added, the transition update installed the new
+# extract_conversation.py without it, and VERSION was stamped, so re-running
+# --update skipped the fix. Extraction was broken for ~15 minutes and nothing
+# said so: session_end.sh logs its failure to a file nobody reads, and a session
+# that produces no conversation .md is simply absent downstream.
+#
+# The check is one import of the two modules that matter. It runs at every
+# session start, not only after an update, so it also catches a lib left broken
+# by an interrupted install or a partial sync.
+if [ "$SOURCE" != "compact" ]; then
+    LIB_DIR="$HOME/.claude/memory/lib"
+    if [ -f "$LIB_DIR/extract_conversation.py" ]; then
+        SELFCHECK_PY="$LIB_DIR/.venv/bin/python3"
+        [ -x "$SELFCHECK_PY" ] || SELFCHECK_PY="python3"
+        # sys.path must be the lib dir and nothing else. `python3 -c` puts the
+        # working directory first, so a session started inside a checkout of
+        # this repository would import the modules from there and the check
+        # would pass while the installed lib was broken — which is precisely
+        # the state it exists to detect.
+        SELFCHECK_ERR=$("$SELFCHECK_PY" -c "
+import os, sys
+here = os.getcwd()
+sys.path = [p for p in sys.path if p not in ('', here)]
+sys.path.insert(0, '$LIB_DIR')
+import extract_conversation, adapters
+assert adapters.names(), 'no adapters registered'
+assert os.path.dirname(adapters.__file__).startswith('$LIB_DIR'), 'adapters imported from outside the lib'
+" 2>&1)
+        if [ -n "$SELFCHECK_ERR" ]; then
+            # Both channels on purpose. stderr is where a broken hook belongs;
+            # stdout is the only one that reaches the model, and a silent
+            # extraction failure is exactly what went unnoticed last time.
+            echo "LLM_MEMORY_BROKEN: the installed pipeline at $LIB_DIR cannot extract conversations." >&2
+            echo "$SELFCHECK_ERR" >&2
+            echo "LLM_MEMORY_BROKEN: $LIB_DIR is incomplete — extract_conversation/adapters failed to import, so NO conversation .md files are being written and every session since the last good state is missing from memory. Repair with: bash $LIB_DIR/install.sh --update --force"
+            echo "  detail: $(echo "$SELFCHECK_ERR" | tail -1)"
+        fi
+    fi
+fi
+
 # Sweep: collect transcripts not yet captured by hooks.
 # Only look at JSONL files modified since the last sweep (sentinel mtime).
 # This keeps startup fast on machines with thousands of accumulated transcripts.
