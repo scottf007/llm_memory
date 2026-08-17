@@ -1,0 +1,703 @@
+# FEEDBACK — llm_memory's living defect and observation ledger
+
+Compiled 2026-08-17 by seat `s3-judge`, job `llm-memory-multiclient`
+(assignment `fba61413`, admission heuristic `a4272dca`). Sources: all 53 events
+in the job record, the S1/S2/S3 judge verdicts, the multi-client design note
+(`5a1c58b2`), and the transition-update incident (`512d16a6`).
+
+Shape mirrors universalai's `notes/FEEDBACK.md` at `53c095a`.
+
+---
+
+## THE STANDING RULE
+
+**Every judge verdict's non-blocking observations, every incident post, and
+every deferred item gets appended here by the seat that produced it, in the
+same sitting.** Not "when there is time" — findings that live only in a board
+post are findings that get re-discovered by the next seat at full cost.
+
+**This ledger is a required input to every design brief and every slice cut on
+this product.** A brief that has not been checked against it is a brief that
+will propose work already known to be blocked, or re-litigate a rejection that
+already has evidence behind it.
+
+---
+
+## THE ADMISSION HEURISTIC
+
+Per Scott, via `a4272dca`: *"obvious holes yes, not every suggestion or
+problem."* This **replaces** a blanket intake rule. A row earns admission only
+if **all four** hold:
+
+1. **Evidenced** — it demonstrably bit (reproduced, measured, incident) **or**
+   carries a named, checkable trigger condition under which it will bite.
+2. **Actionable** — a specific change someone could make, not a vibe.
+3. **Consequential** — it blocks work, corrupts output, loses data, spends
+   money, or silently degrades.
+4. **Not covered** — no existing test guards it, and no in-flight slice already
+   owns it (in-flight work gets a status row; deferred work needs a stated
+   reopen condition).
+
+Explicitly excluded: style and taste suggestions with no failure mode;
+hypotheticals with no concrete trigger; one-off environment quirks with no
+recurrence path; anything a merged test already pins.
+
+The custodian applies the filter on intake and **may reject a submission with
+one line saying which criterion failed**. A rejected row costs nothing; an
+admitted junk row costs every future reader. Rejections from this compilation
+are recorded in [Compilation notes](#compilation-notes) rather than discarded
+silently.
+
+---
+
+## HOW TO READ THIS
+
+| status | meaning |
+|---|---|
+| **open** | Confirmed, nobody is working on it. |
+| **in-flight** | A slice is actively carrying it. Branch or assignment named in the row. |
+| **deferred** | Deliberately not doing it. The **condition** that would reopen it is stated. A deferred row without a condition is a bug in this ledger. |
+| **closed** | Fixed and merged. Kept only where re-opening is a live risk. |
+
+`id` is stable — cite `F-05`, not "the exec bit thing". New rows take the next
+free number and are **never renumbered**.
+
+---
+
+## INDEX
+
+| id | finding | status |
+|---|---|---|
+| F-01 | `min_user_turns` — codex ingest works, codex work does not reach the narrative | in-flight |
+| F-02 | renderer short-id collapse — every codex session renders as `codex-01` | in-flight |
+| F-03 | fixture project names in a public repo — an owner ruling was reversed | in-flight |
+| F-04 | the Gemini wiring recipe does the opposite of what it claims | in-flight |
+| F-05 | exec bit invisible to git under `core.fileMode=false` — 8 tests fail from a clean checkout | in-flight |
+| F-06 | `install.sh` ships `tools/*.py` only, so the wrapper never reaches the installed lib | in-flight |
+| F-07 | graph one-liners under-reported; `render` collides with two existing symbols | in-flight |
+| F-08 | adapter boilerplate duplication claude/codex — evidence is off-record | open |
+| F-09 | archive-provenance drift (`08d89c12`) — `[L:N]` refs shift and drop | open |
+| F-10 | the stale mid-session `.md` class — a permanent ~10 oracle failures | open |
+| F-11 | `memory_wrap` reports a missing project to the model but not to the user | open |
+| F-12 | `resume` turns an empty `conversation_md` into a directory-read error | open |
+| F-13 | the dev `.venv` holds a foreign package named `mcp` | open |
+| F-14 | the standalone oracle script exits 0 with no corpus | open |
+| F-15 | nothing downstream reads `client:` yet | open |
+| F-16 | the compacted-record render path has no rendered pin | open |
+| F-17 | D12 — codex and qwen both ship native memory; displacement undecided | open |
+| F-18 | D2 — `LLM_MEMORY_HOME` recommended, never built; zero env overrides exist | open |
+| F-19 | the rules line has never been observed to work on any client | open |
+| F-20 | transition-update ordering — the old installer always runs the upgrade | deferred |
+| F-21 | Grok `UserPromptSubmit` probe unrun, and its runbook is not executable | deferred |
+| F-22 | three questions to Scott, unanswered | deferred |
+
+---
+
+## A. IN FLIGHT — the S3 revision and the post-ingest slice
+
+F-01 through F-03 sit with seat `post-ingest` (assignment `6a853f48`);
+F-04 through F-07 sit with seat `s3-serving` (revision assignment `1f25dbd1`,
+on top of `6ab990e`). A row leaves this section when the fix **merges**, not
+when it is written.
+
+### F-01 — `min_user_turns`: "codex ingest works" and "codex work reaches the narrative" are different claims
+*source: `c237eb21`, judge `07cf16e8`, contract amended at `6a853f48` · status: in-flight · blocks: whether S2 delivers anything Scott can see*
+
+Only **8 of 124** codex envelopes clear the default threshold of 5 substantive
+user turns — measured twice independently, by the adapter's own count and by
+loading the real `server.py` from merged main. Codex `exec` runs are
+single-prompt by nature. Codex sessions are ingested, readable, and attached to
+no narrative.
+
+The first contract (a flat `codex: 1`) was **amended before implementation**,
+after an owner-commissioned analysis of the actual 124 conversations:
+
+- 68% are the `codex-auto` board-polling harness — 57 pure `NO_REPLY`, and 27
+  whose replies are posted to the board *verbatim, by construction*, so
+  extracting them duplicates the board.
+- ~40 standalone sessions carry real value, **some recorded nowhere else**
+  (design-council rounds whose arguments exist in no other memory).
+
+So a blanket `1` ingests 84 noise sessions and a flat `5` discards real signal.
+The amended contract is three parts: a structural pre-filter on the `codex-auto`
+prompt pattern (archive, never extract), per-client `min_user_turns` with
+`codex: 1` for the remainder, and a ~50-char minimum assistant-content gate to
+kill `PONG`/`exit`/bare-id sessions.
+
+**The durable half, which outlives the fix:** the answer is not a number. The
+next client will face the same question, and the method is "characterise the
+corpus first, then pick per-client."
+
+### F-02 — renderer short-id collapse: every codex session renders as `codex-01`
+*source: `0bdcb0c2` · status: in-flight · blocks: human-readable provenance in narratives*
+
+`renderer.py:618` and `:641` print `session_id[:8]`. `codex-` is six of those
+eight characters and every codex thread id begins `019`, so **every** codex
+session renders as `codex-01` in both places a human reads session ids. Claude
+ids still show 8 hex characters and stay distinct.
+
+Reported, not fixed, by the seat that caused it — `renderer.py` was out of its
+scope and the fix is a rendering decision. The assigned fix strips a known
+client prefix and shows it separately, which keeps provenance visible; the
+alternative (take the *last* eight characters) loses it.
+
+### F-03 — fixture project names in a public repo: an owner ruling was reversed
+*source: judge `07cf16e8` raised it; Scott ruled KEEP at `3e91071d`; COO reversed at `bee6b19e` · status: in-flight · blocks: publishing the repo*
+
+Three real project names survive the fixture sanitiser **by design**, because
+the fixtures pin project derivation from `cwd`:
+`/home/user/projects/universalai` (189 records), `agent-messaging` (36),
+`fletchcorp` (13). None appears anywhere in the repo at merged main, so S2
+newly introduces them, and `fletchcorp` matches Scott's own email domain — it
+is identifying in a way `universalai` is not.
+
+Everything else in the sanitiser holds under direct attack: 1.8 MB across 30
+files, zero occurrences of `scott`/`Scott`/`/home/scott`, zero credentials, and
+a prose hunt over every string **and dictionary key** longer than 25 characters
+returned exactly two hits, both codex's own schema key names.
+
+**The disagreement is recorded rather than smoothed over,** per this job's
+policy. Scott ruled KEEP at 03:52 ("directory names of largely public repos;
+sanitizer exceptions signed off"). The COO reversed it at 03:59 — placeholders
+like every other string, plus a depth-walk extension so a real project name can
+never ship again. The reversal is the operative instruction and is being
+implemented. **This row does not close on the fix merging.** It closes when
+Scott confirms he accepts the reversal of his own ruling.
+
+### F-04 — the Gemini wiring recipe does the opposite of what it claims
+*source: judge `52e59524`, proven by sandbox execution · status: in-flight · blocks: anyone wiring Gemini*
+
+`docs/mcp-wiring-recipes.md` printed:
+
+```bash
+gemini mcp add llm_memory <py> -- <server.py> -s user
+```
+
+Run verbatim in a sandbox `HOME`, this reports *"added to **project**
+settings"*, writes `./.gemini/settings.json`, and bakes
+`args: ["…/server.py", "-s", "user"]` into the server's launch command. `-s
+user` lands after `--`, so yargs takes it as a positional. Both halves of the
+claim fail — and the doc explicitly says "pass `-s user` (as above) to make it
+available everywhere."
+
+Corrected form, verified in the same sandbox — **options before positionals**:
+
+```bash
+gemini mcp add -s user llm_memory <py> -- <server.py>
+```
+
+The Codex line in the same file *was* correct, and both were "verified against
+`--help` output". See F-P2 for the process lesson.
+
+### F-05 — the exec bit git could not see
+*source: judge `52e59524` · status: in-flight · blocks: reproducibility of every test claim on this repo*
+
+`tools/memory_wrap` was committed `100644` while every other shell entrypoint
+in the repo (`install.sh`, `dashboard.sh`, all seven `hooks/*.sh`) is `100755`.
+From a fresh checkout the suite is **247 passed, 8 failed, 1 skipped** — all
+eight wrapper tests dying on `Permission denied` — against a reported 255/1.
+
+Root cause: this repo's shared `.git/config` sets **`core.fileMode = false`**.
+The authoring seat's local `chmod +x` was real (its worktree file is genuinely
+`0755`) and completely invisible to git. Its "255 passed" was a true statement
+about its own worktree and a false one about the commit.
+
+Fix is `git update-index --chmod=+x tools/memory_wrap`; the installer test
+extension in F-06 is its regression guard. See F-P1 for the process rule.
+
+### F-06 — `install.sh` ships `tools/*.py` only
+*source: judge `52e59524` · status: in-flight · blocks: the wrapper working outside a repo checkout*
+
+`install.sh:209` is `cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/"`. Both new
+non-`.py` artifacts — `tools/memory_wrap` (extensionless bash) and
+`tools/memory_wrap_clients.json` — are therefore **never installed**. The
+installed lib gets `memory_wrap_resume.py`, the helper, with no wrapper to call
+it and no client config to read. Every other path the recipes document is a
+`~/.claude/memory/lib/...` path; the wrapper alone is repo-checkout-only.
+
+The assigned fix extends the copy and asserts both files land **and are
+executable**.
+
+### F-07 — graph one-liners under-reported, and `render` collides
+*source: standing practice `062046a8`, audited at `52e59524` · status: in-flight · blocks: the evidence base for keeping the practice*
+
+The practice: run `bootstrap/uai build` + `find` before creating a new symbol,
+post one line per symbol. **The one-liners are the measurement** — they decide
+whether the practice earns its keep.
+
+First data point, S3: **1 of 3** new module-level symbols reported.
+
+- `memory_wrap` — reported MISS, and the MISS **is corroborated**: `uai find
+  inject` and `uai find prepend` both return zero on a 995-entity /
+  4,035-relationship graph. No pre-existing injection helper existed.
+- `tools.memory_wrap_resume.render` — **not reported, and it collides by name
+  with two existing symbols**: `renderer.render(state: dict)` and
+  `adapters.render(ref, client)`. Substantively still MISS-proceed — three
+  different jobs, and `renderer.py:589` deliberately emits a *pointer* rather
+  than full resume content, so there was nothing to reuse. But this collision
+  is precisely what the practice exists to surface.
+- `tools.memory_wrap_resume.main` — not reported; trivially new, 12 existing
+  modules define `main` by convention.
+
+**Cost datum for the tally:** graph build plus three `find` calls, ~40 seconds,
+would have caught the collision.
+
+---
+
+## B. OPEN — duplication and consolidation
+
+### F-08 — adapter boilerplate duplication claude/codex
+*source: named by the COO at `fba61413` as coming from the four-model cross-vendor round · status: open · trigger: a third adapter*
+
+`adapters/claude.py` and `adapters/codex.py` share structure that a third and
+fourth adapter will duplicate again. The natural moment to consolidate is
+**before S4**, with two examples to generalise from and not yet four to
+migrate.
+
+**Admitted on the trigger criterion, not the evidence criterion, and the gap is
+recorded deliberately.** The four-model round (GLM-5.2, gpt-5.6-luna,
+deepseek-v4-flash, nemotron-free) has its full texts in the COO's *session
+scratchpad*, not on the board. The board carries only the six items the COO
+extracted into `ab6e87f8`, and adapter boilerplate duplication is **not among
+them**. So this row rests on the coordinator's recollection, and the underlying
+evidence is not in the immutable job record — which this job's own policy says
+is where evidence belongs.
+
+**To close, or to strengthen:** the COO posts the cross-vendor texts to the
+board, or a seat re-derives the duplication from the two adapters directly.
+Either way this row should stop resting on an off-record source.
+
+---
+
+## C. OPEN — product limitations and policy
+
+### F-09 — archive-provenance drift (`08d89c12`)
+*source: raised as content loss at `670d410d`, re-characterised by judge `29268c5e` · status: open*
+
+The original report called this content loss ("the archived jsonl holds less
+than whatever produced the stored .md"). Exact analysis says otherwise, and the
+correction matters:
+
+- 8,554 lines on both sides; **66 lines differ**; every one is an
+  `=== assistant <ts> [L:N] ===` header.
+- **Not one line of conversation text differs. Not one timestamp differs.**
+- 53 headers: the `[L:N]` ref merely shifts (`+1`×3, `+2`×48, `+3`×1, `+6`×1).
+- 13 headers: stored had an `[L:N]`, regenerated has none at all.
+- The −115 bytes is entirely those 13 dropped refs, net of digit-width growth.
+
+Logged as **archive-provenance drift, not data loss**. On the
+narrative-fidelity standard it costs nothing. It stays open as an
+archive-integrity question: the transcript archive and the rendered
+conversation disagree about structure, and nobody knows why.
+
+### F-10 — the stale mid-session `.md` class
+*source: `670d410d`, `29268c5e` · status: open · blocks: trusting the corpus oracle's failure count*
+
+Ten corpus sessions do not reproduce byte-for-byte. All ten fail **identically
+on main**, and main's output and the adapter's output are byte-identical to
+each other on all ten (sha256 verified per pair) — pre-existing drift, not
+S1's. They split three ways:
+
+- **Eight**: genuinely stale `.md` files written mid-session. Regeneration
+  produces *more* narrative, not different narrative — `810372f1` 15 → 116
+  turns (+202,766 bytes); `066f9f7a` 1 → 56; `d0ae24a8` 46 → 70. On the
+  narrative-fidelity standard these are a **win**.
+- **One** (`08d89c12`): F-09, a different thing entirely.
+- **One** (`7a8a83ff`): same turns, same bytes (74,083 both sides), differs
+  only in `ended` by **118 ms**. Not staleness at all.
+
+**Why this is consequential rather than cosmetic:** the corpus oracle will
+report ~10 non-reproducing forever unless someone regenerates these or pins
+them as known-drift. A permanent non-zero failure count is exactly how a real
+regression gets waved through.
+
+### F-11 — `memory_wrap` reports a missing project to the model but not to the user
+*source: judge `52e59524` · status: open · not owned by the S3 revision*
+
+The test is named `test_missing_project_reports_visibly_not_silently`. Executed
+for real against a nonexistent project, the wrapper **does** put
+`(memory_wrap: Error: no project state at …)` into the prompt the model
+receives — and emits **0 bytes on stderr**, exit **0**.
+
+Non-silent to the *model*, entirely silent to the *user*. Typo a project name
+and you get a normal-looking session with no memory and nothing on your
+terminal to say so. That is criterion 3's "silently degrades".
+
+Fail-open is the right default — a missing narrative should not block a
+session. The claim is what overreaches. One-line fix: echo the same notice to
+stderr.
+
+For the record, everything else the wrapper was attacked with fails **closed**
+and correctly: unknown client, malformed JSON, wrong-type JSON, missing config,
+`_comment` as a client key, ghost binary, unknown `prompt_mode`, and `jq`
+absent from PATH. No attack produced a silent success or launched a client with
+a broken prompt.
+
+### F-12 — `resume` turns an empty `conversation_md` into a directory-read error
+*source: judge `52e59524` · status: open · pre-existing, introduced by no slice on this job*
+
+`server.py:566`: when a session record has no `conversation_md`, `Path("")`
+evaluates to `.`, `.exists()` is true because the cwd exists, and `read_text()`
+raises `IsADirectoryError`. `resume` returns
+`(failed to read conversation.md: [Errno 21] Is a directory: '.')`.
+
+Harmless when a person reads it. It is no longer only read by a person —
+`memory_wrap` prepends that string straight into a model's context.
+
+**Severity is genuinely low and stated as such:** 0 of 29 real projects have an
+empty `conversation_md` on their last session. Only synthetic state reaches it,
+including the wrapper's own test fixture, which is why nobody noticed. Guard
+the empty case rather than relying on the corpus staying clean.
+
+### F-13 — the dev `.venv` holds a foreign package named `mcp`
+*source: `de2577f2`, independently verified at `52e59524` · status: open · trigger: any hand-run of the wrapper from the repo venv*
+
+`/home/scott/projects/llm_memory/.venv` contains an `mcp` package that is
+**not** the MCP SDK `server.py` imports. It imports fine at top level, so it
+looks healthy — but `import server` under it dies with
+`AttributeError: 'Server' object has no attribute 'list_tools'`.
+
+This is why `tests/test_memory_wrap.py` points `MEMORY_WRAP_PYTHON` at
+`~/.claude/memory/lib/.venv/bin/python3`. The workaround is correct and
+correctly documented as pre-existing.
+
+Two consequences worth keeping:
+
+- The wrapper's documented fallback — "falls back to plain `python3` for
+  dev/test checkouts" (`tools/memory_wrap:22-24`) — **is non-functional here**:
+  system `python3` has no `mcp` at all. It fails closed with a traceback and
+  exit 1, which is right, but the comment overstates what the fallback buys.
+- Anyone hand-running the wrapper from the repo venv gets a confusing
+  `AttributeError` rather than "wrong environment".
+
+Admitted as an environment quirk **with a recurrence path**, which is the
+distinction the heuristic draws.
+
+### F-14 — the standalone oracle script exits 0 with no corpus
+*source: judge `29268c5e` finding 2, re-verified unchanged at `bae6414a` · status: open (standing constraint) · trigger: anyone wiring the script into CI*
+
+`tools/adapter_oracle.py` returns **0** when the conversation corpus is absent
+("nothing to check") and when the sample is empty. Verified under a redirected
+`HOME`.
+
+**The constraint:** the standalone script is a vacuous pass on any machine
+without the corpus and **must never be wired into CI as the gate on its own**.
+`tests/test_adapter_oracle.py` is the correct gate and is wired correctly —
+with no corpus it runs 17 synthetic fixtures (not 20, as originally reported)
+and they genuinely bite: dropping a turn fails 3, reordering blocks fails 1,
+truncating one body character fails 4, dropping an `[L:N]` ref fails 2.
+
+Recorded so nobody "simplifies" CI by calling the script directly.
+
+### F-15 — nothing downstream reads `client:` yet
+*source: `5bcd5c88`, carried forward at `ff1cba31` · status: open · trigger: attribution becoming load-bearing, i.e. now*
+
+The S1 pre-merge verification ran every downstream consumer against real
+`client:`-bearing conversation files — `conversations.py`, `server.py`'s
+`narrative_coverage`/`resume`, the delta-extractor input path, `merger.py`,
+`backfill_conversations.py`, `renderer.py`, and the SessionStart hook. Nothing
+chokes; the frontmatter parser is a generic `key: value` regex and every lookup
+is by name.
+
+The finding is the other half: **`client:` is provenance nobody consults.**
+Correct when there was one client. It becomes load-bearing with codex ingested
+and a third adapter coming, and no consumer is ready.
+
+(Also surfaced by that pass: `renderer.py:301 _tail_lines()` has zero call
+sites — verified by instrumenting `open`/`read_text` during a real render, 1
+file opened, 0 under `conversations/`. Dead code with no failure mode, so no
+row of its own; noted here so it is not re-discovered.)
+
+### F-16 — the compacted-record render path has no rendered pin
+*source: judge `07cf16e8` · status: open · trigger: any change to compacted-record rendering*
+
+Fixture `01-compacted-…` is the only fixture carrying a `compacted` record, and
+its `session_meta` payload genuinely has `parent_thread_id`/`forked_from_id`,
+so it is correctly classified as a forked thread and correctly **stubbed**
+rather than enveloped. The skip is legitimate and self-documenting.
+
+Side effect: the compacted-record **render** path is pinned only by its
+expected-envelope fixture, never by a rendered conversation. It can break
+silently. Wants a fixture that carries a compacted record without being a
+subagent.
+
+### F-17 — D12: codex and qwen both ship native memory
+*source: design note `5a1c58b2`, D12 · status: open, undecided · blocks: S4/qwen slice framing*
+
+Codex ships `~/.codex/memories/` + `memories_1.sqlite`. qwen ships
+`~/.qwen/memories/MEMORY.md` — with the same `MEMORY.md` + feedback + user
+taxonomy shape this project uses. Wiring `llm_memory` into either client does
+**not** touch its native store; the two are simply separate.
+
+Design-note recommendation: **displace for project knowledge, keep native for
+client-local preferences.** Not ratified, nothing implements it. Until it is
+decided, a codex user has two memory systems that do not know about each other
+and no documented answer for which to write to.
+
+### F-18 — D2: `LLM_MEMORY_HOME` recommended, never built
+*source: design note `5a1c58b2`, D1/D2/D3 · status: open · blocked on F-22 Q1*
+
+Verified during the design pass: **zero env overrides exist anywhere in the
+codebase.** `~/.claude/memory` is pinned by `install.sh:6`, by 14 Python modules
+each recomputing `Path.home()/'.claude'/'memory'` independently, by
+`hooks/session_start.sh` (19 occurrences), by the MCP registration in
+`~/.claude.json` (absolute paths), and by Syncthing's `config.xml` per device.
+
+Recommendation: add the indirection now, default unchanged; if the name matters
+for optics, **symlink rather than move**. The code change is cheap (~14 sites;
+`merger.py:38 _memory_root()` already shows the pattern). The *data* move is
+2.4 GB, an all-or-nothing flag day across devices, a full Syncthing rescan
+each, and MCP re-registration in every client — and buys **no capability**,
+because nothing in the ingest path consults the directory name.
+
+The one scenario where a rename stops being cosmetic: running `llm_memory` on a
+machine with no Claude Code installed at all. For an open-source release that
+is real.
+
+### F-19 — the rules line has never been observed to work on any client
+*source: design note `5a1c58b2` §6 (its own falsifier), S3 scope at `de2577f2` · status: open · blocks: the whole non-Claude serving story*
+
+The design note states the falsifier that would invalidate its own
+recommendation:
+
+> If S3's acceptance test shows models that have the tools and still do not
+> call them, every rules-line recommendation is documentation theatre and the
+> wrapper becomes the only answer.
+
+No slice has tested this. D8's rules line is shipped as documentation in
+`docs/mcp-wiring-recipes.md` and has never been observed to work on any client.
+That is not a defect in S3 — it was scoped to recipes, not adoption — but it
+means the injection story rests on one mechanism that is verified
+(`tools/memory_wrap`, once F-05 and F-06 close) and one that is not (the rules
+line, on four clients).
+
+Automatic injection exists **only** where a client splices hook stdout into
+context. Claude does (`session_start.sh:196-214`). Grok, Codex, Gemini and qwen
+all depend on the model choosing to obey, and **the failure is silent in every
+case** — the model answers with no memory and cannot tell it was missing any.
+
+---
+
+## D. DEFERRED — with the condition that reopens them
+
+### F-20 — transition-update ordering: the old installer always runs the upgrade
+*source: incident `512d16a6`, declined with reasons at `c237eb21` · status: deferred*
+
+On 2026-08-17 the background updater ran the **old** `install.sh` to install the
+new tree. The old script had no `adapters/` copy block, so it installed the new
+shim `extract_conversation.py` **without** `adapters/` — live for ~15 minutes —
+and stamped `VERSION`, so re-running `--update` skipped the copy and would not
+self-heal. Exactly the silent breakage S1 predicted. Repaired by hand.
+
+The general defect: **the old installer always runs the upgrade to the new
+one.** Every future update inherits this.
+
+What shipped was the *detector*, not the fix — a session-start self-check
+(`fd474bf`, widened at `14f7177`) that imports `extract_conversation` and
+`adapters.base`/`adapters.render` from the lib dir and shouts on stdout **and**
+stderr when they are broken. stdout because it is the only channel that reaches
+the model, and going unnoticed was the entire failure mode.
+
+The root-cause fix — `install.sh` re-execing its freshly extracted self before
+the copy phase — was declined **on purpose**:
+
+> "It changes the one code path that can break every future update, and I
+> cannot test a real transition from here — I would be shipping an untested
+> change to the upgrade mechanism to fix an upgrade bug." — `s1-adapter`
+
+**Reopen condition:** a seat or operator who can drive a **real remote
+transition** end to end. Do not close this from a single machine, and do not
+let the existence of the detector be mistaken for the fix.
+
+### F-21 — Grok `UserPromptSubmit` probe unrun, and its runbook is not executable
+*source: design D9 (`5a1c58b2`), runbook at `de2577f2`, defects found at `52e59524` · status: deferred*
+
+The question is one bit and falsifiable. Grok's `SessionStart` stdout is
+confirmed ignored (`~/.grok/docs/user-guide/10-hooks.md:415`), but the same doc
+lists `UserPromptSubmit` as a per-turn event (`:86`) and its "stdout is
+ignored" sentence is scoped to "events **like** `SessionStart` or
+`PostToolUse`" — conspicuously excluding `UserPromptSubmit`. If Grok's
+`UserPromptSubmit` stdout reaches context, Grok gets genuine automatic
+injection and stops being obedience-dependent (see F-19).
+
+**Why it is unrun, and why that was right.** The only hook surface Grok trusts
+is the single shared global `~/.claude/settings.json`. Running the probe means
+writing to a file other seats' live Claude Code sessions depend on mid-session;
+two seats had live sessions in that window. `s3-serving` and `s3-judge`
+declined independently, for the same reason.
+
+**Two defects to fix before anyone runs it:**
+
+1. **Step 3 does not work as written.** `grok "prompt"` is the *interactive
+   TUI* form — `grok --help` documents `[PROMPT]` as "Initial prompt for the
+   interactive session". Presented as a copy-paste bash block feeding step 4's
+   one-word read, it drops the operator into a TUI. Grok has
+   `-p, --single <PROMPT>` with `--output-format plain` for exactly this.
+2. **No positive control.** Step 4 reads a `NONE` reply as "D9 negative, stdout
+   ignored". But `NONE` is equally consistent with "the hook never fired" — bad
+   JSON, wrong file, Grok not reading it. As written the procedure **cannot
+   distinguish a true negative from a broken install**, and this job's policy
+   requires a trigger and a non-trigger control. Give the sentinel hook a side
+   effect (`echo SENTINEL; date >> /tmp/grok-probe-fired.log`); an empty log on
+   a `NONE` result means inconclusive, not negative.
+
+**Reopen condition:** a window with no concurrent Claude Code or Grok session,
+**or** a project-scoped hook surface for Grok (which would deserve its own
+row). Fix both runbook defects first — running it as written can produce a
+false negative that closes D9 wrongly.
+
+### F-22 — three questions to Scott, unanswered
+*source: `93e6d723`; a third question was held and never spent · status: deferred (owner)*
+
+Neither blocks anything — defaults were picked and the design note is complete
+without answers — but both change recommendations if answered the other way.
+
+**Q1. Does "a generic memory folder for multiple agents" mean the path must
+stop saying `.claude` (optics / open-source), or just that non-Claude agents
+must be able to use it (capability)?** Default taken: capability, hence D1
+(keep the root) + D2 + D3. If Scott meant optics, **D1 flips** — but D3
+(symlink `~/.llm-memory` + `LLM_MEMORY_HOME`) may buy the whole optics win for
+a hundredth of the cost. Cost breakdown in F-18.
+
+**Q2. Is qwen-local a client whose memory Scott wants kept, or a test rig?**
+Ingest is worth doing either way (cheapest adapter of the five). The question
+is *injection*: qwen runs a local 27B model, and obeying a standing rules-file
+instruction unprompted at turn 1 is exactly the behaviour that degrades first
+at that scale. **This is the main justification for building the generic
+wrapper at all** — if qwen is real, the wrapper is load-bearing; if it is a
+test rig, the wrapper could have waited for evidence that Codex or Grok need
+it.
+
+**Q3.** Held by `mc-design`, never asked. Recorded so the budget is not assumed
+spent.
+
+**Reopen condition:** Scott answers, or Scott says the defaults stand.
+
+---
+
+## E. RECENTLY CLOSED — do not re-open these
+
+Kept only where re-opening is a live risk. All verified closed by an
+adversarial delta pass, not by the author's report.
+
+- **Oracle `client:` excuse too wide** (`29268c5e` finding 1 → closed at
+  `4f08246`, verified `bae6414a`). The excuse is now exactly one line with
+  exactly the expected value. The fix closed **two holes the judge had not
+  reported**: a single `client:` line with a *wrong* value, and the line
+  **omitted entirely** — the latter meaning the old oracle would pass an
+  adapter that had stopped emitting provenance at all.
+- **Self-check gated on the file whose absence is the failure** (`14f7177`).
+  The old guard was `if [ -f "$LIB_DIR/extract_conversation.py" ]`, so deleting
+  that file silently disabled the entire check. Verified real by running the
+  old hook against the same broken lib: it fires 0. Now 8 triggers fire, 2
+  controls stay silent, and it survives the cwd-shadowing trap that made the
+  first version useless.
+- **Case-insensitive prefix routing** (`8b1e39a`). `CODEX-`/`Codex-`/`cOdEx-`
+  now route to codex; the near-miss `codexlike-` still routes to claude —
+  widened without swallowing the lookalike.
+- **Sanitiser depth** (`8b1e39a`). Prose is now caught in values, as dict
+  **keys**, and through nested **lists**. 0 unsanitised strings across 1.8 MB.
+- **Mixed-dialect handling** (`8b1e39a`). Both dialects kept, a note recorded
+  on `SessionMeta.notes`, a stderr WARNING; single-dialect control silent. 0 of
+  127 real files flagged — disjointness now asserted rather than assumed.
+- **Repeat-install determinism** (`e3ae2a7`). Three consecutive installs leave
+  an identical tree; a retired fixture is now removed instead of lingering and
+  being collected by pytest.
+  **One nuance worth not losing:** the `fixtures/fixtures` *nesting* half is
+  **not reproducible on this platform** — GNU coreutils 9.4 merges rather than
+  nests, so the pre-fix commit also produces zero nesting here. That half is
+  pre-emptive (correct: the lib self-updates every session start, so repeat
+  install is the normal case and divergence would show on someone else's
+  machine). The **retired-fixture half is a real, reproducible repair.** Do not
+  let a changelog imply an observed break that nobody observed.
+
+---
+
+## F. PROCESS — kept separate on purpose
+
+These are not defects in the product. They are how work on it goes wrong.
+
+- **F-P1 — A test count is a claim about the commit, not about your worktree.**
+  Verify it from a **fresh clone or worktree of the pushed SHA**, and say that
+  is how you ran it. This repo sets `core.fileMode=false`, so file modes are
+  one specific thing a worktree will lie to you about (F-05: 255/1 in the
+  author's worktree, 247/8/1 from the commit) — but the rule is general.
+  `git update-index --chmod=+x <file>` is how you fix a mode when
+  `core.fileMode` is off.
+- **F-P2 — Reading a `--help` and running the command are different acts of
+  verification.** F-04's Gemini line and the Codex line beside it were both
+  "verified against `--help` output"; one was right and one did the opposite of
+  its stated purpose. A recipe whose entire value is being copy-pasteable
+  should be **executed once into a sandbox `HOME`** — which costs nothing and
+  touches no live config.
+- **F-P3 — State the method with the number.** Two figures in the S2 record
+  cannot be reproduced from what was written down. "1069 assistant turns"
+  reconciles with no definition the judge could construct (independent counts:
+  1054 / 1376 / 1394 depending on what you include). And "468 user turns per
+  `server.py`" is only reproducible **uncapped** —
+  `_count_substantive_user_turns(path, cap)` short-circuits at its cap, and at
+  the production cap of 5 the same function returns ≥5 for exactly 8 of 124.
+  Neither is a correctness problem; both are numbers a future seat will either
+  re-derive or trust wrongly.
+- **F-P4 — Graph-check before naming a new symbol,** and report
+  GRAPH-HIT/GRAPH-MISS with the delivery (`062046a8`). A MISS means *no name
+  matched*, not *nothing like it exists* — F-07's `render` was a legitimate
+  MISS on substance while colliding by name with two existing symbols.
+- **F-P5 — A relayed instruction is unverified until the record shows it.**
+  Established at `51e8d0e5` when a side-channel instruction was correctly
+  refused and the COO confirmed the refusal was right and is the org standard.
+  Applied twice more in this compilation: both cross-session relays about this
+  assignment were checked against the board before being acted on.
+- **A guard needs a trigger and a non-trigger control.** Job policy, and the
+  reason F-21 is not runnable as written — a probe with no positive control
+  cannot tell a true negative from a broken install.
+
+---
+
+## COMPILATION NOTES
+
+**Method.** Read all 53 events in
+`.agent-messages/jobs/llm-memory-multiclient/events/` directly rather than from
+session context, then verified the claims I could reach against the tree at
+`e3ae2a7` and against live state (`server.py` tool definitions, `install.sh:209`,
+`renderer.py` render functions, the 29 real project state files) before writing
+them down.
+
+**Rejections.** The admission heuristic (`a4272dca`) was applied, and it
+excluded four candidates that a blanket intake rule would have admitted:
+
+- **D13 adapter order** (codex → qwen → grok → gemini, moving qwen ahead of
+  grok on cost) — a planning recommendation, not a finding. Fails
+  *consequential*: nothing breaks if it is ignored. Belongs in the slice plan.
+  Same for the note that **Gemini now writes transcripts**
+  (`~/.gemini/tmp/<project>/chats/session-*.jsonl`), which downgrades S5 from
+  "manufacture a transcript" to "write an adapter for a `$set`-op journal" —
+  useful for the S5 brief, not a defect.
+- **`renderer.py:301 _tail_lines()` is dead code** — fails *consequential*: no
+  failure mode. Noted inside F-15 so it is not re-discovered, without a row.
+- **The two unreconciled S2 numbers** — as *findings* they fail
+  *consequential*; as a *habit* they are worth fixing, so they are F-P3 in the
+  process section rather than a defect row.
+- **`memory_wrap`'s non-functional `python3` fallback** — folded into F-13
+  rather than given its own row; it is one consequence of one environment
+  fault, and two rows for one cause is how a ledger becomes noise.
+
+**One item I could not admit, and it was explicitly requested.** The
+compilation brief named "the `memory_wrap` real-client spawn incident once
+`s3-serving` posts it". **As of this commit `s3-serving` has not posted it, and
+nothing in the 53-event log describes it.** It fails criterion 1 outright — I
+have no evidence, not even a second-hand summary. I have not opened a
+placeholder row, because a row invented by the compiler is worse than no row:
+it would carry an id, appear in the index, and assert that something happened
+that I cannot show. **When `s3-serving` posts it, it takes F-23.**
+
+**Related, and the same judgement:** F-08 (adapter boilerplate) *was* admitted,
+because it has a checkable trigger and a named source even though its evidence
+is off-record. The difference is that F-08 states a specific, verifiable claim
+about two files in the tree; the spawn incident states nothing yet.
+
+**Counts current as of `e3ae2a7` (main) and `6ab990e` (`claude/s3-serving`):**
+suite 247 passed / 1 skipped on main; 247 passed / 8 failed / 1 skipped from a
+fresh checkout of `6ab990e`, 255 / 1 with F-05's mode bit applied. Graph: 995
+entities / 4,035 relationships. 29 projects with session history; 124 codex
+envelopes, 8 clearing the default turn threshold.
