@@ -59,7 +59,12 @@ if this probe proves `UserPromptSubmit` is worth building on).
    cp ~/.claude/settings.json ~/.claude/settings.json.pre-grok-probe.bak
    ```
 
-2. **Add a sentinel `UserPromptSubmit` hook.** Edit `~/.claude/settings.json`
+2. **Add a sentinel `UserPromptSubmit` hook — with a positive control.** A
+   hook that only prints a sentinel can't distinguish "stdout is ignored"
+   from "the hook never fired at all" (wrong file, malformed JSON, Grok not
+   reading `~/.claude/settings.json` the way the docs claim). Give it a
+   side effect that doesn't depend on stdout reaching the model, so there's
+   an independent trigger/non-trigger control: edit `~/.claude/settings.json`
    and add, under `hooks`:
    ```json
    "UserPromptSubmit": [
@@ -67,7 +72,7 @@ if this probe proves `UserPromptSubmit` is worth building on).
        "hooks": [
          {
            "type": "command",
-           "command": "echo 'MEMORY_PROBE_SENTINEL_7f3a2c'"
+           "command": "echo 'MEMORY_PROBE_SENTINEL_7f3a2c'; date >> /tmp/grok-probe-fired.log"
          }
        ]
      }
@@ -77,30 +82,41 @@ if this probe proves `UserPromptSubmit` is worth building on).
    machine as of this branch — append to it rather than replacing it.)
 
 3. **Run one Grok turn in a throwaway project** (not this repo, so a bad
-   result can't contaminate a real session):
+   result can't contaminate a real session), in single-turn headless mode so
+   it actually returns a reply instead of opening the interactive TUI
+   (`grok "prompt"` — the bare positional form — launches the TUI, which
+   won't work piped into a read-the-output step; use `-p`/`--single`):
    ```bash
+   rm -f /tmp/grok-probe-fired.log
    mkdir -p /tmp/grok-probe-scratch && cd /tmp/grok-probe-scratch
-   grok "Without using any tool, reply with only the exact sentinel string \
+   grok -p "Without using any tool, reply with only the exact sentinel string \
    you can see above this message in your context, or the single word NONE \
-   if you cannot see one."
+   if you cannot see one." --output-format plain
    ```
 
-4. **Read the result directly, don't infer it.**
-   - Model replies `MEMORY_PROBE_SENTINEL_7f3a2c` → `UserPromptSubmit` stdout
-     reaches context. **D9 resolves positive.** Grok graduates from
+4. **Read the result directly, don't infer it — check the control before
+   trusting a negative.**
+   - `/tmp/grok-probe-fired.log` empty → the hook never fired. Inconclusive,
+     not negative — fix the install (wrong file, bad JSON, Grok not reading
+     `~/.claude/settings.json` on this build) and rerun before drawing any
+     conclusion about `UserPromptSubmit`.
+   - Log has an entry (hook fired) and model replies
+     `MEMORY_PROBE_SENTINEL_7f3a2c` → `UserPromptSubmit` stdout reaches
+     context. **D9 resolves positive.** Grok graduates from
      obedience-dependent to automatic injection; `hooks/session_start.sh`'s
      approach (or a Grok-specific equivalent) becomes viable for Grok, and
      `tools/memory_wrap` demotes from "the mechanism" to "the fallback" for
      Grok specifically (per §2b.6 — it stays the mechanism for Codex,
      Gemini and qwen regardless of this result).
-   - Model replies `NONE` or anything else → **D9 resolves negative.**
+   - Log has an entry (hook fired) but model replies `NONE` or anything
+     else → **D9 resolves negative, with a real control behind it.**
      `tools/memory_wrap` remains the only non-obedience-dependent path for
      Grok, same as the other three obedience-dependent clients.
 
 5. **Restore immediately, whatever the result:**
    ```bash
    mv ~/.claude/settings.json.pre-grok-probe.bak ~/.claude/settings.json
-   rm -rf /tmp/grok-probe-scratch
+   rm -rf /tmp/grok-probe-scratch /tmp/grok-probe-fired.log
    ```
 
 ## What this probe does not test

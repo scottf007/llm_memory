@@ -19,9 +19,11 @@
 #                         git repo root, or of $PWD outside a repo)
 #   MEMORY_WRAP_CLIENTS   path to an alternate client config JSON
 #   MEMORY_WRAP_PYTHON    python3 to run memory_wrap_resume.py with (default:
-#                         the installed lib's venv, which is guaranteed to
-#                         have the `mcp` package server.py imports; falls
-#                         back to plain python3 for dev/test checkouts)
+#                         the installed lib's venv, which has the `mcp`
+#                         package server.py imports; if that venv isn't
+#                         present, falls back to plain python3 on PATH —
+#                         which only works if that interpreter also has
+#                         `mcp` installed, e.g. this repo's own dev venv)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"

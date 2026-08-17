@@ -205,8 +205,13 @@ else
         mkdir -p "$LIB_DIR/tests/fixtures"
         cp -r "$EXTRACTED/tests/fixtures/." "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
         mkdir -p "$LIB_DIR/tools"
-        rm -f "$LIB_DIR/tools/"*.py
+        rm -f "$LIB_DIR/tools/"*.py "$LIB_DIR/tools/memory_wrap" "$LIB_DIR/tools/memory_wrap_clients.json"
         cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/" 2>/dev/null || true
+        # memory_wrap (the S3 generic client wrapper) and its per-client
+        # config aren't .py files, so the glob above skips them.
+        cp "$EXTRACTED/tools/memory_wrap" "$LIB_DIR/tools/memory_wrap" 2>/dev/null || true
+        cp "$EXTRACTED/tools/memory_wrap_clients.json" "$LIB_DIR/tools/memory_wrap_clients.json" 2>/dev/null || true
+        chmod +x "$LIB_DIR/tools/memory_wrap" 2>/dev/null || true
 
         # Copy skills — $LIB_DIR/skills is fully llm_memory-owned, so we
         # wipe the tree first (cheaper than a marker) then copy fresh.

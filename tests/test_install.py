@@ -234,3 +234,46 @@ class TestFixturesInstall:
         """The codex fixtures live in a subdirectory; a flat copy would skip them."""
         content = (REPO_DIR / "install.sh").read_text()
         assert 'cp -r "$EXTRACTED/tests/fixtures/." "$LIB_DIR/tests/fixtures/"' in content
+
+
+class TestToolsInstall:
+    """tools/memory_wrap and its client config aren't *.py, so the glob that
+    installs the rest of tools/ skips them — install.sh needs an explicit
+    copy for each, plus a chmod, or the installed wrapper is either absent
+    or unusable (see judge verdict 52e59524: the wrapper's own repo commit
+    shipped without its exec bit for the same class of reason).
+    """
+
+    def _copy_block(self) -> list[str]:
+        """The real lines from install.sh, not a paraphrase of them."""
+        content = (REPO_DIR / "install.sh").read_text().splitlines()
+        start = next(i for i, line in enumerate(content)
+                     if 'mkdir -p "$LIB_DIR/tools"' in line)
+        end = next(i for i, line in enumerate(content[start:], start)
+                   if 'chmod +x "$LIB_DIR/tools/memory_wrap"' in line)
+        return content[start:end + 1]
+
+    def _run(self, tmp_path) -> Path:
+        lib_dir = tmp_path / "lib"
+        extracted = tmp_path / "extracted"
+        (extracted / "tools").mkdir(parents=True)
+        (extracted / "tools" / "adapter_oracle.py").write_text("# oracle\n")
+        (extracted / "tools" / "memory_wrap").write_text("#!/bin/bash\necho hi\n")
+        (extracted / "tools" / "memory_wrap_clients.json").write_text("{}\n")
+        lib_dir.mkdir(parents=True)
+
+        script = "\n".join([
+            "set -e", f'LIB_DIR="{lib_dir}"', f'EXTRACTED="{extracted}"', *self._copy_block()])
+        subprocess.run(["bash", "-c", script], check=True, capture_output=True)
+        return lib_dir
+
+    def test_wrapper_and_config_are_installed(self, tmp_path):
+        lib_dir = self._run(tmp_path)
+        assert (lib_dir / "tools" / "memory_wrap").is_file()
+        assert (lib_dir / "tools" / "memory_wrap_clients.json").is_file()
+        assert (lib_dir / "tools" / "adapter_oracle.py").is_file()
+
+    def test_wrapper_is_executable(self, tmp_path):
+        lib_dir = self._run(tmp_path)
+        mode = (lib_dir / "tools" / "memory_wrap").stat().st_mode
+        assert mode & 0o111, "installed memory_wrap must be executable"

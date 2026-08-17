@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import server  # noqa: E402
 
 
-def render(project: str) -> str:
+def render_resume_block(project: str) -> str:
     result = server._handle_resume({"project": project})
     text = result[0].text
 
@@ -65,7 +65,16 @@ def main() -> int:
     if len(sys.argv) != 2 or not sys.argv[1].strip():
         print("usage: memory_wrap_resume.py <project>", file=sys.stderr)
         return 2
-    print(render(sys.argv[1].strip()))
+    block = render_resume_block(sys.argv[1].strip())
+    print(block)
+    # A "(memory_wrap: ...)" block is a notice, not real memory — it's
+    # inserted into the client's prompt either way (fail open on the model
+    # side, per design note §2b.7's "say so explicitly"), but a silent
+    # stderr means the person running memory_wrap never sees it. Echo it so
+    # a mistyped --project or an unknown project is visible at the terminal,
+    # not just to the model.
+    if block.startswith("(memory_wrap:"):
+        print(block, file=sys.stderr)
     return 0
 
 

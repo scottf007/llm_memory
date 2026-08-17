@@ -40,17 +40,24 @@ are separate until D12 is actually decided.
 
 ## Gemini CLI
 
-Not wired today — `~/.gemini/config/mcp_config.json` exists but is empty.
+Not wired today — both `~/.gemini/config/mcp_config.json` (empty) and the
+user-scope location, `~/.gemini/settings.json` (auth only, no MCP block),
+confirm nothing is registered yet.
 
 ```bash
-gemini mcp add llm_memory ~/.claude/memory/lib/.venv/bin/python3 -- ~/.claude/memory/lib/server.py -s user
+gemini mcp add -s user llm_memory ~/.claude/memory/lib/.venv/bin/python3 -- ~/.claude/memory/lib/server.py
 ```
 
-Verified against this machine's `gemini mcp add --help`: syntax is
-`gemini mcp add <name> <commandOrUrl> [args...]`, default transport is
-`stdio`, default scope is **project** — pass `-s user` (as above) to make it
-available everywhere the way Claude's registration already is, or drop it to
-scope the server to this repo only.
+Verified in a sandboxed `HOME` + scratch cwd (no live config touched):
+options must come **before** the positionals. `gemini mcp add <name>
+<commandOrUrl> [args...] -s user` — `-s user` trailing after `--` — does not
+set user scope; yargs takes it as two more positionals, so it lands inside
+`args` (baked into the launched server's argv, e.g. `-s user` gets passed to
+`server.py`) and the server is registered at the default **project** scope
+instead, writing `./.gemini/settings.json` in whatever directory you
+happened to run it from. `gemini mcp add -s user <name> <commandOrUrl> --
+<args>` (as above) is the form that actually registers at user scope, with
+clean args and no stray project file.
 
 Rules-file line: add it to this repo's `GEMINI.md` (create if absent).
 
