@@ -28,6 +28,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import adapters
+
 HOME = Path.home()
 
 # How many lines of dialogue to include as the resume_excerpt on the most
@@ -585,6 +587,24 @@ def _render_suggestions(suggestions: list, state: dict | None = None, now: datet
     return "\n".join(out) + "\n"
 
 
+def _display_session_id(session_id: str) -> str:
+    """Short display form of a session id.
+
+    Bare `session_id[:8]` collides for a prefixed client: every codex thread
+    id begins `019…` after the `codex-` prefix, so every codex session
+    rendered as `codex-01` — indistinguishable in the two places a human
+    reads session ids, while claude's unprefixed ids stayed distinct. Strip
+    the known prefix, truncate what remains, and show the client separately
+    — keeps ids distinct without losing the provenance the prefix carried.
+    """
+    sid = session_id or ""
+    lowered = sid.lower()
+    for prefix, client in adapters.prefixes().items():
+        if lowered.startswith(prefix.lower()):
+            return f"{client}-{sid[len(prefix):][:8]}"
+    return sid[:8]
+
+
 def _render_resuming(state: dict) -> str:
     """Lean pointer only. Full resume content (journal + conversation tail)
     is demand-loaded via the `resume` MCP tool — keeps the narrative tight
@@ -615,7 +635,7 @@ def _render_resuming(state: dict) -> str:
     ended = (last.get("ended") or "")[:10] or "?"
     project = state.get("project", "?")
     out.append(
-        f"Last real session `{sid[:8]}` ended {ended} — status: `{status}`. "
+        f"Last real session `{_display_session_id(sid)}` ended {ended} — status: `{status}`. "
         f"To pick up where it left off, call "
         f"`resume(project=\"{project}\")` — returns the session's journal "
         f"and conversation tail on demand. Not loaded by default."
@@ -638,7 +658,7 @@ def _render_source_transcripts(state: dict) -> str:
     out.append("|------|---------|-------|")
     for s in recent:
         started = (s.get("started") or "")[:10]
-        sid = s.get("session_id", "")[:8]
+        sid = _display_session_id(s.get("session_id", ""))
         topic = (s.get("topic") or "").replace("|", "\\|")
         out.append(f"| {started} | `{sid}` | {topic} |")
 

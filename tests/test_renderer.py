@@ -384,3 +384,64 @@ def test_all_required_sections_present():
                     "## What We've Learnt", "## What We Want To Do",
                     "## Suggested Work", "## Resuming", "## Source Transcripts"):
         assert section in md
+
+
+# --- short session-id display ---------------------------------------------
+#
+# Every codex thread id begins `019…` after its `codex-` prefix, so the old
+# bare `session_id[:8]` rendered every codex session as `codex-01` —
+# indistinguishable in the Resuming line and the Source Transcripts table,
+# the two places a human reads a session id. The fix strips the known
+# prefix before truncating and shows the client separately.
+
+def _session(session_id: str, days_ago: float = 0.0, **extra) -> dict:
+    s = {
+        "session_id": session_id,
+        "status": "active",
+        "started": _ts(days_ago),
+        "ended": _ts(days_ago),
+        "closure_status": "complete",
+        "topic": "test session",
+    }
+    s.update(extra)
+    return s
+
+
+def test_display_session_id_strips_known_prefix_and_keeps_client_visible():
+    assert renderer._display_session_id("codex-019ff8c5-af16-72a2-aecf") == "codex-019ff8c5"
+    assert renderer._display_session_id("codex-019d41af-1234-5678-9abc") == "codex-019d41af"
+
+
+def test_display_session_id_leaves_unprefixed_claude_ids_unchanged():
+    """Non-trigger control: claude ids carry no adapter prefix and must keep
+    their plain 8-character truncation."""
+    assert renderer._display_session_id("5c243ece-1ba3-4609-a5e3-daa2a349dcee") == "5c243ece"
+
+
+def test_two_codex_sessions_render_with_distinct_short_ids():
+    """Trigger control for the collision the bug caused: two different codex
+    sessions must not both render as `codex-01`."""
+    state = _state(sessions=[
+        _session("codex-019ff8c5-af16-72a2-aecf-a6e9b1e41f00", days_ago=2),
+        _session("codex-019d41af-1234-5678-9abc-def012345678", days_ago=1),
+    ])
+    md = renderer.render(state)
+    assert "codex-019ff8c5" in md
+    assert "codex-019d41af" in md
+    assert "codex-01`" not in md, "sessions collided into the old codex-01 display id"
+
+
+def test_claude_short_ids_in_source_transcripts_are_unchanged():
+    state = _state(sessions=[
+        _session("5c243ece-1ba3-4609-a5e3-daa2a349dcee", days_ago=1),
+    ])
+    md = renderer.render(state)
+    assert "`5c243ece`" in md
+
+
+def test_resuming_section_shows_client_prefixed_short_id_for_codex():
+    state = _state(sessions=[
+        _session("codex-019ff8c5-af16-72a2-aecf-a6e9b1e41f00", days_ago=1),
+    ])
+    section = renderer._render_resuming(state)
+    assert "`codex-019ff8c5`" in section
