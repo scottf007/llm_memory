@@ -1,0 +1,26 @@
+{
+  "_comment": "Per-client launch shape for tools/memory_wrap. Data, not code — add a client by adding an entry, never by editing memory_wrap. 'prompt_mode' is 'append' (prompt goes on the end as a bare positional arg) or 'flag' (prompt goes right after 'flag' as its own arg). 'args' are fixed arguments inserted before the prompt.",
+
+  "codex": {
+    "command": "codex",
+    "args": ["exec"],
+    "prompt_mode": "append"
+  },
+  "grok": {
+    "command": "grok",
+    "args": [],
+    "prompt_mode": "append"
+  },
+  "gemini": {
+    "command": "gemini",
+    "args": [],
+    "prompt_mode": "flag",
+    "flag": "-p"
+  },
+  "qwen": {
+    "command": "qwen",
+    "args": [],
+    "prompt_mode": "flag",
+    "flag": "-p"
+  }
+}

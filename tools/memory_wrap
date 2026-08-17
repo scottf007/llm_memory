@@ -1,0 +1,88 @@
+#!/bin/bash
+# memory_wrap — generic memory-injection wrapper for non-Claude CLI clients.
+#
+# Claude gets the project narrative auto-injected by hooks/session_start.sh
+# splicing hook stdout into context (see design D10/2b.6). No other client
+# has that hook, and a rules-file line asking a model to call `resume` at
+# turn 1 is obedience-dependent and fails silently when ignored. This is the
+# mechanism that works regardless: fetch resume(project) ourselves and
+# prepend it to the client's first prompt before the client ever runs.
+#
+# Per-client launch shape lives in tools/memory_wrap_clients.json — data,
+# not code. Add a client by adding a JSON entry, not by editing this script.
+#
+# Usage:
+#   memory_wrap <client-key> <prompt> [extra client args...]
+#
+# Env overrides:
+#   MEMORY_WRAP_PROJECT   project name to resume (default: basename of the
+#                         git repo root, or of $PWD outside a repo)
+#   MEMORY_WRAP_CLIENTS   path to an alternate client config JSON
+#   MEMORY_WRAP_PYTHON    python3 to run memory_wrap_resume.py with (default:
+#                         the installed lib's venv, which is guaranteed to
+#                         have the `mcp` package server.py imports; falls
+#                         back to plain python3 for dev/test checkouts)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+CLIENTS_JSON="${MEMORY_WRAP_CLIENTS:-$SCRIPT_DIR/memory_wrap_clients.json}"
+RESUME_HELPER="$SCRIPT_DIR/memory_wrap_resume.py"
+INSTALLED_PYTHON="$HOME/.claude/memory/lib/.venv/bin/python3"
+if [ -n "${MEMORY_WRAP_PYTHON:-}" ]; then
+    PYTHON="$MEMORY_WRAP_PYTHON"
+elif [ -x "$INSTALLED_PYTHON" ]; then
+    PYTHON="$INSTALLED_PYTHON"
+else
+    PYTHON="python3"
+fi
+
+usage() {
+    echo "usage: memory_wrap <client-key> <prompt> [extra client args...]" >&2
+    exit 2
+}
+
+[ "$#" -ge 2 ] || usage
+
+CLIENT_KEY="$1"; shift
+PROMPT="$1"; shift
+EXTRA_ARGS=("$@")
+
+[ -f "$CLIENTS_JSON" ] || { echo "memory_wrap: no client config at $CLIENTS_JSON" >&2; exit 1; }
+
+COMMAND=$(jq -r --arg k "$CLIENT_KEY" '.[$k].command // empty' "$CLIENTS_JSON")
+if [ -z "$COMMAND" ]; then
+    echo "memory_wrap: unknown client '$CLIENT_KEY' in $CLIENTS_JSON" >&2
+    exit 1
+fi
+PROMPT_MODE=$(jq -r --arg k "$CLIENT_KEY" '.[$k].prompt_mode // "append"' "$CLIENTS_JSON")
+FLAG=$(jq -r --arg k "$CLIENT_KEY" '.[$k].flag // empty' "$CLIENTS_JSON")
+mapfile -t BASE_ARGS < <(jq -r --arg k "$CLIENT_KEY" '.[$k].args // [] | .[]' "$CLIENTS_JSON")
+
+if [ "$PROMPT_MODE" = "flag" ] && [ -z "$FLAG" ]; then
+    echo "memory_wrap: client '$CLIENT_KEY' has prompt_mode=flag but no 'flag' set" >&2
+    exit 1
+fi
+
+PROJECT="${MEMORY_WRAP_PROJECT:-}"
+if [ -z "$PROJECT" ]; then
+    ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+    PROJECT=$(basename "$ROOT")
+fi
+
+INJECTION=$("$PYTHON" "$RESUME_HELPER" "$PROJECT")
+FULL_PROMPT="$INJECTION
+
+$PROMPT"
+
+case "$PROMPT_MODE" in
+    append)
+        exec "$COMMAND" "${BASE_ARGS[@]}" "${EXTRA_ARGS[@]}" "$FULL_PROMPT"
+        ;;
+    flag)
+        exec "$COMMAND" "${BASE_ARGS[@]}" "${EXTRA_ARGS[@]}" "$FLAG" "$FULL_PROMPT"
+        ;;
+    *)
+        echo "memory_wrap: unknown prompt_mode '$PROMPT_MODE' for client '$CLIENT_KEY'" >&2
+        exit 1
+        ;;
+esac

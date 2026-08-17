@@ -32,7 +32,7 @@ cd llm_memory
 
 ## What It Does
 
-**MCP Server** — A local Python server that Claude Code spawns on startup. Provides 8 memory tools for storing, searching, connecting, and auditing memories. Backed by JSON files with a SQLite/FTS5 index for fast full-text search.
+**MCP Server** — A local Python server that Claude Code spawns on startup. Provides 4 read-only memory tools for searching and resuming project state. Backed by per-project JSON ledgers with a SQLite/FTS5 index for fast full-text search.
 
 **Lifecycle Hooks** — Shell scripts that fire automatically at session start, before compaction, and at session end. They load project context, archive raw transcripts, and ensure nothing falls through the cracks.
 
@@ -59,20 +59,16 @@ Session ends
 
 ## Memory Tools
 
+All four tools are read-only. Memory is written by the narrative pipeline (delta-extractor → merger → renderer), not by calling a tool mid-session.
+
 | Tool | Description |
 |------|-------------|
-| `memory_store` | Save a narrative, note, or session log |
-| `memory_search` | Full-text search across all memories |
-| `memory_recent` | List recent memories, filtered by project or type |
-| `memory_get` | Retrieve a specific memory by UUID |
-| `memory_connect` | Create a relationship between two memories |
-| `memory_explore` | Traverse the memory graph from a starting point |
-| `memory_delete` | Remove a memory |
-| `narrative_coverage` | Check which transcripts are processed into a narrative |
+| `resume` | Return the last session's journal and a conversation-tail excerpt for a project — the fast path for "where did I leave off" |
+| `project_lookup` | Fuzzy-search one project's ledger (decisions, learnings, done, goals, suggestions) |
+| `memory_search` | Fuzzy-search ledger items across *all* projects, for when you don't know which project a fact is in |
+| `narrative_coverage` | Compare on-disk session transcripts against what's already been merged into a project's narrative |
 
-Three memory types: **narrative** (per-project living document), **note** (atomic fact, decision, or correction), **session_log** (automatic session record).
-
-Two relationship types: **supersedes** (narrative versioning) and **related_to** (linked notes).
+Each project's ledger holds five kinds of item: **decisions**, **learnings**, **done**, **goals**, **suggestions** — one JSON file per item under `~/.claude/memory/items/{project}/{kind}/`, indexed into SQLite/FTS5 for search. The per-project source of truth is `~/.claude/memory/projects/{project}.json`; a human-readable narrative is rendered from it to `{project}.narrative.md`.
 
 ## Dashboard
 
@@ -85,7 +81,7 @@ Timeline view with search and type/project filters. Force-directed knowledge gra
 
 ## Multi-Device Sync
 
-LLM Memory syncs between machines via [Syncthing](https://syncthing.net/). JSON record files and transcripts sync automatically; each machine builds its own SQLite index on startup. No merge conflicts — every record uses a globally unique UUID.
+LLM Memory syncs between machines via [Syncthing](https://syncthing.net/). The `projects/`, `items/`, `conversations/`, `transcripts/`, and `deltas/` directories sync automatically; each machine builds its own local, disposable SQLite index on startup.
 
 ```bash
 python3 ~/.claude/memory/lib/setup_syncthing.py
@@ -95,23 +91,23 @@ python3 ~/.claude/memory/lib/setup_syncthing.py
 <summary><strong>Architecture</strong></summary>
 
 ```
-┌─────────────┐     MCP (stdio)     ┌──────────────┐     ┌───────────┐
-│ Claude Code  │◄──────────────────►│ LLM Memory   │────►│ records/  │
-│              │                    │ server.py    │     │ (JSON)    │
-└─────────────┘                    └──────┬───────┘     └───────────┘
+┌─────────────┐     MCP (stdio)     ┌──────────────┐     ┌────────────┐
+│ Claude Code  │◄──────────────────►│ LLM Memory   │────►│ projects/  │
+│              │                    │ server.py    │     │ (JSON)     │
+└─────────────┘                    └──────┬───────┘     └────────────┘
        │                                  │
        │ lifecycle hooks + CLAUDE.md      ▼
        │                            ┌───────────┐
-       ▼                            │ SQLite     │ ← derived index
+       ▼                            │ SQLite     │ ← derived index over items/
  SessionStart → auto-load narrative │ + FTS5     │   (rebuildable)
  PostToolUse  → monitor transcript  └───────────┘
  PreCompact   → save before compact
  SessionEnd   → archive transcript
 ```
 
-**Records are JSON files.** Each memory is a JSON file in `~/.claude/memory/records/`. The SQLite database is a derived index rebuilt from these files on server startup. The database is disposable — delete it anytime and rebuild.
+**The per-project JSON ledger is the source of truth.** Each project has one file, `~/.claude/memory/projects/{project}.json`, holding its decisions, learnings, done items, goals, suggestions, and session history. Per-item files under `~/.claude/memory/items/{project}/{kind}/` are derived from it and feed the SQLite/FTS5 index — the database itself is disposable, delete it anytime and rebuild with `python3 ~/.claude/memory/lib/indexer.py`.
 
-**UUIDs, not integers.** All records use 32-character hex UUIDs. No collisions across machines.
+**Items use short kind-prefixed ids** (e.g. `dec-00245540.json`), not database row numbers — one JSON file per item, so item history is diffable and mergeable per-file.
 
 **Narratives are written from raw transcripts**, not from summaries. Transcripts capture the user's exact words, the debugging loops, the moments where direction changed. Summaries are lossy.
 
@@ -129,8 +125,11 @@ python3 ~/.claude/memory/lib/setup_syncthing.py
 
 ```
 ~/.claude/memory/
-  records/        ← one JSON file per memory (source of truth, synced)
+  projects/       ← one JSON file per project (source of truth, synced): decisions, learnings, done, goals, suggestions, session history
+  items/          ← one JSON file per ledger item, derived from projects/ (synced) — feeds the FTS5 index
+  conversations/  ← rendered per-session Markdown, tool noise stripped (synced)
   transcripts/    ← raw session JSONL files (synced)
+  deltas/         ← per-session extraction deltas consumed by the merger (synced)
   config/         ← shared CLAUDE.md rules (synced)
   memory.db       ← local search index (rebuilt on startup, never synced)
   lib/            ← installed code + Python venv (not synced)
@@ -169,8 +168,8 @@ python3 -m pytest tests/
 - `chmod +x ~/.claude/memory/lib/hooks/*.sh`
 
 **Database issues**
-- Rebuild anytime: `python3 ~/.claude/memory/lib/server.py --rebuild`
-- The database is disposable — JSON record files are the real data
+- Rebuild anytime: `python3 ~/.claude/memory/lib/indexer.py`
+- The database is disposable — the JSON files under `projects/` and `items/` are the real data
 
 ## Uninstall
 
@@ -179,7 +178,7 @@ claude mcp remove llm_memory --scope user
 # Remove hook entries from ~/.claude/settings.json
 rm -rf ~/.claude/memory/lib/
 # Optionally delete all stored memories:
-# rm -rf ~/.claude/memory/records/ ~/.claude/memory/transcripts/
+# rm -rf ~/.claude/memory/projects/ ~/.claude/memory/items/ ~/.claude/memory/conversations/ ~/.claude/memory/transcripts/ ~/.claude/memory/deltas/
 ```
 
 ## License
