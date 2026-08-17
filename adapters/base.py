@@ -75,6 +75,10 @@ class SessionMeta:
     # Anything a client wants preserved in frontmatter that the protocol has
     # no opinion about. Rendered last, in insertion order.
     extra: dict[str, str] = field(default_factory=dict)
+    # Parse-time observations worth surfacing to a human — an ambiguous file,
+    # a shape the adapter did not expect. Never rendered: this is for the
+    # operator, not for the conversation. Empty is the normal case.
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass

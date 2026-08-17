@@ -103,6 +103,21 @@ across would be a bug: the angle brackets in codex user text are prose
 (`<sha>`, `<job>`, `<seat>`). The full drop list is a table in
 `adapters/codex.py`, with a test per entry.
 
+### Prefixed ids collide with the renderer's 8-character display
+
+`renderer.py` shows `session_id[:8]` in the Resuming line and the Source
+Transcripts table. `codex-` is six of those eight characters, and every codex
+thread id begins `019…`, so **every codex session renders as `codex-01`** —
+indistinguishable from every other one in the two places a human reads session
+ids. Claude ids still show eight hex characters and stay distinct.
+
+Found by rendering a real project-less codex session through merger and
+renderer in a sandbox. Not fixed here: `renderer.py` was out of scope for the
+codex slice, and the fix is a rendering decision, not an adapter one. The two
+candidates are taking the *last* eight characters, or stripping a known client
+prefix before truncating and showing it separately. The second keeps
+provenance visible, which was half the reason for prefixing.
+
 ### `min_user_turns` is the real gate, not the envelope
 
 Of 124 non-subagent codex sessions, **all 124** produce envelopes the server

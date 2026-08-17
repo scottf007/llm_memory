@@ -67,6 +67,24 @@ def test_bare_ids_route_to_claude_and_prefixed_ids_to_their_owner():
     assert adapters.client_for_session_id("codex-019ffa3a-5670") == "codex"
 
 
+@pytest.mark.parametrize("session_id", ["CODEX-019ffa3a", "Codex-019ffa3a", "cOdEx-019ffa3a"])
+def test_prefix_routing_is_case_insensitive(session_id):
+    """Routing reads whatever is on disk, not only what an adapter wrote.
+
+    A file renamed by hand, or one that arrived through a case-insensitive
+    filesystem, must not fall through to Claude and get re-extracted into a
+    `client: claude` conversation. Failing open to the wrong client is the
+    expensive direction.
+    """
+    assert adapters.client_for_session_id(session_id) == "codex"
+
+
+def test_case_insensitivity_does_not_capture_unrelated_ids():
+    """Non-trigger control: near-misses still belong to Claude."""
+    for session_id in ("codexish-abc", "code-019", "xcodex-019", "019-codex-1"):
+        assert adapters.client_for_session_id(session_id) == "claude"
+
+
 # --------------------------------------------------------------------------
 # Golden fixtures
 # --------------------------------------------------------------------------
@@ -144,6 +162,85 @@ def test_item_completed_dialect_actually_yields_turns():
         if uses_ic and any(t.role == "user" and t.text for t in turns):
             found.append(path.name)
     assert found, "no non-subagent fixture produces user turns from the item_completed dialect"
+
+
+_TOKEN_RE = __import__("re").compile(r"^[A-Za-z0-9_.:+-]{1,40}$")
+_PLACEHOLDER_RE = __import__("re").compile(r"^<[A-Za-z0-9_]+:\d+(?::[0-9a-f]{8})?>$|^<[A-Za-z0-9_]+>$")
+# The one class of long string the sanitiser deliberately keeps: the rewritten
+# neutral cwd, because project attribution has to stay testable.
+_ALLOWED_LITERALS = {"/home/user"}
+
+
+def _walk_strings(node, path="$"):
+    """Yield (json-path, string) for every string anywhere in the tree."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield f"{path}.{key}", str(key)
+            yield from _walk_strings(value, f"{path}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk_strings(value, f"{path}[{i}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+def _is_sanitised(value: str) -> bool:
+    if _PLACEHOLDER_RE.match(value) or _TOKEN_RE.match(value):
+        return True
+    if value in _ALLOWED_LITERALS or value.startswith("/home/user"):
+        return True
+    return False
+
+
+@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.stem)
+def test_every_string_at_every_depth_is_sanitised(path):
+    """Depth-blind, not key-blind.
+
+    The earlier checks looked for known leaks — a home directory, a filename.
+    That is the same mistake the first sanitiser made: it can only catch what
+    someone thought to list. This asserts the invariant instead. Every string
+    anywhere in the tree, at any nesting depth, on either dialect's payload
+    path, in a dict key or a value, must be a structural token or a
+    placeholder. Nested prose cannot ship without failing here.
+    """
+    offenders = []
+    for line_no, line in enumerate(path.read_text().splitlines(), 1):
+        try:
+            record = json.loads(line)
+        except Exception:
+            offenders.append((line_no, "$", "<unparseable line>"))
+            continue
+        for json_path, value in _walk_strings(record):
+            if not _is_sanitised(value):
+                offenders.append((line_no, json_path, value[:80]))
+    assert not offenders, (
+        f"{path.name}: {len(offenders)} unsanitised string(s), first few: {offenders[:5]}")
+
+
+def test_the_depth_walk_would_catch_nested_prose():
+    """Trigger control for the walk above.
+
+    A check that never fires proves nothing, and this one is asserting a
+    negative over ~1.8 MB of fixtures.
+    """
+    smuggled = {"type": "event_msg", "payload": {"item": {"content": [
+        {"deep": {"deeper": ["a sentence of real prose that should never ship"]}}]}}}
+    bad = [v for _, v in _walk_strings(smuggled) if not _is_sanitised(v)]
+    assert bad == ["a sentence of real prose that should never ship"]
+
+    # And a key, not just a value — the leak the first sanitiser actually had.
+    keyed = {"/home/scott/projects/thing/notes.md": {"type": "x"}}
+    assert any(not _is_sanitised(v) for _, v in _walk_strings(keyed))
+
+
+def test_fixture_tree_contains_no_symlinks():
+    """`cp -r` follows or preserves symlinks depending on flags and platform.
+
+    A symlink in a committed fixture tree either dangles after install or
+    points somewhere outside it. Neither is a fixture.
+    """
+    links = [p for p in FIXTURE_DIR.rglob("*") if p.is_symlink()]
+    assert not links, f"symlinks in the fixture tree: {links}"
 
 
 def test_fixtures_carry_no_identifying_content():
@@ -262,6 +359,68 @@ def test_noise_records_never_reach_the_conversation(record, tmp_path):
     assert "real question" in out and "real answer" in out
 
 
+def test_mixed_dialect_file_keeps_both_and_says_so(tmp_path, capsys):
+    """The disjointness assumption, made falsifiable.
+
+    Reading both dialects is safe today because no codex session uses both —
+    123 files use one, 4 use the other, none overlap. That is an observation
+    about one machine at one version, not a guarantee. If it ever stops
+    holding, turns may be duplicated.
+
+    The adapter keeps both anyway: dropping half a conversation to protect an
+    invariant is the worse failure. But it must not do that quietly, because a
+    silently doubled transcript reads as a real conversation.
+    """
+    path = _session([
+        _meta_record(),
+        {"timestamp": "2026-01-01T00:00:01.000Z", "type": "event_msg",
+         "payload": {"type": "user_message", "message": "from the exec dialect"}},
+        {"timestamp": "2026-01-01T00:00:02.000Z", "type": "event_msg",
+         "payload": {"type": "item_completed",
+                     "item": {"type": "UserMessage",
+                              "content": [{"type": "text", "text": "from the tui dialect"}]}}},
+    ], tmp_path)
+
+    meta, turns = codex.parse(codex.ref_for_path(path, session_id="codex-mixed"))
+    texts = [t.text for t in turns]
+    assert "from the exec dialect" in texts, "the exec dialect was dropped"
+    assert "from the tui dialect" in texts, "the tui dialect was dropped"
+
+    assert meta.notes, "a mixed-dialect session must be flagged"
+    note = meta.notes[0]
+    assert "event_msg" in note and "item_completed" in note
+    assert "duplicated" in note
+    assert "WARNING" in capsys.readouterr().err
+
+
+def test_single_dialect_file_is_not_flagged(tmp_path, capsys):
+    """Non-trigger control: the warning must stay quiet in the normal case,
+    which is every codex session that exists today."""
+    path = _session([
+        _meta_record(),
+        {"timestamp": "2026-01-01T00:00:01.000Z", "type": "event_msg",
+         "payload": {"type": "user_message", "message": "just the one dialect"}},
+        {"timestamp": "2026-01-01T00:00:02.000Z", "type": "event_msg",
+         "payload": {"type": "agent_message", "message": "still the one dialect"}},
+    ], tmp_path)
+
+    meta, _ = codex.parse(codex.ref_for_path(path, session_id="codex-single"))
+    assert meta.notes == []
+    assert "WARNING" not in capsys.readouterr().err
+
+
+def test_no_real_session_is_mixed_dialect():
+    """The observation the adapter relies on, asserted against the real corpus."""
+    if not HAS_CORPUS:
+        pytest.skip("no ~/.codex/sessions on this machine")
+    flagged = []
+    for ref in codex.discover():
+        meta, _ = codex.parse(ref)
+        if meta.notes:
+            flagged.append((ref.path.name, meta.notes))
+    assert not flagged, f"disjointness no longer holds: {flagged}"
+
+
 def test_kept_text_is_not_tag_stripped(tmp_path):
     """Non-trigger control against copying Claude's noise regex.
 
@@ -347,6 +506,48 @@ def test_envelope_user_content_is_a_string_not_a_block_list(tmp_path):
     assert isinstance(rec["message"]["content"], str)
     assert rec["type"] == "user"
     assert rec["client"] == "codex"
+
+
+def test_unattributed_session_is_ingested_and_reaches_no_project(tmp_path):
+    """9 real codex sessions were started from `~` or `~/projects`.
+
+    They have a cwd and no project, and the pipeline has to hold that without
+    inventing one. Demonstrated in a sandbox against the real consumers before
+    being pinned here: `conversations.iter_sessions` parses all nine,
+    `list_projects()` excludes them, `_find_project_transcripts("")` returns
+    nothing, and merger + renderer run clean. So they are ingested, readable
+    and attached to no narrative — the same place an unattributed Claude
+    session lands, not a new failure mode.
+    """
+    import conversations
+
+    path = _session([
+        _meta_record(cwd="/home/u"),
+        {"timestamp": "2026-01-01T00:00:01.000Z", "type": "event_msg",
+         "payload": {"type": "user_message", "message": "no project here"}},
+    ], tmp_path)
+    meta, turns = codex.parse(codex.ref_for_path(path, session_id="codex-np"))
+    assert meta.project == ""
+    assert meta.cwd == "/home/u"
+
+    conv_dir = tmp_path / "conversations"
+    conv_dir.mkdir()
+    (conv_dir / "codex-np.md").write_text(adapters.render_conversation(meta, turns))
+
+    rows = list(conversations.iter_sessions(conv_dir))
+    assert len(rows) == 1
+    assert "project" not in rows[0], "a project-less session must not gain an empty project"
+    assert rows[0]["session_id"] == "codex-np"
+    assert rows[0]["client"] == "codex"
+    assert conversations.list_projects(conv_dir) == []
+    assert conversations.list_sessions("", conv_dir) == []
+
+    # The envelope is still correct — attribution and visibility are separate.
+    written = envelope.write_envelope(meta, turns, tmp_path / "transcripts")
+    assert envelope.count_user_turns(written) == 1
+    rec = json.loads(written.read_text().splitlines()[0])
+    assert rec["cwd"] == "/home/u"
+    assert adapters.project_from_cwd(rec["cwd"]) == ""
 
 
 def test_envelope_cwd_round_trips_to_the_same_project():

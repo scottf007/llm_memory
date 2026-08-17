@@ -84,9 +84,16 @@ def client_for_session_id(session_id: str) -> str:
     is. This is the routing that keeps the claude adapter from re-extracting a
     foreign client's envelope: the envelope is Claude-shaped on purpose, so
     shape cannot be the discriminator — the id is.
+
+    Matching is case-insensitive. Adapters emit lowercase ids, but this routes
+    *whatever is on disk*: a file that arrived through a case-insensitive
+    filesystem, a rename, or a hand-edit would otherwise fall through to Claude
+    and be re-extracted into a `client: claude` conversation. Failing open to
+    the wrong client is the expensive direction.
     """
+    lowered = session_id.lower()
     for prefix, client in _PREFIXES.items():
-        if session_id.startswith(prefix):
+        if lowered.startswith(prefix.lower()):
             return client
     return DEFAULT
 

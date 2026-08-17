@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Iterator
 
@@ -183,6 +184,7 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     first_ts = ""
     last_ts = ""
     pending_tool_line: int | None = None
+    dialects: set[str] = set()
 
     def add(role: str, ts: str, text: str, line_num: int) -> None:
         nonlocal pending_tool_line
@@ -248,8 +250,10 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
 
             # -- the kept stream --------------------------------------------
             if ptype == "user_message":
+                dialects.add("event_msg")
                 add("user", ts, payload.get("message") or "", line_num)
             elif ptype == "agent_message":
+                dialects.add("event_msg")
                 add("assistant", ts, payload.get("message") or "", line_num)
             elif ptype == "item_completed":
                 item = payload.get("item")
@@ -257,8 +261,10 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
                     continue
                 itype = item.get("type")
                 if itype == "UserMessage":
+                    dialects.add("item_completed")
                     add("user", ts, _content_text(item.get("content")), line_num)
                 elif itype == "AgentMessage":
+                    dialects.add("item_completed")
                     add("assistant", ts, _content_text(item.get("content")), line_num)
                 elif itype in _TOOL_ITEM_TYPES and pending_tool_line is None:
                     pending_tool_line = line_num
@@ -266,6 +272,21 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
 
     meta.started = first_ts
     meta.ended = last_ts
+
+    # Across the 127 sessions on this machine the two dialects are perfectly
+    # disjoint per file — 123 event_msg, 4 item_completed, no overlap — which
+    # is what makes reading both safe rather than double-counting. If a future
+    # codex version ever emits both in one session, that assumption is dead and
+    # the turns above may be duplicated. Both are kept, because dropping half a
+    # conversation to protect an invariant is the worse failure, but it says so
+    # loudly rather than quietly returning a doubled transcript.
+    if len(dialects) > 1:
+        note = (f"{ref.session_id}: both codex dialogue dialects present "
+                f"({', '.join(sorted(dialects))}); turns from both were kept and may "
+                f"be duplicated — the disjointness this adapter relies on no longer holds")
+        meta.notes.append(note)
+        print(f"WARNING: {note}", file=sys.stderr)
+
     return meta, turns
 
 
