@@ -195,7 +195,7 @@ else
         mkdir -p "$LIB_DIR/tests"
         cp "$EXTRACTED/tests/"*.py "$LIB_DIR/tests/" 2>/dev/null || true
         mkdir -p "$LIB_DIR/tests/fixtures"
-        cp "$EXTRACTED/tests/fixtures/"* "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
+        cp -r "$EXTRACTED/tests/fixtures/"* "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
         mkdir -p "$LIB_DIR/tools"
         rm -f "$LIB_DIR/tools/"*.py
         cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/" 2>/dev/null || true

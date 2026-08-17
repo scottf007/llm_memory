@@ -58,7 +58,7 @@ def test_every_adapter_module_on_disk_is_registered():
     That failure mode has no error message: the client's sessions simply never
     appear in any narrative. Cheaper to fail here.
     """
-    infrastructure = {"__init__", "base", "render"}
+    infrastructure = {"__init__", "base", "render", "envelope"}
     package_dir = Path(__file__).resolve().parent.parent / "adapters"
     on_disk = {p.stem for p in package_dir.glob("*.py") if p.stem not in infrastructure}
     assert on_disk <= set(adapters.names()), f"unregistered adapters: {on_disk - set(adapters.names())}"

@@ -56,6 +56,11 @@ class SessionMeta:
     session_id: str
     client: str
     project: str = ""
+    # The session's working directory as the client recorded it. `project` is
+    # derived from it, but the envelope writer needs the original: a foreign
+    # session's envelope has to carry a cwd the pipeline can re-derive the
+    # same project from.
+    cwd: str = ""
     started: str = ""
     ended: str = ""
     is_subagent: bool = False

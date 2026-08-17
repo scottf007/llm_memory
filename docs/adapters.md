@@ -68,9 +68,51 @@ contributes its line reference to the surrounding block but no prose.
    foreign adapter writes a minimal Claude-shaped JSONL to
    `transcripts/<sid>.jsonl` and records its own path as `raw_source:` in the
    frontmatter.
-5. Self-check the envelope against `_count_user_turns`. A session whose
-   envelope counts zero user turns is dropped below `min_user_turns` with no
-   error and no log line — memory just quietly gets a hole in it.
+5. Self-check the envelope against `_count_substantive_user_turns` — use
+   `adapters.verify_envelope()`. A session whose envelope counts zero user
+   turns is dropped from `narrative_coverage` with no error and no log line;
+   memory just quietly gets a hole in it.
+6. **Read the client's own transcripts before believing the format survey.**
+   See below.
+
+## What the codex adapter cost, and what it teaches
+
+The scoping survey said codex turn text lives in `event_msg` payloads of type
+`user_message` / `agent_message`. That is true of 123 of the 127 sessions on
+this machine, and false in a way that costs you the best data:
+
+- `codex_exec` sessions use that shape.
+- `codex-tui` sessions instead emit `event_msg` / `item_completed`, with the
+  text under `payload.item.content[].text` and the kind in `payload.item.type`
+  (`UserMessage` / `AgentMessage`).
+
+An adapter written to the surveyed shape renders every TUI session as an empty
+conversation — including the richest codex session on disk, 10,571 records and
+74 real user turns. No crash, no warning: the session parses fine and produces
+nothing. **A format survey tells you what one session looked like. Only a
+census over every session on disk tells you what the client emits.** The two
+dialects turn out to be perfectly disjoint per file, so the adapter reads
+whichever it finds and cannot double-count.
+
+Per-vendor stripping is real, and it is not the same shape of problem for each
+client. Claude injects noise as tags inside otherwise-real turns, so it is
+removed with a regex. Codex emits noise as whole records — developer-role
+prompts, plugin catalogues, `<environment_context>`, encrypted reasoning,
+telemetry — so it is dropped by record type, and copying Claude's tag regex
+across would be a bug: the angle brackets in codex user text are prose
+(`<sha>`, `<job>`, `<seat>`). The full drop list is a table in
+`adapters/codex.py`, with a test per entry.
+
+### `min_user_turns` is the real gate, not the envelope
+
+Of 124 non-subagent codex sessions, **all 124** produce envelopes the server
+counts correctly, and **8** clear the default `min_user_turns=5`. 114 of 127
+codex sessions on this machine are single-prompt `codex exec` runs. So a
+correct adapter with a correct envelope still leaves most codex work out of
+`narrative_coverage`. That is a serving/config decision — the threshold is a
+parameter, and it exists because short Claude sessions are usually noise —
+but "codex ingest works" and "codex work reaches the narrative" are different
+claims, and only the first is true by default.
 
 ## The oracle
 
@@ -135,3 +177,29 @@ kinds of failure apart is to run the same session through `main`'s
 `extract_conversation.extract()`: if it mismatches there too, it is drift, not
 a regression. A suppression list would be easier and would be the end of the
 oracle.
+
+## Clients with no stored corpus
+
+The oracle needs files that already exist, so a new client has nothing to
+compare against. `tests/test_codex_adapter.py` is the pattern that replaces
+it — four checks, because no single one is sufficient:
+
+1. **Golden fixtures.** `tools/make_codex_fixtures.py` builds them from real
+   sessions, keeping every structural detail and discarding the prose: each
+   string becomes a length-stamped placeholder. Ten fixtures chosen by feature
+   cover (every record shape the client emits) and then by conversation depth,
+   because this corpus is lopsided and sampling at random would return ten
+   near-identical files and call it diversity. Oversized sources are committed
+   as a prefix, marked in the filename.
+   *Sanitise with an allow-list, not a deny-list.* The first version enumerated
+   the keys holding prose and leaked absolute paths through dictionary **keys**
+   while carefully scrubbing the values. A string now survives only if it looks
+   like a structural token.
+2. **The envelope self-check**, run over every fixture and every real session.
+3. **Conformance attacks** — an adapter missing a protocol function, or with a
+   non-callable in its place, must be rejected by `conforms()`; `discover()`
+   must not return duplicate ids or phantom paths.
+4. **Discovery edge cases** — a malformed line mid-file, an unreadable file, an
+   empty file, a missing sessions directory. Skip and continue, never crash:
+   discovery that dies on one bad file reports zero sessions, which is worse
+   than reporting the rest.
