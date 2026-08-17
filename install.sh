@@ -176,13 +176,29 @@ else
         cp "$EXTRACTED/hooks/"*.sh "$LIB_DIR/hooks/"
         chmod +x "$LIB_DIR/hooks/"*.sh
 
+        # Copy per-client adapters. extract_conversation.py imports this
+        # package, so it is not optional — a lib dir with the new
+        # extract_conversation.py and no adapters/ cannot extract anything.
+        # Fully llm_memory-owned: wipe the flat *.py first so a retired client
+        # adapter can't linger and get imported.
+        mkdir -p "$LIB_DIR/adapters"
+        rm -f "$LIB_DIR/adapters/"*.py
+        rm -rf "$LIB_DIR/adapters/__pycache__"
+        cp "$EXTRACTED/adapters/"*.py "$LIB_DIR/adapters/"
+
         # Copy templates
         mkdir -p "$LIB_DIR/templates"
         cp "$EXTRACTED/templates/"* "$LIB_DIR/templates/" 2>/dev/null || true
 
-        # Copy tests
+        # Copy tests and the tools they drive (the adapter oracle lives in
+        # tools/ and is imported by tests/test_adapter_oracle.py).
         mkdir -p "$LIB_DIR/tests"
         cp "$EXTRACTED/tests/"*.py "$LIB_DIR/tests/" 2>/dev/null || true
+        mkdir -p "$LIB_DIR/tests/fixtures"
+        cp "$EXTRACTED/tests/fixtures/"* "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
+        mkdir -p "$LIB_DIR/tools"
+        rm -f "$LIB_DIR/tools/"*.py
+        cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/" 2>/dev/null || true
 
         # Copy skills — $LIB_DIR/skills is fully llm_memory-owned, so we
         # wipe the tree first (cheaper than a marker) then copy fresh.

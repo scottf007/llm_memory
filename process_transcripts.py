@@ -14,37 +14,21 @@ import argparse
 import shutil
 from pathlib import Path
 
+import adapters
 import extract_conversation
 
 DB_DIR = Path.home() / ".claude" / "memory"
-PROJECTS_DIR = Path.home() / ".claude" / "projects"
 ARCHIVE_DIR = DB_DIR / "transcripts"
 CONVERSATIONS_DIR = DB_DIR / "conversations"
 
 
-def find_transcripts() -> list[tuple[Path, str]]:
-    """Return (jsonl_path, session_id) for every main-session transcript."""
-    seen: set[str] = set()
-    results: list[tuple[Path, str]] = []
+def find_transcripts(client: str = adapters.DEFAULT) -> list[tuple[Path, str]]:
+    """Return (jsonl_path, session_id) for every main-session transcript.
 
-    if PROJECTS_DIR.exists():
-        for project_dir in sorted(PROJECTS_DIR.iterdir()):
-            if not project_dir.is_dir():
-                continue
-            for jsonl in sorted(project_dir.glob("*.jsonl")):
-                sid = jsonl.stem
-                if sid not in seen:
-                    seen.add(sid)
-                    results.append((jsonl, sid))
-
-    if ARCHIVE_DIR.exists():
-        for jsonl in sorted(ARCHIVE_DIR.glob("*.jsonl")):
-            sid = jsonl.stem
-            if sid not in seen:
-                seen.add(sid)
-                results.append((jsonl, sid))
-
-    return results
+    Discovery is the adapter's job — it knows where that client keeps its
+    sessions. This wrapper keeps the historical tuple shape for callers.
+    """
+    return [(ref.path, ref.session_id) for ref in adapters.get(client).discover()]
 
 
 def archive_transcript(path: Path, session_id: str) -> Path:

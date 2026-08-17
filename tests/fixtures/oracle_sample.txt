@@ -1,0 +1,22 @@
+# Pinned sample for tools/adapter_oracle.py.
+# Stratified by age and size across projects; see select() for how.
+06e57946-b0bd-46e7-854a-a60fb5124c43
+31b40f0e-30a5-4b1f-a72b-2fb6eef50778
+45a9aee3-96e8-4a30-9660-fbba08f17167
+58187ec3-3b4d-4077-9e95-81a4f8973f97
+a45b49ec-734b-44c4-b218-47d744f4dfdf
+103ef730-2ef4-4af2-96b6-ac19a0a8caa2
+7e51bb0d-6521-4cad-9986-ec7d9a4dde35
+62f6b4d9-aa8f-474f-a488-14e249866d5e
+fa3798ef-3c98-4a7a-bfc2-a260bae4235e
+acb543ea-da5e-4344-8b12-ae495fa08750
+e45d4a80-b32d-418c-a215-699c34deddb6
+8058ffaa-bee5-4e77-8c45-46cef88f3b40
+107c158a-8115-4bd1-a498-65ada505fdef
+5c243ece-1ba3-4609-a5e3-daa2a349dcee
+12ea4d75-0403-4ec7-ab52-9a15430de902
+000dc555-2841-41e8-add9-8669c504e0ff
+0afd9aea-d1ca-451c-89eb-085483e2160b
+0d01a265-5d92-4bcc-b212-62fd789eba52
+b8f8fd10-8d39-4c66-a734-a5250f6eb770
+59b89031-81ea-40b9-a224-f77094fb4cec
