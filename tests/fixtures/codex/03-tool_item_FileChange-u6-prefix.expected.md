@@ -1,6 +1,6 @@
 ---
 session_id: codex-03-tool_item_FileChange-u6-prefix
-project: agent-messaging
+project: project-67ba102a
 client: codex
 raw: ~/.claude/memory/transcripts/codex-03-tool_item_FileChange-u6-prefix.jsonl
 turns: 6

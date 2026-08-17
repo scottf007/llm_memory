@@ -1,6 +1,6 @@
 ---
 session_id: codex-10-depth_3-user-turns-u3
-project: fletchcorp
+project: project-aad8ac1e
 client: codex
 raw: ~/.claude/memory/transcripts/codex-10-depth_3-user-turns-u3.jsonl
 turns: 3

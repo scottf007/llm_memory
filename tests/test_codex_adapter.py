@@ -167,8 +167,14 @@ def test_item_completed_dialect_actually_yields_turns():
 _TOKEN_RE = __import__("re").compile(r"^[A-Za-z0-9_.:+-]{1,40}$")
 _PLACEHOLDER_RE = __import__("re").compile(r"^<[A-Za-z0-9_]+:\d+(?::[0-9a-f]{8})?>$|^<[A-Za-z0-9_]+>$")
 # The one class of long string the sanitiser deliberately keeps: the rewritten
-# neutral cwd, because project attribution has to stay testable.
+# neutral cwd, because project attribution has to stay testable. The project
+# component itself must be the digest placeholder `make_codex_fixtures.py`
+# generates, never a real directory name — a real name is just as short and
+# just as token-shaped, so this has to check the placeholder's exact form
+# rather than merely "starts with /home/user".
 _ALLOWED_LITERALS = {"/home/user"}
+_PLACEHOLDER_CWD_RE = __import__("re").compile(
+    r"^/home/user/projects/project-[0-9a-f]{8}$")
 
 
 def _walk_strings(node, path="$"):
@@ -185,9 +191,9 @@ def _walk_strings(node, path="$"):
 
 
 def _is_sanitised(value: str) -> bool:
-    if _PLACEHOLDER_RE.match(value) or _TOKEN_RE.match(value):
+    if value in _ALLOWED_LITERALS or _PLACEHOLDER_CWD_RE.match(value):
         return True
-    if value in _ALLOWED_LITERALS or value.startswith("/home/user"):
+    if _PLACEHOLDER_RE.match(value) or _TOKEN_RE.match(value):
         return True
     return False
 
@@ -233,6 +239,29 @@ def test_the_depth_walk_would_catch_nested_prose():
     assert any(not _is_sanitised(v) for _, v in _walk_strings(keyed))
 
 
+def test_the_depth_walk_would_catch_a_real_project_name():
+    """Trigger + non-trigger control for the cwd project component.
+
+    A real project name is exactly as token-shaped as the digest placeholder
+    `make_codex_fixtures.py` generates, so a shape-only check ("looks like a
+    token", or the old "starts with /home/user") cannot tell them apart. This
+    pins the actual invariant: only the placeholder form survives, so a real
+    directory name landing in `cwd` — the leak this guard exists for — can
+    never ship again.
+    """
+    real_names = ("agent-messaging", "universalai", "fletchcorp")
+    for name in real_names:
+        smuggled = {"type": "session_meta",
+                    "payload": {"cwd": f"/home/user/projects/{name}"}}
+        bad = [v for _, v in _walk_strings(smuggled) if not _is_sanitised(v)]
+        assert f"/home/user/projects/{name}" in bad, f"{name} was not caught"
+
+    # Non-trigger control: the actual placeholder shape must keep passing.
+    placeholder = {"type": "session_meta",
+                   "payload": {"cwd": "/home/user/projects/project-580b9887"}}
+    assert not [v for _, v in _walk_strings(placeholder) if not _is_sanitised(v)]
+
+
 def test_fixture_tree_contains_no_symlinks():
     """`cp -r` follows or preserves symlinks depending on flags and platform.
 
@@ -262,6 +291,21 @@ def test_fixtures_carry_no_identifying_content():
                 cwd = holder.get("cwd") if isinstance(holder, dict) else None
                 if isinstance(cwd, str) and cwd.startswith("/home"):
                     assert cwd.startswith("/home/user"), f"{path.name}: unsanitised cwd {cwd}"
+
+
+def test_no_real_project_name_ships_in_a_fixture():
+    """Named regression guard for the three real project names Scott ruled
+    out of the public fixture set (agent-messaging, universalai, fletchcorp —
+    the last matches Scott's own email domain and is identifying in a way the
+    other two are not). Belt-and-suspenders alongside the shape-based depth
+    walk: this fails loudly and specifically if any of these three literal
+    strings ever reappears anywhere in the committed fixture tree.
+    """
+    real_names = ("agent-messaging", "universalai", "fletchcorp")
+    for path in list(FIXTURES) + list(FIXTURE_DIR.glob("*.expected.*")):
+        text = path.read_text()
+        for name in real_names:
+            assert name not in text, f"{path.name} leaks real project name {name!r}"
 
 
 # --------------------------------------------------------------------------

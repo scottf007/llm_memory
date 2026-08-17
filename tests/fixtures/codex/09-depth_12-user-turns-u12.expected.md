@@ -1,6 +1,6 @@
 ---
 session_id: codex-09-depth_12-user-turns-u12
-project: universalai
+project: project-580b9887
 client: codex
 raw: ~/.claude/memory/transcripts/codex-09-depth_12-user-turns-u12.jsonl
 turns: 12

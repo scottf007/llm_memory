@@ -1,6 +1,6 @@
 ---
 session_id: codex-04-depth_75-user-turns-u39-prefix
-project: universalai
+project: project-580b9887
 client: codex
 raw: ~/.claude/memory/transcripts/codex-04-depth_75-user-turns-u39-prefix.jsonl
 turns: 39

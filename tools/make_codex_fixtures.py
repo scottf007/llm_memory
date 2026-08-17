@@ -73,6 +73,20 @@ def _placeholder(key: str, value: str) -> str:
     return f"<{key or 'str'}:{len(value)}>"
 
 
+def _placeholder_project(name: str) -> str:
+    """Map a real project directory name to a stable, content-free stand-in.
+
+    A real project name is a structural token by every rule above — short, no
+    space, no slash — so the allow-list alone cannot catch it. It goes out the
+    same way a filename does: forced regardless of shape, here rather than in
+    `sanitise()` because the cwd rewrite already bypasses that path. The
+    digest is deterministic so re-running this script against the same real
+    session reproduces the same fixture bytes.
+    """
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return f"project-{digest}"
+
+
 def _sanitise_key(key: str) -> str:
     """Dict keys need the same treatment as values.
 
@@ -250,8 +264,10 @@ def build(limit: int = 10) -> list[str]:
         ref = codex.ref_for_path(path)
         meta, _ = codex.parse(ref)
         # Rewrite cwd to a stable neutral path that still carries the
-        # /projects/<name>/ convention, so attribution stays testable.
-        cwd = f"/home/user/projects/{meta.project}" if meta.project else "/home/user"
+        # /projects/<name>/ convention, so attribution stays testable — but
+        # the name itself is a placeholder, not the real project directory.
+        cwd = (f"/home/user/projects/{_placeholder_project(meta.project)}"
+               if meta.project else "/home/user")
         lines = []
         budget = MAX_FIXTURE_BYTES
         truncated = False
