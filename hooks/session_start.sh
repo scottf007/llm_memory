@@ -68,7 +68,18 @@ fi
 # by an interrupted install or a partial sync.
 if [ "$SOURCE" != "compact" ]; then
     LIB_DIR="$HOME/.claude/memory/lib"
-    if [ -f "$LIB_DIR/extract_conversation.py" ]; then
+    # Gate on "a lib is installed here", not on the presence of the very file
+    # most likely to be missing. Keying the check off extract_conversation.py
+    # meant the one failure where that file itself failed to copy went
+    # unreported — the guard skipped itself for lack of the thing it guards.
+    # A machine with no llm_memory at all stays silent.
+    LIB_INSTALLED=false
+    if [ -f "$LIB_DIR/VERSION" ]; then
+        LIB_INSTALLED=true
+    elif ls "$LIB_DIR"/*.py >/dev/null 2>&1; then
+        LIB_INSTALLED=true
+    fi
+    if [ "$LIB_INSTALLED" = true ]; then
         SELFCHECK_PY="$LIB_DIR/.venv/bin/python3"
         [ -x "$SELFCHECK_PY" ] || SELFCHECK_PY="python3"
         # sys.path must be the lib dir and nothing else. `python3 -c` puts the
@@ -76,14 +87,24 @@ if [ "$SOURCE" != "compact" ]; then
         # this repository would import the modules from there and the check
         # would pass while the installed lib was broken — which is precisely
         # the state it exists to detect.
+        #
+        # adapters.base is imported by name rather than relying on `import
+        # adapters` to pull it in: a package whose __init__ stops importing a
+        # submodule would otherwise leave that submodule's absence undetected,
+        # and base.py carries the protocol every adapter is validated against.
         SELFCHECK_ERR=$("$SELFCHECK_PY" -c "
 import os, sys
 here = os.getcwd()
 sys.path = [p for p in sys.path if p not in ('', here)]
 sys.path.insert(0, '$LIB_DIR')
-import extract_conversation, adapters
+import extract_conversation
+import adapters
+import adapters.base
+import adapters.render
 assert adapters.names(), 'no adapters registered'
-assert os.path.dirname(adapters.__file__).startswith('$LIB_DIR'), 'adapters imported from outside the lib'
+for _mod in (extract_conversation, adapters, adapters.base):
+    assert os.path.realpath(_mod.__file__).startswith(os.path.realpath('$LIB_DIR')), \
+        _mod.__name__ + ' imported from outside the lib'
 " 2>&1)
         if [ -n "$SELFCHECK_ERR" ]; then
             # Both channels on purpose. stderr is where a broken hook belongs;

@@ -103,6 +103,48 @@ def test_check_recovers_after_repair(installed_lib, tmp_path):
     assert "LLM_MEMORY_BROKEN" not in _run_hook(home, tmp_path)
 
 
+def test_missing_extract_conversation_is_reported(installed_lib, tmp_path):
+    """The gap that made the guard skip itself.
+
+    The check used to run only `if [ -f "$LIB_DIR/extract_conversation.py" ]`,
+    so the one failure where *that* file did not copy — the same class of
+    partial install as the incident — silently skipped the check entirely.
+    """
+    home, lib = installed_lib
+    (lib / "extract_conversation.py").unlink()
+
+    output = _run_hook(home, tmp_path)
+    assert "LLM_MEMORY_BROKEN" in output
+    assert "extract_conversation" in output
+
+
+def test_missing_adapters_base_is_reported(installed_lib, tmp_path):
+    """`import adapters` alone is not proof the package is whole.
+
+    Today `adapters/__init__.py` imports `.base`, so its absence surfaces. That
+    is a property of the current __init__, not a guarantee — an __init__ that
+    stopped importing a submodule would leave a missing base.py undetected, and
+    base.py carries the protocol every adapter is validated against. So it is
+    imported by name.
+    """
+    home, lib = installed_lib
+    (lib / "adapters" / "base.py").unlink()
+
+    output = _run_hook(home, tmp_path)
+    assert "LLM_MEMORY_BROKEN" in output
+    assert "base" in output
+
+
+def test_lib_with_version_but_no_python_is_reported(installed_lib, tmp_path):
+    """A wiped-then-not-refilled lib is the worst case: it looks installed."""
+    home, lib = installed_lib
+    for py in lib.glob("*.py"):
+        py.unlink()
+    (lib / "VERSION").write_text("deadbeef\n")
+
+    assert "LLM_MEMORY_BROKEN" in _run_hook(home, tmp_path)
+
+
 def test_absent_lib_is_not_reported_as_broken(tmp_path):
     """A machine with no llm_memory installed is not a failure to shout about."""
     home = tmp_path / "home"
