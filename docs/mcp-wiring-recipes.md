@@ -102,7 +102,7 @@ observed failure mode; do not shorten it:
 
 > **Memory.** At the start of every session, before answering anything, call
 > the `llm_memory` MCP tool `resume` with `project` set to the last path
-> segment of the repository root (for `/home/scott/projects/llm_memory`, that
+> segment of the repository root (for `/home/user/projects/llm_memory`, that
 > is `llm_memory`). If it returns nothing useful, call `project_lookup` with
 > the same `project` and the topic you are about to work on. Do this without
 > asking permission. If both return empty, say so explicitly rather than

@@ -27,7 +27,7 @@ The only hook-config surface Grok trusts is the single shared, global
 `~/.claude/settings.json` — confirmed on this machine both by the design
 note (`10-hooks.md:66`, "always-trusted global hook location") and
 independently here via `grok inspect` from a scratch directory outside any
-project, which reported `Permissions / Source: /home/scott/.claude/settings.json`
+project, which reported `Permissions / Source: /home/user/.claude/settings.json`
 with no project- or cwd-scoped alternative offered. There is no
 `hooks-paths` entry, no `.grok/settings.json` override, and no `GROK_HOME`-
 style env var that redirects hook discovery to an isolated file (`grok

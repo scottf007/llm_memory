@@ -127,7 +127,7 @@ class TestSubagentStartOutputsContext:
 
         input_json = json.dumps({
             "agent_id": "agent-test-001",
-            "cwd": "/home/scott/projects/testproj",
+            "cwd": "/home/user/projects/testproj",
             "session_id": "parent-session-123",
         })
 
@@ -148,7 +148,7 @@ class TestSubagentStartOutputsContext:
 
         input_json = json.dumps({
             "agent_id": "agent-test-003",
-            "cwd": "/home/scott/projects/testproj",
+            "cwd": "/home/user/projects/testproj",
         })
 
         stdout, stderr, rc = _run_hook("subagent_start.sh", home, input_json)
@@ -190,7 +190,7 @@ class TestSubagentStartOutputsContext:
 
         input_json = json.dumps({
             "agent_id": "agent-test-005",
-            "cwd": "/home/scott/projects/testproj",
+            "cwd": "/home/user/projects/testproj",
         })
 
         stdout, stderr, rc = _run_hook("subagent_start.sh", home, input_json)
@@ -275,7 +275,7 @@ class TestSubagentStopNarrativeReload:
         input_json = json.dumps({
             "agent_id": "agent-general-001",
             "agent_type": "memory-aware",
-            "cwd": "/home/scott/projects/testproj",
+            "cwd": "/home/user/projects/testproj",
             "exit_code": 0,
         })
 

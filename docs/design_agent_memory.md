@@ -341,7 +341,7 @@ cleanup needed, no race conditions, no self-loading required.
 
 ## Open Questions
 
-1. **Large transcript handling**: The 42MB finance_nexus transcript can't be
+1. **Large transcript handling**: The 42MB example_project transcript can't be
    read in one go. The narrative-updater agent needs chunked reading strategy.
 
 2. **Agent teams vs subagents**: For narrative updates, a simple subagent is

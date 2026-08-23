@@ -43,7 +43,7 @@ Filename: `{uuid}.json` where uuid is a 32-char lowercase hex string (no dashes)
   "uuid": "a1b2c3d4e5f6789012345678abcdef00",
   "type": "note",
   "content": "The MCP server config lives in ~/.claude/settings.json, not .claude.json",
-  "project": "finance_nexus",
+  "project": "example_project",
   "session_id": "abc123",
   "importance": 7,
   "transcript_ref": "~/.claude/memory/transcripts/abc123.jsonl",

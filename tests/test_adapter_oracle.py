@@ -83,8 +83,8 @@ def test_unknown_client_is_a_loud_error():
 
 
 def test_project_attribution_is_shared_not_per_adapter():
-    assert adapters.project_from_cwd("/home/scott/projects/llm_memory/tools") == "llm_memory"
-    assert adapters.project_from_cwd("/home/scott/scratch") == ""
+    assert adapters.project_from_cwd("/home/user/projects/llm_memory/tools") == "llm_memory"
+    assert adapters.project_from_cwd("/home/user/scratch") == ""
 
 
 # --------------------------------------------------------------------------
@@ -94,7 +94,7 @@ def test_project_attribution_is_shared_not_per_adapter():
 def test_full_session_renders_the_documented_contract(tmp_path):
     path = _write_jsonl(tmp_path / "demo-session.jsonl", [
         {"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
-         "cwd": "/home/scott/projects/demo",
+         "cwd": "/home/user/projects/demo",
          "message": {"role": "user",
                      "content": "hello <system-reminder>noise</system-reminder>there"}},
         {"type": "assistant", "timestamp": "2026-01-01T00:00:01.000Z",
@@ -169,7 +169,7 @@ def test_text_only_assistant_block_has_no_line_ref(tmp_path):
 def test_unattributed_session_omits_the_project_line(tmp_path):
     path = _write_jsonl(tmp_path / "nocwd.jsonl", [
         {"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
-         "cwd": "/home/scott/scratch", "message": {"content": "hi"}},
+         "cwd": "/home/user/scratch", "message": {"content": "hi"}},
     ])
 
     out = _render(path)

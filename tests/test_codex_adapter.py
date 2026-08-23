@@ -17,6 +17,7 @@ counterpart here. Four things stand in for it:
 
 from __future__ import annotations
 
+import os
 import json
 import types
 from pathlib import Path
@@ -235,8 +236,51 @@ def test_the_depth_walk_would_catch_nested_prose():
     assert bad == ["a sentence of real prose that should never ship"]
 
     # And a key, not just a value — the leak the first sanitiser actually had.
-    keyed = {"/home/scott/projects/thing/notes.md": {"type": "x"}}
+    keyed = {"/home/user/projects/thing/notes.md": {"type": "x"}}
     assert any(not _is_sanitised(v) for _, v in _walk_strings(keyed))
+
+
+# --------------------------------------------------------------------------
+# Real-name guard sourcing (F-03/F-24)
+# --------------------------------------------------------------------------
+#
+# The two guards below need REAL project names to be real trigger controls —
+# a shape-only check cannot tell a real directory name from the digest
+# placeholder, which is the whole point of the guard. But this repository is
+# published, so the literal names cannot live in it: a public repo containing
+# the list has leaked the list, whatever the assertion around it says.
+#
+# So the names are sourced from outside the tree, and the guards degrade
+# honestly rather than silently:
+#   * LLM_MEMORY_REAL_NAMES  — comma-separated, or
+#   * tests/.real-names      — one per line, gitignored.
+# Absent, the literal-name guard SKIPS with a message saying so, while the
+# synthetic control below still runs everywhere. A public clone therefore
+# proves the mechanism works; the maintainer's machine additionally proves it
+# catches the specific strings an owner ruled out.
+
+# Real-shaped but fictional. These must be caught by the same code path, so a
+# public clone still has a working trigger control rather than a disabled test.
+SYNTHETIC_REAL_NAMES = ("acme-messaging", "globex-platform", "initech")
+
+
+def _real_names():
+    """Names to guard against, from outside the published tree, or None."""
+    env = os.environ.get("LLM_MEMORY_REAL_NAMES", "").strip()
+    if env:
+        return tuple(n.strip() for n in env.split(",") if n.strip())
+    local = Path(__file__).parent / ".real-names"
+    if local.exists():
+        names = tuple(n.strip() for n in local.read_text().splitlines() if n.strip())
+        if names:
+            return names
+    return None
+
+
+_NO_NAMES = (
+    "no real-name list available: set LLM_MEMORY_REAL_NAMES=a,b,c or create "
+    "tests/.real-names (gitignored). The synthetic trigger control still ran."
+)
 
 
 def test_the_depth_walk_would_catch_a_real_project_name():
@@ -249,8 +293,8 @@ def test_the_depth_walk_would_catch_a_real_project_name():
     directory name landing in `cwd` — the leak this guard exists for — can
     never ship again.
     """
-    real_names = ("agent-messaging", "universalai", "fletchcorp")
-    for name in real_names:
+    # Synthetic control: runs everywhere, including a public clone.
+    for name in SYNTHETIC_REAL_NAMES + (_real_names() or ()):
         smuggled = {"type": "session_meta",
                     "payload": {"cwd": f"/home/user/projects/{name}"}}
         bad = [v for _, v in _walk_strings(smuggled) if not _is_sanitised(v)]
@@ -281,8 +325,12 @@ def test_fixtures_carry_no_identifying_content():
     """
     for path in FIXTURES:
         text = path.read_text()
-        assert "/home/scott" not in text, f"{path.name} leaks a real home directory"
-        assert "scottnotes" not in text, f"{path.name} leaks a real filename"
+        # Derived, not hardcoded: this catches the home directory of whoever
+        # is actually running, which is a stronger guard than one owner's
+        # literal path and leaks nothing into a published tree.
+        assert str(Path.home()) not in text, f"{path.name} leaks a real home directory"
+        for literal in (_real_names() or ()):
+            assert literal not in text, f"{path.name} leaks {literal!r}"
         # Every cwd must be the neutral rewrite.
         for line in text.splitlines():
             rec = json.loads(line)
@@ -294,14 +342,18 @@ def test_fixtures_carry_no_identifying_content():
 
 
 def test_no_real_project_name_ships_in_a_fixture():
-    """Named regression guard for the three real project names Scott ruled
-    out of the public fixture set (agent-messaging, universalai, fletchcorp —
-    the last matches Scott's own email domain and is identifying in a way the
-    other two are not). Belt-and-suspenders alongside the shape-based depth
-    walk: this fails loudly and specifically if any of these three literal
-    strings ever reappears anywhere in the committed fixture tree.
+    """Named regression guard for the real project names the owner ruled out
+    of the public fixture set. The list is sourced from outside this tree (see
+    `_real_names`) because naming them here would publish them.
+
+    Belt-and-suspenders alongside the shape-based depth walk: this fails loudly
+    and specifically if any of those literal strings ever reappears anywhere in
+    the committed fixture tree. Skips, with a message, where the list is not
+    configured — the depth-walk guard still runs its synthetic control there.
     """
-    real_names = ("agent-messaging", "universalai", "fletchcorp")
+    real_names = _real_names()
+    if not real_names:
+        pytest.skip(_NO_NAMES)
     for path in list(FIXTURES) + list(FIXTURE_DIR.glob("*.expected.*")):
         text = path.read_text()
         for name in real_names:

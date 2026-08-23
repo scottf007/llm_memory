@@ -25,7 +25,7 @@ processed. `narrative_coverage` decided "processed" by testing membership in
 Worse, re-extracting it did nothing: `apply_delta` returned early on the
 already-merged session id while the fan-out step still rewrote the file and
 printed `Merged ...`, so the discard was invisible. A 206k-token
-re-extraction of finance_nexus — 14 items, 26 revaluations, 11 resolutions —
+re-extraction of example_project — 14 items, 26 revaluations, 11 resolutions —
 was lost to this exact path before it was found.
 
 **Added**
@@ -60,7 +60,7 @@ was lost to this exact path before it was found.
 
 - `done[]` removed from the state-auditor's three-part-filter sweep. Every
   build-log entry is historical and captured by git, so the filter archived
-  all of them by construction — 425 in finance_nexus, which is what emptied
+  all of them by construction — 425 in example_project, which is what emptied
   the section. Bounding that section is the renderer's job, via scoring and
   per-section budgets. Archive a done item only when the delta pipeline
   supersedes it or its subject was physically deleted.
@@ -77,7 +77,7 @@ was lost to this exact path before it was found.
 The rendered narrative is injected at every session start, so its size is a
 per-session cost paid forever. It was unbounded in project age: `load_bearing`
 items bypassed the decay filter entirely and goals and suggestions had no
-filter at all. finance_nexus reached ~33k tokens (~223KB). The documented
+filter at all. example_project reached ~33k tokens (~223KB). The documented
 "target ≤5,000 tokens" had nothing enforcing it.
 
 **Changed**

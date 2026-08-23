@@ -61,7 +61,7 @@ _ID_KEYS = {"id", "call_id", "turn_id", "session_id", "installation_id", "accoun
             "encrypted_content", "agent_nickname", "forked_from_id", "parent_thread_id"}
 
 # Keys whose values name something on disk. A bare filename passes the token
-# test — `scottnotes.md` has no slash and 13 characters — so file and directory
+# test — `usernotes.md` has no slash and 13 characters — so file and directory
 # names need forcing regardless of shape. The parser keys off record and
 # payload types, never off these, so nothing testable is lost.
 _PATH_KEYS = {"name", "path", "file", "filename", "dir", "directory", "cwd",

@@ -4,7 +4,7 @@ The property that matters here is boundedness: the narrative is injected at
 every session start, so its size must be a function of the budget, not of
 project age. Before the budget existed, `load_bearing` items bypassed
 filtering entirely and goals/suggestions had no filter at all, so a mature
-project's narrative grew without limit (finance_nexus reached ~33k tokens).
+project's narrative grew without limit (example_project reached ~33k tokens).
 """
 
 from datetime import datetime, timedelta, timezone

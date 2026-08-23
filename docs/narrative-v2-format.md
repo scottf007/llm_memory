@@ -20,7 +20,7 @@ run over; filler cannot.
 
 This is a mechanism, not an aspiration. The earlier ≤5,000-token target was
 advisory with nothing enforcing it, and `load_bearing` items were exempt from
-filtering entirely — finance_nexus reached ~33,000 tokens. Items now render in
+filtering entirely — example_project reached ~33,000 tokens. Items now render in
 score order until the budget is spent; the remainder collapses into a pointer.
 The decay score decides *what* survives; the budget decides *how much* does.
 

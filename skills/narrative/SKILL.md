@@ -26,7 +26,7 @@ To enumerate all projects with session activity:
 
 ```bash
 python3 -c "
-import sys; sys.path.insert(0, '/home/scott/.claude/memory/lib')
+import sys; sys.path.insert(0, '/home/user/.claude/memory/lib')
 from conversations import iter_sessions
 seen = {fm.get('project') for fm in iter_sessions() if fm.get('project')}
 for p in sorted(seen): print(p)
@@ -138,13 +138,13 @@ that had nothing to say.
      description="Delta PROJECT: SESSION_ID",
      subagent_type="delta-extractor",
      prompt="""Project: PROJECT_NAME
-   conversation_md_path: /home/scott/.claude/memory/conversations/SESSION_ID.md
-   project_state_path:   /home/scott/.claude/memory/projects/PROJECT_NAME.json
+   conversation_md_path: /home/user/.claude/memory/conversations/SESSION_ID.md
+   project_state_path:   /home/user/.claude/memory/projects/PROJECT_NAME.json
    session_id:           SESSION_ID
    session_started_at:   ISO8601_START
    session_ended_at:     ISO8601_END
-   output_path:          /home/scott/.claude/memory/deltas/SESSION_ID.delta.json
-   contested_path:       /home/scott/.claude/memory/projects/PROJECT_NAME.contested.json
+   output_path:          /home/user/.claude/memory/deltas/SESSION_ID.delta.json
+   contested_path:       /home/user/.claude/memory/projects/PROJECT_NAME.contested.json
 
    Read the project state JSON and the conversation markdown. Produce the
    structured delta per your prompt spec and write it as JSON (only) to
@@ -190,7 +190,7 @@ that had nothing to say.
 5. **If the delta-extractor's Write to `~/.claude/memory/deltas/...` fails
    or prompts repeatedly,** that's a missing permission, not a sandbox
    block. Do NOT reroute through `/tmp/` and `mv` — that just multiplies
-   the prompts. Tell the user to add `Write(/home/scott/.claude/memory/**)`
+   the prompts. Tell the user to add `Write(/home/user/.claude/memory/**)`
    to `~/.claude/settings.json`'s `permissions.allow` (it ships in
    `settings.yaml` as of the post-2026-05-11 install; older installs need
    to re-run `install.sh` or add it manually) and stop.

@@ -161,7 +161,7 @@ def _write_delta(path, session_id="sess-cli", text="a sandboxed decision"):
     return path
 
 
-def _write_state(path, project="finance_nexus"):
+def _write_state(path, project="example_project"):
     path.write_text(json.dumps({
         "project": project,
         "decisions": [], "goals": [], "suggestions": [],
@@ -173,7 +173,7 @@ def _write_state(path, project="finance_nexus"):
 def test_canonical_state_file_resolves_to_the_real_items_root_and_db():
     """Production invocation must be unchanged: no writes here, just the
     resolved paths."""
-    canonical = Path.home() / ".claude" / "memory" / "projects" / "finance_nexus.json"
+    canonical = Path.home() / ".claude" / "memory" / "projects" / "example_project.json"
     items_root, db_path, sandboxed = merger.resolve_paths(canonical)
     assert items_root == Path.home() / ".claude" / "memory" / "items"
     assert db_path == Path.home() / ".claude" / "memory" / "memory.db"
@@ -181,7 +181,7 @@ def test_canonical_state_file_resolves_to_the_real_items_root_and_db():
 
 
 def test_state_file_outside_canonical_dir_resolves_to_a_sandbox():
-    scratch = Path("/tmp/definitely-not-the-memory-tree/finance_nexus.json")
+    scratch = Path("/tmp/definitely-not-the-memory-tree/example_project.json")
     items_root, db_path, sandboxed = merger.resolve_paths(scratch)
     assert items_root == scratch.parent / "items"
     assert db_path == scratch.parent / "memory.db"
@@ -196,7 +196,7 @@ def test_merging_outside_the_canonical_dir_never_touches_the_real_tree(
     home = _fake_home(tmp_path, monkeypatch)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    state_path = _write_state(scratch / "finance_nexus.json")
+    state_path = _write_state(scratch / "example_project.json")
     delta_path = _write_delta(scratch / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
@@ -213,17 +213,17 @@ def test_merging_outside_the_canonical_dir_writes_items_to_the_sandbox(
     _fake_home(tmp_path, monkeypatch)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    state_path = _write_state(scratch / "finance_nexus.json")
+    state_path = _write_state(scratch / "example_project.json")
     delta_path = _write_delta(scratch / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
 
-    sandbox_items = scratch / "items" / "finance_nexus" / "decisions"
+    sandbox_items = scratch / "items" / "example_project" / "decisions"
     written = list(sandbox_items.glob("*.json"))
     assert len(written) == 1
     payload = json.loads(written[0].read_text())
     assert payload["text"] == "a sandboxed decision"
-    assert payload["project"] == "finance_nexus"
+    assert payload["project"] == "example_project"
     # The sandbox index lives alongside, not in the real tree.
     assert (scratch / "memory.db").exists()
 
@@ -232,14 +232,14 @@ def test_sandbox_inbox_merge_reads_the_sandbox_items_tree(tmp_path, monkeypatch)
     """The read side is redirected too, so a dry run sees only its own items."""
     _fake_home(tmp_path, monkeypatch)
     scratch = tmp_path / "scratch"
-    inbox = scratch / "items" / "finance_nexus" / "learnings"
+    inbox = scratch / "items" / "example_project" / "learnings"
     inbox.mkdir(parents=True)
     (inbox / "lrn-beef0001.json").write_text(json.dumps({
-        "id": "lrn-beef0001", "kind": "learnings", "project": "finance_nexus",
+        "id": "lrn-beef0001", "kind": "learnings", "project": "example_project",
         "text": "arrived via the sandbox inbox", "status": "active",
         "last_touched_at": BASE_TS,
     }))
-    state_path = _write_state(scratch / "finance_nexus.json")
+    state_path = _write_state(scratch / "example_project.json")
     delta_path = _write_delta(scratch / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
@@ -254,12 +254,12 @@ def test_canonical_state_file_fans_out_to_the_canonical_items_root(
     to {HOME}/.claude/memory/items and no sandbox notice is printed."""
     home = _fake_home(tmp_path, monkeypatch)
     projects = home / ".claude" / "memory" / "projects"
-    state_path = _write_state(projects / "finance_nexus.json")
+    state_path = _write_state(projects / "example_project.json")
     delta_path = _write_delta(tmp_path / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
 
-    fanned = home / ".claude" / "memory" / "items" / "finance_nexus" / "decisions"
+    fanned = home / ".claude" / "memory" / "items" / "example_project" / "decisions"
     assert len(list(fanned.glob("*.json"))) == 1
     assert not (projects / "items").exists()
     assert "sandbox mode" not in capsys.readouterr().err
@@ -270,12 +270,12 @@ def test_items_root_override_is_honoured(tmp_path, monkeypatch):
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     override = tmp_path / "elsewhere" / "items"
-    state_path = _write_state(scratch / "finance_nexus.json")
+    state_path = _write_state(scratch / "example_project.json")
     delta_path = _write_delta(scratch / "d.json")
 
     merger.main(["--items-root", str(override), str(state_path), str(delta_path)])
 
-    assert len(list((override / "finance_nexus" / "decisions").glob("*.json"))) == 1
+    assert len(list((override / "example_project" / "decisions").glob("*.json"))) == 1
     assert not (scratch / "items").exists()
     assert (tmp_path / "elsewhere" / "memory.db").exists()
 
@@ -284,7 +284,7 @@ def test_items_root_override_equal_to_canonical_is_not_sandboxed(tmp_path, monke
     home = _fake_home(tmp_path, monkeypatch)
     canonical_items = home / ".claude" / "memory" / "items"
     items_root, db_path, sandboxed = merger.resolve_paths(
-        tmp_path / "scratch" / "finance_nexus.json", canonical_items)
+        tmp_path / "scratch" / "example_project.json", canonical_items)
     assert items_root == canonical_items
     assert db_path == home / ".claude" / "memory" / "memory.db"
     assert sandboxed is False
@@ -296,13 +296,13 @@ def test_project_name_still_comes_from_the_filename_stem(tmp_path, monkeypatch, 
     _fake_home(tmp_path, monkeypatch)
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    state_path = _write_state(scratch / "fn_test.json", project="finance_nexus")
+    state_path = _write_state(scratch / "fn_test.json", project="example_project")
     delta_path = _write_delta(scratch / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
 
     assert (scratch / "items" / "fn_test").is_dir()
-    assert not (scratch / "items" / "finance_nexus").exists()
+    assert not (scratch / "items" / "example_project").exists()
     assert "state['project']" in capsys.readouterr().err
 
 

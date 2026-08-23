@@ -109,7 +109,7 @@ def _run_hook(hook_name, home, input_json, timeout=10):
     return result.stdout, result.stderr, result.returncode
 
 
-def _run_session_start(home, source="startup", cwd="/home/scott/projects/testproj"):
+def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj"):
     """Run session_start.sh with a fake HOME and return its stdout."""
     input_json = json.dumps({
         "source": source,
@@ -140,7 +140,7 @@ class TestPostCompactNarrativeStaleness:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="compact",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         # Post-compact output should mention that the narrative needs updating
         assert "update" in stdout.lower() or "stale" in stdout.lower() or "new session" in stdout.lower(), (
@@ -166,7 +166,7 @@ class TestPostCompactNarrativeStaleness:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="compact",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         # Should not falsely warn
         assert "stale" not in stdout.lower()
@@ -191,7 +191,7 @@ class TestStaleNarrativeMandatory:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         # Should NOT just say "Consider"
         has_consider_only = "consider" in stdout.lower() and "must" not in stdout.lower()
@@ -217,7 +217,7 @@ class TestStaleNarrativeMandatory:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         assert "must" in stdout.lower() or "automatic task" in stdout.lower(), (
             f"Missing narrative should trigger AUTOMATIC TASK. Output:\n{stdout}"
@@ -241,7 +241,7 @@ class TestStaleNarrativeAutomaticTask:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         assert "AUTOMATIC TASK" in stdout, (
             f"Stale narrative should output 'AUTOMATIC TASK', got:\n{stdout}"
@@ -267,7 +267,7 @@ class TestStaleNarrativeAutomaticTask:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         assert "AUTOMATIC TASK" not in stdout, (
             f"Fresh narrative should NOT trigger AUTOMATIC TASK, got:\n{stdout}"
@@ -299,7 +299,7 @@ class TestCrossProjectStaleness:
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
-                                           cwd="/home/scott/projects/testproj")
+                                           cwd="/home/user/projects/testproj")
 
         assert "otherproj" in stdout, (
             f"Project 'otherproj' has a stale narrative (5 new sessions) but was not "
