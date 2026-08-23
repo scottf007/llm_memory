@@ -68,9 +68,9 @@ free number and are **never renumbered**.
 
 | id | finding | status |
 |---|---|---|
-| F-01 | `min_user_turns` — codex ingest works, codex work does not reach the narrative | in-flight |
-| F-02 | renderer short-id collapse — every codex session renders as `codex-01` | in-flight |
-| F-03 | fixture project names in a public repo — an owner ruling was reversed | in-flight |
+| F-01 | `min_user_turns` — codex ingest works, codex work does not reach the narrative | closed |
+| F-02 | renderer short-id collapse — every codex session renders as `codex-01` | closed |
+| F-03 | fixture project names in a public repo — an owner ruling was reversed | closed |
 | F-04 | the Gemini wiring recipe does the opposite of what it claims | closed |
 | F-05 | exec bit invisible to git under `core.fileMode=false` — 8 tests fail from a clean checkout | closed |
 | F-06 | `install.sh` ships `tools/*.py` only, so the wrapper never reaches the installed lib | closed |
@@ -93,19 +93,38 @@ free number and are **never renumbered**.
 | F-23 | the `memory_wrap` real-client spawn incident | open |
 | F-24 | the fixture scrub's two residuals — a pseudonym, and a shape guard that cannot see a bare name | open |
 | F-25 | the `codex-auto` marker is tested on every session, not only codex ones | open |
-| F-26 | the `mcp<2` pin bought time on escalation `09ea13cb`, it did not fix `server.py`'s mcp-2.x incompatibility | open |
+| F-26 | the `mcp<2` pin bought time on escalation `09ea13cb`, it did not fix `server.py`'s mcp-2.x incompatibility | deferred |
+| F-27 | the narrative-on-qwen pilot ran off-record and failed its own pass condition | closed |
 
 ---
 
-## A. IN FLIGHT — the S3 revision and the post-ingest slice
+## A. MERGED — the S3 revision and the post-ingest slice
 
-F-01 through F-03 sit with seat `post-ingest` (assignment `6a853f48`);
-F-04 through F-07 sit with seat `s3-serving` (revision assignment `1f25dbd1`,
-on top of `6ab990e`). A row leaves this section when the fix **merges**, not
-when it is written.
+**Status corrected 2026-08-23 by `llm-memory-pm`.** Every row in this section
+except F-07 is now closed on `main`, and this section is kept under its original
+number because ids are never renumbered.
+
+- **F-01, F-02, F-03** merged in `a996002` on 17 August (seat `post-ingest`,
+  assignment `6a853f48`), gated PASS by `s3-judge` at `97c8a3cb`.
+- **F-04, F-05, F-06** merged in `7b96b22` on 23 August (seat `s3-serving`,
+  revision assignment `1f25dbd1`), gated PASS twice — `s3-judge` at
+  `01786971962654367040` and cross-vendor `glm-arm` (z-ai/GLM lineage) at
+  `01786973651112959419`, which reproduced all seven items independently.
+- **F-07** remains in-flight; it is the only row in this section still open.
+
+**Why this correction was needed, recorded because the failure is instructive.**
+This ledger marked F-01..F-03 `in-flight` for six days after they merged, and
+marked F-04..F-06 `closed` on a branch that had not merged yet — so it was
+simultaneously behind reality and ahead of it. The rule at the top of this
+section ("a row leaves this section when the fix **merges**") was correct and
+was not applied, because the custodian who wrote the statuses was gating the
+branch rather than merging it, and nobody held the file afterwards. A ledger
+that is a required input to every brief will send the next brief at work already
+done. The structural fix is not a better rule: it is that whoever merges updates
+the row in the same sitting, which is what happened here.
 
 ### F-01 — `min_user_turns`: "codex ingest works" and "codex work reaches the narrative" are different claims
-*source: `c237eb21`, judge `07cf16e8`, contract amended at `6a853f48` · status: in-flight · blocks: whether S2 delivers anything Scott can see*
+*source: `c237eb21`, judge `07cf16e8`, contract amended at `6a853f48` · status: closed at `a996002` · blocks: whether S2 delivers anything Scott can see*
 
 Only **8 of 124** codex envelopes clear the default threshold of 5 substantive
 user turns — measured twice independently, by the adapter's own count and by
@@ -158,7 +177,7 @@ exactly right as history — it reproduces — but a reader arrives at a documen
 arguing for work already done. `adapters.md` was untouched by the fix branch.
 
 ### F-02 — renderer short-id collapse: every codex session renders as `codex-01`
-*source: `0bdcb0c2` · status: in-flight · blocks: human-readable provenance in narratives*
+*source: `0bdcb0c2` · status: closed at `a996002` · blocks: human-readable provenance in narratives*
 
 `renderer.py:618` and `:641` print `session_id[:8]`. `codex-` is six of those
 eight characters and every codex thread id begins `019`, so **every** codex
@@ -180,7 +199,7 @@ the non-trigger control. `test_two_codex_sessions_render_with_distinct_short_ids
 does fail against the old `codex-01` collision.
 
 ### F-03 — fixture project names in a public repo: an owner ruling was reversed
-*source: judge `07cf16e8` raised it; Scott ruled KEEP at `3e91071d`; COO reversed at `bee6b19e` · status: in-flight · blocks: publishing the repo*
+*source: judge `07cf16e8` raised it; Scott ruled KEEP at `3e91071d`; COO reversed at `bee6b19e` · status: closed at `a996002` · blocks: publishing the repo*
 
 Three real project names survive the fixture sanitiser **by design**, because
 the fixtures pin project derivation from `cwd`:
@@ -226,7 +245,7 @@ is an ordinary and untroubling state for it to be in. See also F-24 for what
 the fix does and does not achieve.
 
 ### F-04 — the Gemini wiring recipe does the opposite of what it claims
-*source: judge `52e59524`, proven by sandbox execution · status: in-flight · blocks: anyone wiring Gemini*
+*source: judge `52e59524`, proven by sandbox execution · status: closed at `7b96b22` · blocks: anyone wiring Gemini*
 
 `docs/mcp-wiring-recipes.md` printed:
 
@@ -262,7 +281,7 @@ cwd; the file's `args` array is exactly `["/home/scott/.claude/memory/lib/server
 fixed and both are independently confirmed by execution, not inference.
 
 ### F-05 — the exec bit git could not see
-*source: judge `52e59524` · status: in-flight · blocks: reproducibility of every test claim on this repo*
+*source: judge `52e59524` · status: closed at `7b96b22` · blocks: reproducibility of every test claim on this repo*
 
 `tools/memory_wrap` was committed `100644` while every other shell entrypoint
 in the repo (`install.sh`, `dashboard.sh`, all seven `hooks/*.sh`) is `100755`.
@@ -287,7 +306,7 @@ passed in 2.04s`. The exec bit survived the rebase onto `7077c0c` exactly as
 claimed.
 
 ### F-06 — `install.sh` ships `tools/*.py` only
-*source: judge `52e59524` · status: in-flight · blocks: the wrapper working outside a repo checkout*
+*source: judge `52e59524` · status: closed at `7b96b22` · blocks: the wrapper working outside a repo checkout*
 
 `install.sh:209` is `cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/"`. Both new
 non-`.py` artifacts — `tools/memory_wrap` (extensionless bash) and
@@ -760,6 +779,101 @@ venv ever reports `2.x`, `server.py` breaks at import, immediately, the same
 way it did before `7077c0c`.* Anyone auditing dependency bumps should treat a
 `mcp` major-version change as a required trigger to re-open this row and
 either migrate `server.py` off `list_tools()` or re-pin with a stated reason.
+
+**OWNER DECISION, 2026-08-23 (Scott, relayed by the COO at `effe7f2e`), and
+this row moves `open` → `deferred` because of it.** The choice put to him was
+(a) port `server.py` to the mcp 2.x API now, while the context is warm, or
+(b) keep the pin and write an explicit reopen trigger. **He took (b).** Under
+this ledger's own rules that is what makes the row `deferred` rather than
+`open`: deferred means deliberately not doing it, *with the condition that
+reopens it stated* — and a deferred row without a condition is a bug in this
+ledger. The condition is the behavioural one above, now decided rather than
+merely observed:
+
+> **Reopen F-26 when anything forces `mcp>=2` into this project's resolved
+> dependency set** — a transitive bump, a wanted package that needs a 2.x-only
+> feature, or an edit to the pin itself. Concretely: `pip show mcp` reporting
+> `2.x` in a fresh venv built from `requirements.txt`.
+
+**And the port is not abandoned, it is placed.** It folds into the
+release-readiness pass, which is prepared but not run — publishing is **NOT
+YET** per the same owner decision (5.1), so `origin/main` stays at `e3ae2a7`.
+That ordering is deliberate: the pin's whole justification was that a new
+user's first run is the audience, so the port becomes due at exactly the moment
+there are new users, and not before.
+
+### F-27 — the narrative-on-qwen pilot ran off-record, and it failed its own pass condition
+*source: COO directive `01786950192264618966` (rung 3 of the standing qwen
+ladder); results produced 2026-08-22 outside any job record; admitted here by
+owner decision `effe7f2e` · status: closed · reopen: a materially better local
+model, or a redesign that removes Pass B from the local rung's job*
+
+**The pilot the COO queued was, in substance, run — and nobody knew.** On
+17 August the COO queued a narrative-on-qwen pilot with an explicit condition:
+*"Pass ⇒ qwen becomes the default narrative backend with Claude as fallback;
+fail ⇒ numbers on record and the rung stays Claude."* On 22 August that
+comparison was executed against the real delta-extractor spec on three sessions
+Sonnet had already processed. It produced numbers. Those numbers lived in a
+memory file and a bake-off directory, and reached no board until 23 August.
+
+**Harness and raw outputs:** `~/.claude/memory/bakeoffs-qwen38-extractor-2026-08-22/`.
+Rerunnable. Sessions: `footballmanager` (16k prompt tokens), `llm_memory` (48k),
+`sysadmin` (46k). Backends: Sonnet (the pinned `model: sonnet` in
+`agents/delta-extractor.md`), Qwen3.8-27B local via llama-swap, Haiku 4.5.
+
+**What passed.** Qwen3.8 is *structurally* sound, which the 9B and 3.5-27B
+generations were not — that is a real change and the reason the rung was worth
+re-testing. 3/3 valid JSON, schema-correct, never invented or referenced a
+non-existent id, every delta applied cleanly through `merger.apply_delta`.
+It set `value` on every item where Sonnet sometimes omitted it, matched Sonnet's
+closed items every time, and **caught a genuine decision contradiction Sonnet
+missed** (`dec-ecad9fb2`, "no JS on other pages", against a session that added
+client-side filtering JS).
+
+**What failed, and it is concentrated rather than diffuse.**
+
+| | Qwen3.8 | Haiku 4.5 | Sonnet |
+|---|---|---|---|
+| items introduced (3 sessions) | 7 / 9 / 18 | 4 / 13 / 16 | 10 / 16 / 21 |
+| **archives found** (Rule 4 Pass B) | **0** | **0** | **3** |
+| closure match | matched every time | missed one | — |
+| contradictions found | 1 and 2 | 0 | 0 and 1 |
+| `load_bearing` %, target 10–15 | 0 / **44** / 7 | 0 / 18 / **25** | 0 / 12 / 11 |
+| `closure_status` | wrong on the dense session | wrong on the dense session | correct |
+| cost / time per session | free / 162–335s | $0.13–0.19 / 104–170s | — |
+
+**The verdict against the COO's stated condition: FAIL. The rung stays Claude.**
+Not because the model is unreliable — it is not, any more — but because it
+returns roughly 50–70% of Sonnet's items, over-grades `load_bearing` to 44% on a
+dense session against a 10–15% target, mislabels an open-offer ending as
+`complete` where the spec says `interrupted`, and writes journals about half the
+length.
+
+**Two findings worth more than the verdict.**
+
+1. **The gap is Sonnet vs *everything else*, not Sonnet vs local.** Haiku costs
+   money to be *worse* than free Qwen at the jobs that make this ledger
+   trustworthy: it missed a closure both Qwen and Sonnet found, produced zero
+   archives and zero contradictions across all three sessions, and over-graded on
+   two of three. **Haiku has no niche here.** Wall-clock is not a constraint on a
+   background pipeline, so "free and slow" strictly dominates "cheap and fast".
+2. **Both cheap models fail in the *same place*: Rule 4 Pass B.** Zero archives,
+   twice, three sessions each. That is not a recall gradient, it is a specific
+   job neither can do — and it is the same job that forces the extractor's
+   largest input. This is the evidence base for the design cohort on job
+   `llm-memory-pipeline` (proposal `01787487821089749375`, corrected at
+   `01787487925269299055`), which asks whether Pass B belongs in the per-session
+   extractor at all. **Do not read that cohort's premise as settled by this row:**
+   the April redesign put Pass B there deliberately, and the cohort may well
+   conclude April was right.
+
+**Why this row exists at all, and it is not about qwen.** A decision-shaped
+result sat outside the record for a day and would have been re-litigated at full
+cost by the next person to ask "can we use a local model". The rule already on
+this board covers it — *a seat holding a question posts it before going idle*
+(`a4565f94`) — and the same logic applies to a seat holding an *answer*.
+Generated views and memory are evidence, not replacements for the job record.
+
 
 ### F-20 — transition-update ordering: the old installer always runs the upgrade
 *source: incident `512d16a6`, declined with reasons at `c237eb21` · status: deferred*
