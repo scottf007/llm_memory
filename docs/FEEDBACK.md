@@ -95,6 +95,7 @@ free number and are **never renumbered**.
 | F-25 | the `codex-auto` marker is tested on every session, not only codex ones | open |
 | F-26 | the `mcp<2` pin bought time on escalation `09ea13cb`, it did not fix `server.py`'s mcp-2.x incompatibility | deferred |
 | F-27 | the narrative-on-qwen pilot ran off-record and failed its own pass condition | closed |
+| F-28 | worktree sessions attribute to a phantom project — 49 sessions ingested, merged nowhere | open |
 
 ---
 
@@ -873,6 +874,74 @@ cost by the next person to ask "can we use a local model". The rule already on
 this board covers it — *a seat holding a question posts it before going idle*
 (`a4565f94`) — and the same logic applies to a seat holding an *answer*.
 Generated views and memory are evidence, not replacements for the job record.
+
+
+### F-28 — `project_from_cwd` invents a phantom project for every worktree session
+*source: owner product ticket T-F25, relayed by the COO at `b6df4478`; scale
+and root cause measured by `llm-memory-pm` 2026-08-24 · status: open ·
+blocks: every project that uses `am` worktree seats*
+
+**The ticket says the sessions are never ingested. They are — that is the good
+news, and it makes the fix much smaller than the ticket assumes.** Ingestion,
+stripping and archival all work. What fails is **attribution**, in one function.
+
+`adapters/base.py:126-138`:
+
+```python
+for i, part in enumerate(parts):
+    if part == "projects" and i + 1 < len(parts):
+        return parts[i + 1]
+```
+
+An `am` worktree seat runs in
+`/home/scott/projects/.agent-messaging-worktrees/<PROJECT>/<JOB>/<SEAT>`
+(read from a real transcript's `cwd`, not inferred from the slug). The component
+after `projects` is therefore `.agent-messaging-worktrees`, so every worktree
+session is stamped `project: .agent-messaging-worktrees` — a project that does
+not exist and never will.
+
+**MEASURED 2026-08-24, not estimated:**
+
+| | |
+|---|---|
+| worktree project slugs under `~/.claude/projects/` | **106** |
+| worktree transcripts | **49** (39.1 MB) |
+| conversations stamped with the phantom project | **51** |
+| `~/.claude/memory/projects/.agent-messaging-worktrees.json` | **does not exist** |
+| distinct real parent projects hidden inside them | **1** — all 49 are `agent-messaging` |
+
+So 49 sessions are stripped, archived, searchable by `grep`, and **merged into
+no narrative at all**, because the project they claim to belong to has no
+ledger. They are not lost from disk. They are lost from memory — which for this
+product is the same thing.
+
+**The parse rule is unambiguous, contrary to the ticket's "prefix/parse rule"
+concern.** The worry was that `<PROJECT>-<JOB>-<SEAT>` cannot be split on
+hyphens when project names contain hyphens — true of the *slug*, but the slug is
+a lossy encoding of a path, and the path has real separators. Reading `cwd`
+instead of the directory name makes it a path-component lookup: the parent
+project is the component immediately following the worktrees marker. No
+guessing, no ambiguity, no heuristic.
+
+**Generalise the fix rather than special-casing one marker.** The root defect is
+that `project_from_cwd` will return *any* component after `projects/`, including
+a dotted infrastructure directory. `.agent-messaging-worktrees` is today's
+instance; any future `projects/.something/` produces the same phantom. Proposed
+invariant, testable with a trigger and a non-trigger control: **a project name
+beginning with `.` is never a project** — descend past it and take the next
+component, or return `""` if there is none.
+
+**Backfill is cheap and needs no re-extraction.** The stripped conversations
+already exist; only the `project:` frontmatter is wrong. Re-stamping recovers
+all 49 into `agent-messaging`'s narrative without touching a raw transcript.
+Note the ordering consequence: `agent-messaging` gains 49 unprocessed sessions
+the moment this lands, so the fix and the drain are one slice, not two.
+
+**Why this is a product row and not an `agent-messaging` row.** The worktree
+layout is `am`'s; the wrong answer is ours. Any client that runs an agent in a
+subdirectory of `projects/` hits it — the convention `project_from_cwd`
+encodes is a guess about directory layout that happens to be wrong for a layout
+already in daily use across this machine.
 
 
 ### F-20 — transition-update ordering: the old installer always runs the upgrade
