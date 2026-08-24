@@ -138,6 +138,29 @@ seen function is a README claim we cannot support at release. (F-21: the Grok
 probe that would settle it is unrun and its runbook was only made executable at
 `7b96b22`.)
 
+**11b. The store has a write-permission story for exactly one client.**
+`docs/mcp-wiring-recipes.md` wires Codex, Gemini, Grok and qwen — all of it
+**read** access to the MCP server. Nothing anywhere covers **write** access to
+the store. The only write mechanism in the repo is `settings.yaml` ->
+`apply_settings.py` -> `~/.claude/settings.json`, which is Claude-only *and*
+hardcodes one person's home (#8).
+
+Surfaced live: a codex seat asked to write one delta to
+`~/.claude/memory/deltas/` hung on an approval prompt until Scott fixed it by
+hand. It had finished the analysis; it could not deliver it.
+
+**This contradicts Scott's own ruling.** F-22 Q2, verbatim: *"It should be able
+to be done easily by any agent."* Today only Claude can run any part of the
+pipeline that writes — extraction, audit, cascade. Every other client can query
+memory and cannot contribute to it.
+
+Note this is the OURS half of a two-part defect. The other half — `am window`
+and `am phase` not granting declared writable paths per vendor at launch — is
+agent-messaging's and sits in Tier 5, filed at `6f000df0`. Fixing theirs makes
+seats work; fixing ours makes the product work for anyone who installs it.
+Interacts with #9: `LLM_MEMORY_HOME` changes where "outside the working
+directory" even is, so sequence them together.
+
 **12. F-28 — worktree sessions land in a phantom project.** 49 sessions, 39 MB,
 merged nowhere. Fix generically: a project name beginning with `.` is never a
 project. Backfill needs no re-extraction, but `agent-messaging` gains 49
@@ -168,7 +191,9 @@ ordering, the old installer always runs the upgrade.)
 
 ## TIER 5 — Blocked on agent-messaging, not on us. All reported, all worked around.
 
-`am post --kind decision` bricks `am phase` on that job (`1ce054f7`) · no
+`am post --kind decision` bricks `am phase` on that job (`1ce054f7`) · launcher
+grants no writable paths to non-Claude seats, so a brief can ask for a write the
+launch cannot authorise and the seat hangs silently (`6f000df0`) · no
 `digest-review` verb (T-F20/B23) · `stage`-then-`launch` deadlocks · launcher
 strands non-Claude seats on trust prompts while status reads ACTIVE
 (`829b1db9`).
