@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import adapters
+from lib import certify
 
 HOME = Path.home()
 
@@ -45,6 +46,9 @@ IMPORTANCE_WEIGHTS = {"load_bearing": 3.0, "standard": 1.0, "minor": 0.3}
 # age — the single largest cause of narrative bloat.
 IMPORTANCE_FLOORS = {"load_bearing": 1.0, "standard": 0.0, "minor": 0.0}
 RENDER_THRESHOLD = 0.5  # standard/minor below this dissolve.
+# Renders an open cascade review must survive before the integrity footer
+# announces it as a backlog (§3 shared constants).
+REVIEW_TTL_RENDERS = 5
 STALE_SCORE_THRESHOLD = 0.3  # load_bearing items below this get a stale callout.
 
 # Optional per-item `value` (0.0-1.0) from the delta-extractor, ordering items
@@ -338,6 +342,8 @@ def _render_approach(decisions: list, state: dict | None = None, now: datetime |
         if d.get("quote"):
             q = d["quote"].replace("|", "\\|").replace("\n", " ")
             rationale = f"{rationale} Scott: \"{q}\""
+        if d.get("_suspect_note"):  # NEW, disposition C3 — ephemeral, copy-on-write only (§9.1)
+            rationale = f"{rationale}{d['_suspect_note']}"
         return f"| {text} | {rationale} |"
 
     primary, secondary, dissolved = _partition_by_score(active, now)
@@ -389,12 +395,23 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
         # "No active items" is not "nothing shipped" — an audit sweep can
         # archive an entire build log. Point at the archive instead of
         # asserting the project has produced nothing.
-        archived = len(done) - len(active)
+        #
+        # Three-way, not count-and-subtract (§9.2, disposition #15): a
+        # render-time quarantine is reversible and must never be reported as
+        # an archive. `len(done) - len(active)` conflated the two, so a
+        # withheld item would have been announced as permanently archived.
+        archived = sum(1 for d in done if d.get("status") == "archived")
+        quarantined = sum(1 for d in done if d.get("status") == "quarantined")
+        project = state.get("project", "project")
         if archived:
-            project = state.get("project", "project")
             out.append(
                 f"_{archived} work item(s) archived — see `{project}.json` "
                 f"`done[]` or use `project_lookup` for drill-down._"
+            )
+        elif quarantined:
+            out.append(
+                f"_{quarantined} work item(s) withheld pending review — see "
+                f"the render certificate (`{project}.certificate.json`)._"
             )
         else:
             out.append("_No work items recorded yet._")
@@ -408,6 +425,8 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
         line = f"- {text}"
         if commit:
             line += f" (`{commit}`)"
+        if w.get("_suspect_note"):  # NEW, disposition C3 — ephemeral, copy-on-write only (§9.1)
+            line += w["_suspect_note"]
         return line
 
     primary, secondary, dissolved = _partition_by_score(active, now)
@@ -457,6 +476,8 @@ def _render_learnings(learnings: list, state: dict | None = None, now: datetime 
         if l.get("evidence"):
             ev = l["evidence"] if isinstance(l["evidence"], str) else "; ".join(l["evidence"])
             line += f" — {ev}"
+        if l.get("_suspect_note"):  # NEW, disposition C3 — ephemeral, copy-on-write only (§9.1)
+            line += l["_suspect_note"]
         return line
 
     primary, secondary, dissolved = _partition_by_score(active, now)
@@ -524,6 +545,8 @@ def _render_goals(goals: list, state: dict | None = None, now: datetime | None =
         line = g.get("text", "")
         if g.get("progress"):
             line += f" — _{g['progress']}_"
+        if g.get("_suspect_note"):  # NEW, disposition C3 — ephemeral, copy-on-write only (§9.1)
+            line += g["_suspect_note"]
         return line
 
     # The format spec exempts goals from decay — closure discipline is meant
@@ -561,7 +584,10 @@ def _render_suggestions(suggestions: list, state: dict | None = None, now: datet
 
     def _fmt(s: dict) -> str:
         who = s.get("originator", "claude")
-        return f"- ({who}) {s.get('text', '')}"
+        line = f"- ({who}) {s.get('text', '')}"
+        if s.get("_suspect_note"):  # NEW, disposition C3 — ephemeral, copy-on-write only (§9.1)
+            line += s["_suspect_note"]
+        return line
 
     # Suggestions are the one section the spec explicitly wants to dissolve
     # ("after 3 narrative cycles if not acted on"), so decay applies here.
@@ -679,25 +705,58 @@ def render_with_report(state: dict) -> tuple[str, dict]:
     re-auditing the whole ledger.
     """
     now = datetime.now(timezone.utc)
+    # --- certification (§9.1) -------------------------------------------
+    # Reversible and read-only: `state` is never mutated. Everything below
+    # renders from `state_r`, a copy-on-write view carrying the quarantine
+    # status overrides and the ephemeral `_suspect_note` annotations.
+    eligible = certify.eligible_item_ids(state)
+    cert = certify.evaluate(state, eligible, now=now)
+    qset = certify.quarantine_set(cert)
+    suspect_by_child = certify.suspect_callouts(cert)
+    state_r = certify.copy_with_status_override(state, qset, suspect_by_child)
+    # ---------------------------------------------------------------------
     sections: dict = {}
-    parts = [f"# {state.get('project', 'Project')} — Project Narrative\n"]
-    parts.append(_render_summary(state.get("summary", {})))
-    parts.append(_render_approach(state.get("decisions", []), state, now, sections))
-    parts.append(_render_operations(state.get("operations", [])))
-    parts.append(_render_done(state.get("done", []), state, now, sections))
-    parts.append(_render_learnings(state.get("learnings", []), state, now, sections))
-    parts.append(_render_goals(state.get("goals", []), state, now, sections))
-    parts.append(_render_suggestions(state.get("suggestions", []), state, now, sections))
-    parts.append(_render_resuming(state))
-    parts.append(_render_source_transcripts(state))
+    parts = [f"# {state_r.get('project', 'Project')} — Project Narrative\n"]
+    parts.append(_render_summary(state_r.get("summary", {})))
+    parts.append(_render_approach(state_r.get("decisions", []), state_r, now, sections))
+    parts.append(_render_operations(state_r.get("operations", [])))
+    parts.append(_render_done(state_r.get("done", []), state_r, now, sections))
+    parts.append(_render_learnings(state_r.get("learnings", []), state_r, now, sections))
+    parts.append(_render_goals(state_r.get("goals", []), state_r, now, sections))
+    parts.append(_render_suggestions(state_r.get("suggestions", []), state_r, now, sections))
+    parts.append(_render_resuming(state_r))
+    parts.append(_render_source_transcripts(state_r))
     md = "\n".join(parts)
+    # Unconditional (§9.1, disposition C6). `_integrity_footer` already
+    # returns "" when there is nothing to show, so gating the call was always
+    # redundant — and wrong: it silently skipped the backlog line on a
+    # clean-but-aged-backlog render. The two footer lines are independent.
+    md += _integrity_footer(cert)
     report = {
         "project": state.get("project"),
         "rendered_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "total_tokens": len(md) // CHARS_PER_TOKEN,
         "sections": sections,
+        "certificate": cert.to_dict(),
     }
     return md, report
+
+
+def _integrity_footer(cert) -> str:
+    """Two INDEPENDENT lines (disposition C6): a withheld-items line and an
+    aged-review-backlog line. Either can fire without the other. Returns ""
+    when neither does, so the caller never has to gate this."""
+    q = cert.counts["quarantined"]
+    backlog = cert.resolution_backlog
+    lines = []
+    if q:
+        lines.append(f"> ⚠ Integrity: {q} contradicted item(s) withheld pending review.")
+    if backlog["open_reviews"] and backlog["oldest_render_age"] >= REVIEW_TTL_RENDERS:
+        lines.append(f"> {backlog['open_reviews']} cascade review(s) await confirmation, "
+                     f"oldest open for {backlog['oldest_render_age']} render(s).")
+    if not lines:
+        return ""
+    return "\n" + "\n".join(lines) + f"\n> See `{cert.project}.certificate.json`.\n"
 
 
 def render(state: dict) -> str:
@@ -722,6 +781,14 @@ def main() -> None:
     elif contested_path.exists():
         contested_path.unlink()
 
+    # Certificate sidecar (§9.3) — ALWAYS written, never deleted. Unlike
+    # .contested.json, its absence must never be readable as "clean": a
+    # missing certificate means the render never certified, which is a
+    # different and worse thing than certifying and finding nothing.
+    cert_path = state_path.with_suffix(".certificate.json")
+    cert_path.write_text(json.dumps(report["certificate"], indent=2))
+    verdict = report["certificate"]["verdict"]
+
     over = ", ".join(
         f"{name} {s['spent_tokens']}/{s['soft_tokens']} (-{s['dropped']})"
         for name, s in report["sections"].items()
@@ -731,6 +798,13 @@ def main() -> None:
     if over:
         print(f"  at budget: {over}")
         print(f"  contested items written to {contested_path}")
+
+    # Exit 2 means "artifacts written, integrity work remains" — NOT a failed
+    # render. It fires only after every artifact is on disk, and /narrative
+    # must treat it as continue, not abort. A non-empty not_checked is a
+    # standing scope statement, not a finding, so it never gates this.
+    if verdict in ("CONTRADICTION", "UNCERTIFIED"):
+        sys.exit(2)
 
 
 if __name__ == "__main__":
