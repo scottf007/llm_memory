@@ -216,7 +216,63 @@ a stale view. Rendering each time keeps the sidecar current, and it disappears
 by itself once nothing is being cut.
 
 The rendered `.narrative.md` file is the narrative — session_start + subagent_start
-hooks read it directly. Nothing else to do; the pipeline ends here.
+hooks read it directly.
+
+### 2e. Drain the cascade review backlog (last step, after the final render)
+
+Run this once per project, **after** the last `renderer.py` call for that
+project — including when the renderer exits **2**. Exit 2 means "artifacts
+written, integrity work remains", not a failed render, so treat it as continue,
+not abort:
+
+```bash
+python3 ~/.claude/memory/lib/tools/resolve_cascade_reviews.py \
+  ~/.claude/memory/projects/PROJECT_NAME.json
+```
+
+Why this step is not optional. A fuzzy claim match (U2/U3/U4) never archives
+anything by itself — the merger opens a `cascade_reviews` row and stops. This
+resolver is the only route from that row to a decision, so without it the
+backlog grows forever and the renderer's review-backlog footer counts up with
+nothing draining it.
+
+It never writes `{project}.json`. It emits a review delta and hands it to
+`merger.py --rerun` against the most recent real session, so the change lands
+through the one audited write path and shows up in that session's
+`ledger_delta_applied.resolutions` under `cascade_confirm` / `cascade_reject` /
+`cascaded` / `cascade_invalidated`. **If it reports any confirms or rejects,
+re-run 2d** — state changed, so the narrative and the certificate sidecar are
+now one merge behind.
+
+`no open reviews; nothing to resolve.` is the normal, common output. Nothing
+further to do for that project.
+
+Two variants, for when the default local-model judgment is not what you want:
+
+- `--emit-prompts` prints the open reviews and their confirmation prompts as
+  JSON and stops, resolving nothing. Use it when you want to answer the
+  judgments yourself rather than delegate them, then feed your answers back as
+  `--decisions FILE`, a JSON list of `{"child": ID, "parent": ID, "decision":
+  "confirm"|"reject", "reason": TEXT}`.
+- `--dry-run` builds the delta and prints it without merging.
+
+An open review that nobody answers **rejects** — a row with no decision must
+never be read as a confirmation. Note the asymmetry before overriding anything:
+confirming archives an item permanently, and rejecting blocks that exact pair
+permanently. Neither has an undo, so `--emit-prompts` is the right reflex
+whenever a pair looks contestable.
+
+To resolve a single review by hand:
+
+```bash
+python3 ~/.claude/memory/lib/tools/cascade_review.py list ~/.claude/memory/projects/PROJECT_NAME.json
+python3 ~/.claude/memory/lib/tools/cascade_review.py confirm ~/.claude/memory/projects/PROJECT_NAME.json \
+  --child work-abcd1234 --parent dec-abcd1234 --reason "restates the same claim"
+```
+
+Do not hand-edit `cascade_reviews` in the JSON. That bypasses the fingerprint
+staleness check, which is the only thing standing between a claim that moved
+since the review was proposed and a terminal archive.
 
 ## Step 3: Summary
 
