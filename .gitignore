@@ -16,3 +16,8 @@ build/
 tmp_*/
 tmp_*
 tests/.real-names
+
+# Agent-messaging runtime: seat presence, launch records, briefs and board
+# events. Contains absolute host paths and internal deliberation; never publish.
+.agent-messages/
+memory/

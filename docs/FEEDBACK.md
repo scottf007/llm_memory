@@ -210,7 +210,7 @@ newly introduces them, and `fletchcorp` matches Scott's own email domain — it
 is identifying in a way `universalai` is not.
 
 Everything else in the sanitiser holds under direct attack: 1.8 MB across 30
-files, zero occurrences of `scott`/`Scott`/`/home/scott`, zero credentials, and
+files, zero occurrences of `scott`/`Scott`/`/home/user`, zero credentials, and
 a prose hunt over every string **and dictionary key** longer than 25 characters
 returned exactly two hits, both codex's own schema key names.
 
@@ -277,7 +277,7 @@ sandboxed `HOME` (`live ~/.gemini` never touched — the sandbox `HOME` env var
 makes that structurally true, not merely claimed). Result: `MCP server
 "llm_memory" added to user settings. (stdio)`; only
 `$SANDBOX_HOME/.gemini/settings.json` was written, nothing under the scratch
-cwd; the file's `args` array is exactly `["/home/scott/.claude/memory/lib/server.py"]`
+cwd; the file's `args` array is exactly `["/home/user/.claude/memory/lib/server.py"]`
 — no stray `-s`/`user` baked into argv. Both halves of the original defect are
 fixed and both are independently confirmed by execution, not inference.
 
@@ -524,7 +524,7 @@ the empty case rather than relying on the corpus staying clean.
 ### F-13 — the dev `.venv` holds a foreign package named `mcp`
 *source: `de2577f2`, independently verified at `52e59524` · status: open · trigger: any hand-run of the wrapper from the repo venv*
 
-`/home/scott/projects/llm_memory/.venv` contains an `mcp` package that is
+`/home/user/projects/llm_memory/.venv` contains an `mcp` package that is
 **not** the MCP SDK `server.py` imports. It imports fine at top level, so it
 looks healthy — but `import server` under it dies with
 `AttributeError: 'Server' object has no attribute 'list_tools'`.
@@ -894,7 +894,7 @@ for i, part in enumerate(parts):
 ```
 
 An `am` worktree seat runs in
-`/home/scott/projects/.agent-messaging-worktrees/<PROJECT>/<JOB>/<SEAT>`
+`/home/user/projects/.agent-messaging-worktrees/<PROJECT>/<JOB>/<SEAT>`
 (read from a real transcript's `cwd`, not inferred from the slug). The component
 after `projects` is therefore `.agent-messaging-worktrees`, so every worktree
 session is stamped `project: .agent-messaging-worktrees` — a project that does

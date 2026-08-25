@@ -18,6 +18,13 @@ log() {
     fi
 }
 
+# Warnings are NOT suppressed by --quiet and go to stderr. A step that fails
+# has to say so: this installer's three worst defects all hid behind a
+# discarded stderr or a swallowed exit status under `set -e`.
+warn() {
+    echo "  WARNING: $*" >&2
+}
+
 # --- Marker helpers for tracking llm_memory-owned files ---
 # Several install targets (~/.claude/agents, ~/.claude/skills/narrative, etc.)
 # may also contain files owned by other tools, so we can't blindly wipe them.
@@ -96,14 +103,23 @@ mkdir -p "$MEMORY_DIR" "$LIB_DIR"
 #   4. `gh auth token` (local gh CLI)
 # No token = falls through to unauthenticated curl (public repos only).
 _gh_token() {
-    if [ -n "$GH_TOKEN" ]; then echo "$GH_TOKEN"; return; fi
+    if [ -n "$GH_TOKEN" ]; then echo "$GH_TOKEN"; return 0; fi
     for path in "$HOME/.ssh/github_token" "$HOME/.claude/memory/config/github_token"; do
         if [ -f "$path" ]; then
             tr -d '[:space:]' < "$path"
-            return
+            return 0
         fi
     done
-    command -v gh >/dev/null 2>&1 && gh auth token 2>/dev/null
+    # No token from env or file. Try the gh CLI, but treat its absence or
+    # its failure (gh installed yet unauthenticated — the default state on a
+    # fresh machine) as "no token", not as an error: emit nothing and return
+    # 0 so the caller falls through to unauthenticated curl, as documented
+    # above. A non-zero return here is fatal — `set -e` kills the installer
+    # at `TOKEN=$(_gh_token)` with no message at all.
+    if command -v gh >/dev/null 2>&1; then
+        gh auth token 2>/dev/null || true
+    fi
+    return 0
 }
 TOKEN=$(_gh_token)
 AUTH_HEADER=()
@@ -158,9 +174,14 @@ else
         cp "$EXTRACTED/indexer.py" "$LIB_DIR/"
         cp "$EXTRACTED/migrate_item_ids.py" "$LIB_DIR/"
         cp "$EXTRACTED/resolve_conflicts.py" "$LIB_DIR/"
-        cp "$EXTRACTED/merger.py" "$LIB_DIR/" 2>/dev/null || true
-        cp "$EXTRACTED/renderer.py" "$LIB_DIR/" 2>/dev/null || true
-        cp "$EXTRACTED/delta_cache.py" "$LIB_DIR/" 2>/dev/null || true
+        # These three used to be optional (`|| true`) from when they were new
+        # to the repo. They are load-bearing now — step 8 imports merger, and
+        # the /narrative pipeline imports renderer — so a silent skip leaves a
+        # lib dir that cannot run the headline feature. Copy them like any
+        # other required module: loudly, and fatally if missing.
+        cp "$EXTRACTED/merger.py" "$LIB_DIR/"
+        cp "$EXTRACTED/renderer.py" "$LIB_DIR/"
+        cp "$EXTRACTED/delta_cache.py" "$LIB_DIR/"
         cp "$EXTRACTED/dashboard.py" "$LIB_DIR/"
         cp "$EXTRACTED/apply_settings.py" "$LIB_DIR/"
         cp "$EXTRACTED/requirements.txt" "$LIB_DIR/"
@@ -185,6 +206,28 @@ else
         rm -f "$LIB_DIR/adapters/"*.py
         rm -rf "$LIB_DIR/adapters/__pycache__"
         cp "$EXTRACTED/adapters/"*.py "$LIB_DIR/adapters/"
+
+        # Copy the lib/ package (archive_class, claim_match, certify, ...).
+        # merger.py and renderer.py import it, so — exactly like adapters/
+        # above — it is not optional: a lib dir with the new merger.py and no
+        # lib/ package raises ImportError on the first merge.
+        #
+        # MIND THE DESTINATION. $LIB_DIR is itself named "lib", so the package
+        # must land at $LIB_DIR/lib/, NOT $LIB_DIR/. Copying it flat would
+        # scatter the package's modules among the top-level scripts and the
+        # `from lib import ...` in merger.py would still fail.
+        #
+        # The [ -d ] guard is deliberate and is NOT the silent-skip shape this
+        # installer was just swept for: lib/ genuinely does not exist in every
+        # version this script installs (published main has no lib/ today), so
+        # its absence is a supported state. Its presence-but-uncopyable is
+        # not, which is why the cp itself has no `|| true`.
+        if [ -d "$EXTRACTED/lib" ]; then
+            mkdir -p "$LIB_DIR/lib"
+            rm -f "$LIB_DIR/lib/"*.py
+            rm -rf "$LIB_DIR/lib/__pycache__"
+            cp "$EXTRACTED/lib/"*.py "$LIB_DIR/lib/"
+        fi
 
         # Copy templates
         mkdir -p "$LIB_DIR/templates"
@@ -286,10 +329,17 @@ log "  Directories ready."
 log "[5/8] Registering MCP server with Claude Code..."
 SERVER_CONFIG="{\"type\":\"stdio\",\"command\":\"$VENV_DIR/bin/python3\",\"args\":[\"$LIB_DIR/server.py\"]}"
 if command -v claude &> /dev/null; then
-    if claude mcp add-json llm_memory "$SERVER_CONFIG" --scope user 2>/dev/null; then
+    # Registration failing usually just means "already configured", which is
+    # why this is not fatal — but it can also mean the MCP server never gets
+    # registered at all, and that is the whole product. Capture the output
+    # rather than discarding it, and show it when we could not tell which.
+    if MCP_ERR=$(claude mcp add-json llm_memory "$SERVER_CONFIG" --scope user 2>&1); then
         log "  MCP server registered."
     else
         log "  MCP server registration skipped (may already be configured)."
+        [ -n "$MCP_ERR" ] && log "    claude CLI said: $MCP_ERR"
+        log "    If llm_memory is missing from /mcp, register it manually:"
+        log "      claude mcp add-json llm_memory '$SERVER_CONFIG' --scope user"
     fi
 else
     log "  WARNING: 'claude' CLI not found. Add manually:"
@@ -338,19 +388,29 @@ fi
 # --- Step 7: Apply shared settings ---
 log "[7/8] Applying shared settings..."
 if [ -f "$LIB_DIR/settings.yaml" ]; then
-    "$VENV_DIR/bin/python3" "$LIB_DIR/apply_settings.py" "$LIB_DIR/settings.yaml" 2>/dev/null
-    log "  Applied shared settings from settings.yaml"
+    if "$VENV_DIR/bin/python3" "$LIB_DIR/apply_settings.py" "$LIB_DIR/settings.yaml"; then
+        log "  Applied shared settings from settings.yaml"
+    else
+        log "  WARNING: failed to apply shared settings from settings.yaml (see error above)"
+    fi
 fi
 
 # --- Step 8: Initialize database and process transcripts ---
 log "[8/8] Initializing database..."
 
-"$VENV_DIR/bin/python3" -c "
-import sys
-sys.path.insert(0, '$LIB_DIR')
-from server import init_db
-init_db()
-" 2>/dev/null
+# There is no separate DB-init step, by design. memory.db is derived, not
+# authoritative: indexer.rebuild_items_index() (called at the end of this
+# step) creates the file and the entire schema — the `items` table, its three
+# indexes and the items_fts virtual table, all CREATE ... IF NOT EXISTS — and
+# it is the only thing in the shipped tree that defines any schema at all.
+# Nothing needs a table before then: server.py reads through
+# indexer.search_items(), which returns [] when the DB is missing, and
+# dashboard.py's get_db() returns None.
+#
+# `from server import init_db; init_db()` used to be called right here.
+# init_db does not exist in server.py — it is an orphaned reference — and
+# with stderr discarded under `set -e` it silently killed EVERY fresh install
+# at this line, printing the banner above and then nothing whatsoever.
 
 # Collect any existing transcripts from Claude's project dirs
 for src in "$HOME/.claude/projects"/*/*.jsonl; do
@@ -379,19 +439,23 @@ for fm in iter_sessions():
 print(f'  Found {len(transcripts)} transcripts across {len(projects)} projects:')
 for name in sorted(projects):
     print(f'    {name:25s} {projects[name]:3d} sessions')
-" 2>/dev/null
+" || warn "could not summarise existing transcripts (see error above)."
 fi
 
-"$VENV_DIR/bin/python3" "$LIB_DIR/process_transcripts.py" --quiet 2>/dev/null
-log "  Transcripts scanned."
+if "$VENV_DIR/bin/python3" "$LIB_DIR/process_transcripts.py" --quiet; then
+    log "  Transcripts scanned."
+else
+    warn "process_transcripts.py failed (see error above); transcripts were NOT scanned."
+fi
 
 # Idempotent migration: rewrite integer-suffix item IDs to UUID suffixes.
-"$VENV_DIR/bin/python3" "$LIB_DIR/migrate_item_ids.py" 2>/dev/null || true
+"$VENV_DIR/bin/python3" "$LIB_DIR/migrate_item_ids.py" \
+    || warn "item-ID migration failed (see error above); existing item IDs are unchanged."
 
 # Fan out items from each {project}.json to ~/.claude/memory/items/ so they
 # can be synced and indexed, then rebuild the FTS5 index that memory_search
 # queries.
-"$VENV_DIR/bin/python3" -c "
+if "$VENV_DIR/bin/python3" -c "
 import sys, json
 sys.path.insert(0, '$LIB_DIR')
 from pathlib import Path
@@ -405,8 +469,12 @@ for p in sorted(projects_dir.glob('*.json')):
         continue
     fan_out_items(state, p.stem)
 indexer.rebuild_items_index()
-" 2>/dev/null || true
-log "  Items fanned out and index rebuilt."
+"; then
+    log "  Items fanned out and index rebuilt."
+else
+    warn "item fan-out / index rebuild FAILED (see error above)."
+    warn "memory.db is created by this step — memory_search will find nothing until it succeeds."
+fi
 
 # --- Convenience symlink for dashboard ---
 mkdir -p "$HOME/.local/bin"
