@@ -7,11 +7,16 @@ filtering entirely and goals/suggestions had no filter at all, so a mature
 project's narrative grew without limit (example_project reached ~33k tokens).
 """
 
+import json
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 import renderer
+import merger
+from tests.fixtures.certification.live_ledger import load_live_state
+from tests.fixtures.certification.replay_oracle import build_oracle
 
 
 NOW = datetime(2026, 8, 4, tzinfo=timezone.utc)
@@ -445,3 +450,246 @@ def test_resuming_section_shows_client_prefixed_short_id_for_codex():
     ])
     section = renderer._render_resuming(state)
     assert "`codex-019ff8c5`" in section
+
+
+# --- certification/cascade extensions ---------------------------------------
+#
+# SPEC-rev2-certification-cascade.md §9, §14. Certification runs inside
+# render_with_report on every render (§9.1): quarantine withholds
+# CONTRADICTION children entirely, load-bearing SUSPECT findings get an
+# inline callout, and the integrity footer (§9.1, disposition C6) is now an
+# unconditional call -- it must never be skipped just because the caller
+# forgot to gate it, since _integrity_footer already returns "" when there
+# is nothing to show.
+
+
+def _cert_parent(pid, reversal_id=None, **over):
+    reason = "reversed -- the underlying claim no longer holds"
+    if reversal_id:
+        reason = f"reversed -- see {reversal_id} for the current claim"
+    p = {
+        "id": pid, "text": "old claim text", "rationale": "",
+        "archived_reason": reason, "status": "archived", "archived_in": "sess1",
+    }
+    p.update(over)
+    return p
+
+
+def _cert_child(iid, kind_hint_id, importance="standard", **over):
+    item = {
+        "id": iid, "status": "active", "importance": importance,
+        "text": f"This restates {kind_hint_id} directly and completely.",
+        "rationale": "", "last_touched_at": _ts(0),
+    }
+    item.update(over)
+    return item
+
+
+def _sessions(n):
+    return [
+        {"session_id": f"sess-{i}", "status": "active", "started": _ts(1),
+         "ended": _ts(1), "closure_status": "complete", "topic": "t"}
+        for i in range(n)
+    ]
+
+
+def test_certificate_sidecar_always_written(tmp_path, monkeypatch):
+    state_path = tmp_path / "cleanproj.json"
+    md_path = tmp_path / "out.md"
+    state_path.write_text(json.dumps(_state()))
+
+    monkeypatch.setattr(sys, "argv", ["renderer.py", str(state_path), str(md_path)])
+    renderer.main()
+
+    cert_path = state_path.with_suffix(".certificate.json")
+    assert cert_path.exists()
+    cert = json.loads(cert_path.read_text())
+    assert cert["verdict"] in ("NO_KNOWN_FALSEHOOD", "SUSPECT", "CONTRADICTION", "UNCERTIFIED")
+
+    # Never deleted on a clean render -- unlike .contested.json, which is
+    # written only when something was cut.
+    contested_path = state_path.with_suffix(".contested.json")
+    assert not contested_path.exists()
+    renderer.main()
+    assert cert_path.exists()
+
+
+def test_quarantined_done_not_counted_as_archived():
+    """renderer.py:392 fix (disposition #15): the 'archived' tally in the
+    empty-active-section message must count only status=='archived', never
+    conflate a quarantined item into it."""
+    reversal = {"id": "dec-rrev1", "text": "the current claim", "status": "active",
+                "importance": "standard", "last_touched_at": _ts(0)}
+    parent = _cert_parent("dec-rparent1", reversal_id="dec-rrev1")
+    quarantine_target = _cert_child("work-quarantine1", "dec-rparent1")
+    really_archived = dict(_item("archived work", "standard"), status="archived")
+
+    state = _state(decisions=[parent, reversal], done=[quarantine_target, really_archived])
+    md = renderer.render(state)
+    body = md.split("## What's Done")[1].split("\n## ")[0]
+    assert "1 work item(s) archived" in body
+
+
+def test_done_all_quarantined_withheld_wording():
+    reversal = {"id": "dec-rrev2", "text": "the current claim", "status": "active",
+                "importance": "standard", "last_touched_at": _ts(0)}
+    parent = _cert_parent("dec-rparent2", reversal_id="dec-rrev2")
+    quarantine_target = _cert_child("work-quarantine2", "dec-rparent2")
+
+    state = _state(decisions=[parent, reversal], done=[quarantine_target])
+    md = renderer.render(state)
+    body = md.split("## What's Done")[1].split("\n## ")[0]
+    assert "withheld pending review" in body
+    assert "archived" not in body
+    assert "No work items recorded" not in body
+
+
+def test_exit_2_on_contradiction_or_uncertified(tmp_path, monkeypatch):
+    reversal = {"id": "dec-exitrev1", "text": "current claim", "status": "active",
+                "importance": "standard", "last_touched_at": _ts(0)}
+    parent = _cert_parent("dec-exitparent1", reversal_id="dec-exitrev1")
+    child = _cert_child("work-exitchild1", "dec-exitparent1")
+    state = _state(decisions=[parent, reversal], done=[child])
+    state_path = tmp_path / "exitproj.json"
+    md_path = tmp_path / "out.md"
+    state_path.write_text(json.dumps(state))
+
+    monkeypatch.setattr(sys, "argv", ["renderer.py", str(state_path), str(md_path)])
+    with pytest.raises(SystemExit) as exc:
+        renderer.main()
+    assert exc.value.code == 2
+    assert md_path.exists()  # artifacts written before the exit
+    cert_path = state_path.with_suffix(".certificate.json")
+    assert cert_path.exists()
+    assert json.loads(cert_path.read_text())["verdict"] == "CONTRADICTION"
+
+    # UNCERTIFIED (fuse tripped) exits 2 as well.
+    fuse_reversal = {"id": "dec-fuserev1", "text": "current claim", "status": "active",
+                      "importance": "standard", "last_touched_at": _ts(0)}
+    fuse_parent = _cert_parent("dec-fuseparent1", reversal_id="dec-fuserev1")
+    fuse_children = [_cert_child(f"work-fusechild{i}", "dec-fuseparent1") for i in range(4)]
+    fuse_state = _state(decisions=[fuse_parent, fuse_reversal], done=fuse_children)
+    fuse_path = tmp_path / "fuseproj.json"
+    fuse_md = tmp_path / "fuse_out.md"
+    fuse_path.write_text(json.dumps(fuse_state))
+    monkeypatch.setattr(sys, "argv", ["renderer.py", str(fuse_path), str(fuse_md)])
+    with pytest.raises(SystemExit) as exc2:
+        renderer.main()
+    assert exc2.value.code == 2
+    assert json.loads(fuse_path.with_suffix(".certificate.json").read_text())["verdict"] == "UNCERTIFIED"
+
+    # Non-trigger: SUSPECT/NO_KNOWN_FALSEHOOD exit 0, even with a non-empty
+    # not_checked (C3: a standing scope statement, not a finding).
+    clean_state = _state()
+    clean_path = tmp_path / "cleanexit.json"
+    clean_md = tmp_path / "clean_out.md"
+    clean_path.write_text(json.dumps(clean_state))
+    monkeypatch.setattr(sys, "argv", ["renderer.py", str(clean_path), str(clean_md)])
+    renderer.main()  # must not raise SystemExit
+    clean_cert = json.loads(clean_path.with_suffix(".certificate.json").read_text())
+    assert clean_cert["verdict"] in ("NO_KNOWN_FALSEHOOD", "SUSPECT")
+    assert clean_cert["not_checked"]  # always non-empty, never gates the exit code
+
+
+def test_load_bearing_suspect_inline_callout():
+    parent = {
+        "id": "dec-suspectparent1", "text": "an old, undated claim", "rationale": "",
+        "archived_reason": "no clause this classifier recognizes at all",
+        "status": "archived", "archived_in": "sess1",
+    }
+    lb_child = _cert_child("work-suspectlb1", "dec-suspectparent1", importance="load_bearing",
+                            text="This restates dec-suspectparent1 directly [lb-marker].")
+    std_child = _cert_child("work-suspectstd1", "dec-suspectparent1", importance="standard",
+                             text="This restates dec-suspectparent1 directly [std-marker].")
+    state = _state(decisions=[parent], done=[lb_child, std_child])
+
+    md, report = renderer.render_with_report(state)
+    lb_line = next(line for line in md.splitlines() if "[lb-marker]" in line)
+    std_line = next(line for line in md.splitlines() if "[std-marker]" in line)
+    assert "⚠ SUSPECT" in lb_line
+    assert "dec-suspectparent1" in lb_line
+    assert "⚠ SUSPECT" not in std_line
+
+    findings = report["certificate"]["findings"]
+    assert any(f["child"] == "work-suspectstd1" and f["severity"] == "SUSPECT" for f in findings)
+
+
+def test_founding_case_omitted_before_ranking():
+    oracle = build_oracle(merger)
+    md = renderer.render(oracle)
+    assert "load_bearing items always render in full" not in md
+
+    # Non-trigger: the current (live, post-cascade) state -- already
+    # archived on both sides, so omission here is a no-op, not evidence the
+    # certification-quarantine fix actually engaged.
+    current = load_live_state()
+    md_current = renderer.render(current)
+    assert "load_bearing items always render in full" not in md_current
+
+
+def test_review_footer_ttl_five_triggers():
+    """CORRECTED, disposition C6: quarantine_ids is explicitly empty in
+    this fixture -- the prior draft's bug only reproduced when quarantine
+    happened to be non-empty, which masked it."""
+    review_row = {
+        "child": "work-ttl1", "candidate_parents": ["dec-ttl1"],
+        "reason_code": "lcs_92", "proposed_test": "U3", "status": "open",
+        "first_seen_render": 0, "item_fingerprint": "sha256:x",
+        "parent_set_fingerprint": "sha256:y", "resolved_in": None, "resolution_reason": None,
+    }
+    state = _state(sessions=_sessions(5), cascade_reviews=[review_row])
+    md = renderer.render(state)
+    assert "await confirmation" in md
+    assert "Integrity:" not in md
+
+    # Non-trigger: age 4, zero quarantine -> footer entirely absent (empty
+    # string appended, no stray blank line) -- byte-identical to a render
+    # with no cascade_reviews at all.
+    state4 = _state(sessions=_sessions(4), cascade_reviews=[dict(review_row)])
+    md4 = renderer.render(state4)
+    baseline = renderer.render(_state(sessions=_sessions(4)))
+    assert md4 == baseline
+    assert "await confirmation" not in md4
+    assert "Integrity:" not in md4
+
+
+def test_footer_renders_backlog_line_independent_of_quarantine_count():
+    """NEW, disposition C6."""
+    review_row = {
+        "child": "work-backlog1", "candidate_parents": ["dec-backlog1"],
+        "reason_code": "dead_substrate_2tok", "proposed_test": "U4", "status": "open",
+        "first_seen_render": 1, "item_fingerprint": "sha256:x",
+        "parent_set_fingerprint": "sha256:y", "resolved_in": None, "resolution_reason": None,
+    }
+    aged_state = _state(sessions=_sessions(6), cascade_reviews=[review_row])
+    md = renderer.render(aged_state)
+    assert "Integrity:" not in md
+    assert "await confirmation" in md
+
+    # Non-trigger: zero quarantine + fresh (age < 5) backlog -> absent.
+    fresh_row = dict(review_row, first_seen_render=5)
+    fresh_state = _state(sessions=_sessions(6), cascade_reviews=[fresh_row])
+    md_fresh = renderer.render(fresh_state)
+    assert "Integrity:" not in md_fresh
+    assert "await confirmation" not in md_fresh
+
+
+def test_footer_renders_both_lines_when_both_conditions_hold():
+    """NEW, disposition C6."""
+    reversal = {"id": "dec-bothrev1", "text": "current claim", "status": "active",
+                "importance": "standard", "last_touched_at": _ts(0)}
+    parent = _cert_parent("dec-bothparent1", reversal_id="dec-bothrev1")
+    child = _cert_child("work-bothchild1", "dec-bothparent1")
+    review_row = {
+        "child": "work-bothreview1", "candidate_parents": ["dec-bothreview1"],
+        "reason_code": "lcs_92", "proposed_test": "U3", "status": "open",
+        "first_seen_render": 0, "item_fingerprint": "sha256:x",
+        "parent_set_fingerprint": "sha256:y", "resolved_in": None, "resolution_reason": None,
+    }
+    state = _state(
+        decisions=[parent, reversal], done=[child],
+        sessions=_sessions(5), cascade_reviews=[review_row],
+    )
+    md = renderer.render(state)
+    assert "Integrity:" in md
+    assert "await confirmation" in md
