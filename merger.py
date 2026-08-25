@@ -15,11 +15,17 @@ treated as a sandbox and fans out into a sibling items/ directory with its own
 memory.db, so dry-running a copy can never mutate the real memory tree.
 """
 
+import errno
 import json
+import os
 import secrets
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
+
+from lib import archive_class
+from lib import cascade
 
 
 LEDGER_KEYS = ("decisions", "goals", "suggestions", "learnings", "done")
@@ -114,9 +120,62 @@ def _archive_item(state: dict, kind: str, item_id: str, session_id: str, ts: str
             item["status"] = "archived"
             item["archived_in"] = session_id
             item["archived_reason"] = reason
+            # M1 (§8.2): computed forward at every archive event. Set
+            # unconditionally — no guard against an already-set value.
+            # Callers that need a value the leading-clause parser cannot
+            # produce ("cascade", "lifecycle" — call-site overrides by
+            # contract, §4) overwrite it immediately after this returns.
+            item["archive_class"] = archive_class.classify_archive_reason(reason)
             item["last_touched_in"] = session_id
             item["last_touched_at"] = ts
             return
+
+
+LINK_RELATION = "implements_current_claim"
+
+
+def _link_identity(link: dict) -> tuple:
+    """Replication identity of a decision_links entry (F-1).
+
+    `scope` is deliberately NOT part of the key. It is the one field a
+    legitimate local operation mutates on an existing entry — C5-a's
+    in-place promotion of a confirmed U1_PARTIAL review from "partial" to
+    "whole" — so keying on it made the same edge unrecognisable across
+    machines. Identity is what the edge is ABOUT (which parent, which
+    relation); scope is a claim about it, reconciled by _reconcile_link.
+    """
+    return (link.get("decision_id"), link.get("relation"))
+
+
+def _reconcile_link(current: dict, incoming: dict) -> None:
+    """Fold `incoming` into `current` for one (decision_id, relation) pair.
+
+    "whole" supersedes "partial" and is ABSORBING: once either side has
+    established that a claim wholly restates its parent, no later merge can
+    walk that back. That is what makes the union order-independent — it is
+    commutative and idempotent, so A->B->A and B->A->B converge on the same
+    single edge regardless of replication order.
+
+    A same-scope incoming carries no new information: the pre-F-1 key
+    already treated it as an exact duplicate (the key excludes
+    evidence_source by design, so two same-scope entries are duplicates by
+    construction, never a disagreement to arbitrate). It is ignored, which
+    keeps a quiet resync genuinely quiet.
+
+    Mutates `current` in place and returns nothing on purpose. The caller
+    detects change by comparing the rebuilt list against the original, which
+    also catches a collapse that drops a duplicate WITHOUT promoting
+    anything — a "did I promote?" boolean would silently miss that and
+    report no update on a merge that really did repair the record.
+    """
+    if incoming.get("scope") != "whole" or current.get("scope") == "whole":
+        return
+    current["scope"] = "whole"
+    # The promoting side's provenance travels with the promotion — the
+    # review that established "whole" is the authoritative record of it.
+    for field in ("evidence_source", "written_in", "proposed_test"):
+        if field in incoming:
+            current[field] = incoming[field]
 
 
 def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
@@ -124,10 +183,17 @@ def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int
 
     Walks ~/.claude/memory/items/{project}/{kind}/*.json and for each file:
       - If the item isn't in state[kind], append it.
-      - If the item exists and the file's last_touched_at is newer, replace
+      - If the item exists and the file's status is archived and state's
+        isn't, prefer archived (archive supersedes regardless of timestamp).
+      - Else if the file's last_touched_at is newer, replace
         text/rationale/quote/status/importance/last_touched_at fields.
-      - If the file's status is archived and state's isn't, prefer archived
-        (archive supersedes regardless of timestamp).
+      - Regardless of which branch above fired (or neither): harmonize
+        archive_class (disposition C1) and union decision_links
+        (disposition #24) — neither is a status/timestamp field, so both
+        run unconditionally rather than being gated by the archived-wins/
+        newer-wins outcome (VERDICT §2.2: an equal- or older-timestamp
+        incoming item with additive evidence must still reach these two
+        checks).
 
     Leaves state["sessions"], state["summary"], state["operations"] alone —
     those are written only via deltas.
@@ -158,6 +224,7 @@ def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int
                                     if k not in ("kind", "project")})
                 updates += 1
                 continue
+            changed = False
             # Archived-wins rule (either direction).
             cur_archived = current.get("status") == "archived"
             inc_archived = incoming.get("status") == "archived"
@@ -166,16 +233,95 @@ def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int
                 current["archived_in"] = incoming.get("archived_in") or current.get("archived_in")
                 current["archived_reason"] = incoming.get("archived_reason") or current.get("archived_reason")
                 current["last_touched_at"] = incoming.get("last_touched_at") or current.get("last_touched_at")
-                updates += 1
-                continue
-            # Newer-wins on text fields.
-            inc_ts = incoming.get("last_touched_at") or ""
-            cur_ts = current.get("last_touched_at") or ""
-            if inc_ts and inc_ts > cur_ts:
-                for field in ("text", "rationale", "quote", "importance",
-                              "last_touched_in", "last_touched_at"):
-                    if field in incoming:
-                        current[field] = incoming[field]
+                changed = True
+            else:
+                # Newer-wins on text fields.
+                inc_ts = incoming.get("last_touched_at") or ""
+                cur_ts = current.get("last_touched_at") or ""
+                if inc_ts and inc_ts > cur_ts:
+                    for field in ("text", "rationale", "quote", "importance",
+                                  "last_touched_in", "last_touched_at"):
+                        if field in incoming:
+                            current[field] = incoming[field]
+                    changed = True
+
+            # --- disposition C1 — runs for every item pair, regardless of
+            # which branch above fired. archive_class is never blindly
+            # imported: "regrade"/"unclassified" ARE classify_archive_
+            # reason's own parser outputs and are always safe to recompute
+            # from the merged archived_reason text; "cascade"/"lifecycle"
+            # are call-site overrides the parser cannot reconstruct (§4
+            # returns "unclassified" for all three generated-reason shapes)
+            # and must be preserved whenever either side already carries
+            # one. The two override values cannot legitimately conflict
+            # between peers for the same item (a "cascade" child and a
+            # "lifecycle" closure are structurally different code paths on
+            # different kinds), so incoming winning when it disagrees with a
+            # non-override current value is safe; an incoming non-override
+            # value never overwrites a current override.
+            if current.get("status") == "archived" or incoming.get("status") == "archived":
+                reason = current.get("archived_reason") or incoming.get("archived_reason")
+                cur_cls = current.get("archive_class")
+                inc_cls = incoming.get("archive_class")
+                if inc_cls in ("cascade", "lifecycle"):
+                    if cur_cls != inc_cls:
+                        current["archive_class"] = inc_cls
+                        changed = True
+                elif cur_cls in ("cascade", "lifecycle"):
+                    pass  # preserve the local call-site override
+                else:
+                    recomputed = archive_class.classify_archive_reason(reason)
+                    if cur_cls != recomputed:
+                        current["archive_class"] = recomputed
+                        changed = True
+
+            # decision_links unions by (decision_id, relation) identity,
+            # RECONCILING scope (F-1) — genuinely additive evidence, not
+            # derivable from anything else (disposition #24). A stale
+            # incoming file carrying no decision_links removes nothing.
+            #
+            # F-1: scope was previously part of the identity key. But a C5-a
+            # promotion MUTATES scope on an existing entry, so a promoted
+            # edge arriving from another machine looked like a key the
+            # receiver had never seen and was APPENDED beside the stale
+            # partial it was meant to replace — leaving the record saying
+            # both "partial restatement" and "whole restatement" for the same
+            # (child, parent), permanently. Worse, `cascade._write_decision_
+            # link` then resolved the pair by first match, promoting the
+            # stale one too and minting the duplicate whole entry C5-a exists
+            # to prevent. scope is reconciled instead: see _reconcile_link.
+            cur_links = current.get("decision_links") or []
+            inc_links = incoming.get("decision_links") or []
+            if cur_links or inc_links:
+                merged, order = {}, []
+                for link in cur_links:
+                    key = _link_identity(link)
+                    if key in merged:
+                        # A contradictory pair left behind by the pre-F-1
+                        # union. Collapse it, so the invariant is
+                        # unconditional rather than true-going-forward.
+                        _reconcile_link(merged[key], link)
+                        continue
+                    merged[key] = dict(link)
+                    order.append(key)
+                for link in inc_links:
+                    if (not link.get("decision_id")
+                            or link.get("relation") != LINK_RELATION):
+                        continue  # validate enum/target before importing —
+                                  # never trust a peer blindly
+                    key = _link_identity(link)
+                    if key in merged:
+                        _reconcile_link(merged[key], link)
+                    else:
+                        merged[key] = dict(link)
+                        order.append(key)
+                new_links = [merged[k] for k in order]
+                if new_links != cur_links:
+                    current["decision_links"] = new_links
+                    changed = True
+            # ------------------------------------------------------------------
+
+            if changed:
                 updates += 1
     return updates
 
@@ -255,12 +401,43 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
             state[kind].append(item)
             intro_ids[kind].append(item["id"])
 
+    # M2 referential integrity (§8.1, §12). A NEWLY-INTRODUCED `done` item
+    # whose decision_links target is absent from state after introduction
+    # rejects the WHOLE delta, before any write — a dangling edge is worse
+    # than a missing one, because certification would read it as evidence
+    # that a claim is still implemented. Checked after introduction, not
+    # before, so an edge may legitimately point at a decision introduced by
+    # this same delta. Tolerant reader (step 4): a legacy delta with no
+    # decision_links field merges normally, and pre-existing dangling
+    # references already in state are not retroactively rejected — only
+    # what this delta newly asserts.
+    new_done_ids = set(intro_ids.get("done", []))
+    if new_done_ids:
+        known_ids = {item.get("id")
+                     for k in LEDGER_KEYS for item in state.get(k, [])}
+        for item in state.get("done", []):
+            if item.get("id") not in new_done_ids:
+                continue
+            for link in item.get("decision_links") or []:
+                target = link.get("decision_id")
+                if target not in known_ids:
+                    raise ValueError(
+                        f"merger: delta {session_id!r} introduces done item "
+                        f"{item.get('id')!r} with a decision_links reference to "
+                        f"{target!r}, which is not present in state after "
+                        f"introduction — rejecting the whole delta")
+
     # Resolutions — update existing items. Falls back to text-matching
     # against just-introduced items when the agent referenced a synthetic
     # id (e.g., same-session rejection of a newly-introduced suggestion).
     resolutions = delta.get("ledger_delta", {}).get("resolutions", {}) or {}
     res_summary = {"closed": [], "archived": [], "rejected": [], "contradictions": [],
-                   "drift": [], "revalued": []}
+                   "drift": [], "revalued": [],
+                   # §8.1, disposition #17 extended per C4 — additive, default [].
+                   # `cascade_invalidated` is what keeps a fingerprint-drifted
+                   # review in the session audit trail instead of vanishing.
+                   "cascade_confirm": [], "cascade_reject": [], "cascaded": [],
+                   "cascade_invalidated": []}
 
     def _resolve_id(item_id: str, text_hint: str, kinds_to_search: tuple) -> str | None:
         """Return a real item id. If item_id already matches a prefix/number
@@ -292,6 +469,18 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
                 for item in state.get(kind, []):
                     if item.get("id") == resolved:
                         item["status"] = "archived"
+                        # §8.2, disposition #3 — call-site override. This
+                        # loop archives inline and never calls
+                        # _archive_item, so without this line a goal/
+                        # suggestion closure is the one archive path in the
+                        # system that never gets an archive_class. The
+                        # parser cannot supply it: a "closed: ..." reason
+                        # carries no cascade/regrade vocabulary term and
+                        # would fall through to "unclassified", which is
+                        # reserved for decisions the parser couldn't read —
+                        # not for another kind's own correct lifecycle
+                        # prefix.
+                        item["archive_class"] = "lifecycle"
                         item["archived_in"] = session_id
                         item["archived_reason"] = f"closed: {closed.get('evidence', '')}"
                         item["last_touched_in"] = session_id
@@ -310,6 +499,15 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
         if resolved:
             for kind in ("suggestions", "goals"):
                 _archive_item(state, kind, resolved, session_id, session_ts, f"rejected: {rejected.get('reason', '')}")
+                # §8.2, disposition #3 — call-site override, same rule as
+                # the `closed` loop above. Written after _archive_item
+                # rather than instead of it (the §7.1 post-hoc-overwrite
+                # shape): a "rejected: ..." reason has no vocabulary term,
+                # so the value _archive_item just computed is
+                # "unclassified" and must be replaced.
+                for item in state.get(kind, []):
+                    if item.get("id") == resolved:
+                        item["archive_class"] = "lifecycle"
             res_summary["rejected"].append(resolved)
 
     for contradiction in resolutions.get("contradictions", []) or []:
@@ -322,6 +520,23 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
     for drift in resolutions.get("drift", []) or []:
         note = drift.get("note", "") if isinstance(drift, dict) else str(drift)
         res_summary["drift"].append(note)
+
+    # --- review resolution, then cascade (§8.1) ---------------------------
+    # Order is load-bearing: resolution writes the edge, cascade.apply's step 1
+    # sees it and archives in this same merge, and only then may revaluations
+    # run — so a re-grade never lands on an item whose cascade outcome has not
+    # been applied yet. M1's backfill goes first because cascade cannot build
+    # its parent pool without archive_class; it is idempotent, so calling it on
+    # every merge is safe.
+    archive_class.backfill(state)
+    review_result = cascade.apply_review_resolutions(
+        state, delta.get("resolutions", {}) or {}, session_id, session_ts)
+    res_summary["cascade_confirm"] = review_result["confirmed"]
+    res_summary["cascade_reject"] = review_result["rejected"]
+    res_summary["cascade_invalidated"] = review_result["invalidated"]
+    cascade_result = cascade.apply(state, session_id, session_ts)
+    res_summary["cascaded"] = [a["child"] for a in cascade_result["archived"]]
+    # ----------------------------------------------------------------------
 
     # Re-valuations — re-grade existing items the renderer flagged as
     # contested (near the budget cut line). Deliberately does NOT touch
@@ -389,6 +604,53 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
 
     state["last_updated"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return state
+
+
+def _atomic_write_json(path: Path, value: dict) -> None:
+    """Write `value` to `path` atomically (§8.4).
+
+    Crash windows, deliberate and unchanged from the design:
+      - Before os.replace: nothing durable; a re-run is idempotent by
+        session_id.
+      - After os.replace, before fan_out_items: the state JSON is new and
+        item files may be stale. This is ACCEPTABLE — inbox_merge's
+        archived-wins rule is monotone and its newer-wins field whitelist
+        excludes `status`, so a stale active item file can never resurrect
+        an archived row, and the next merge's fan-out/index rebuild
+        repairs the drift. The fan-out is deliberately NOT transactional.
+      - After fan-out, before the FTS rebuild: the index is derived; the
+        next merge rebuilds it.
+    """
+    data = json.dumps(value, indent=2)
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-")
+    tmp_path = Path(tmp_name)
+    try:
+        if path.exists():
+            os.chmod(tmp_path, path.stat().st_mode & 0o777)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        try:
+            dirfd = os.open(str(path.parent), os.O_RDONLY)
+            try:
+                os.fsync(dirfd)
+            finally:
+                os.close(dirfd)
+        except OSError as e:
+            # §8.4 AMENDED. These constants live in `errno`, not `os`; read
+            # off `os` every getattr returned None, the tuple resolved to
+            # (None, None, None) and EVERY OSError re-raised — the inverse of
+            # the guard's intent. On a filesystem with no directory-fsync
+            # support that reported an ALREADY-SUCCEEDED os.replace as a
+            # failed merge. The guard stays narrow: a genuine I/O error is
+            # still an error.
+            if e.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+                raise
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def fan_out_items(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
@@ -505,7 +767,7 @@ def main(argv: list[str] | None = None) -> None:
 
     state = apply_delta(state, delta, rerun=rerun)
     state["last_rebuilt_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    project_path.write_text(json.dumps(state, indent=2))
+    _atomic_write_json(project_path, state)
 
     fanned = fan_out_items(state, project, items_root)
     _rebuild_items_index(db_path, items_root)
