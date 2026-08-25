@@ -431,9 +431,23 @@ this note.
 PASSED its merge gate.** Suite on the integrated base: **1 failed, 361 passed,
 1 skipped in ~12s**; the one failure is `test_suggestions_do_decay`, a
 pre-existing frozen-NOW fixture excluded by name. At the code-stage fork it was
-25 failures. Nothing committed, nothing pushed — `origin/main` still `e3ae2a7`,
-15 commits behind, and the whole night's work is uncommitted in the working
-tree. **That is the first thing the next PM should resolve with Scott.**
+25 failures.
+
+**COMMITTED 25 Aug on owner's instruction:** branch
+`claude/tier1-certification-cascade`, tip `6bdcc64`, eight commits sliced by
+seat (test stage → root modules → certification → cascade → merger → score →
+installer → notes). `main` untouched at `6b47bc5`. **NOTHING PUSHED** —
+`origin/main` remains `e3ae2a7`, and push is still the owner's call.
+
+Note for whoever bisects this later: the first commit (`102c9ac`, the frozen
+test suite) is **deliberately RED**. Committing the tests before any
+implementation is what makes the history itself carry the drill's central
+claim — that they were written to a spec, not to an implementation. A bisect
+through it will fail. That is intended.
+
+`AGENTS.md`, `CLAUDE.md` and `HOW-WE-WORK.md` were deliberately NOT committed:
+agent infrastructure, not product, in a repo heading for public release. That
+is a separate owner decision, not a side effect of landing a delivery.
 
 ### 11.1 What ran
 
