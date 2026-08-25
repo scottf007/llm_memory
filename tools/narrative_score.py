@@ -7,7 +7,9 @@ buy token efficiency with falsehood. Two readings, computed from artifacts the
 pipeline already writes.
 
   TRUST defects (a stranger decides WORSE for reading this):
-    FALSE  active items whose parent decision is archived as superseded
+    FALSE  certificate contradiction count when a certificate exists,
+           else FALSE_ID (active items whose parent decision is archived
+           as superseded) -- never silently reports a clean 0
            -> tells a stranger a removed mechanism ships and works
     DIRTY  archived items in the top-10 of a fixed query panel
            -> retrieval hands an agent a superseded record at live rank
@@ -43,10 +45,25 @@ def score(project):
               for i in v if isinstance(i, dict)
               and not i.get("archived_in") and not i.get("closed_in")]
     out["ACTIVE"] = len(active)
-    # FALSE: an active item whose text names a superseded item, or that a
+    # FALSE_ID: an active item whose text names a superseded item, or that a
     # cascade sweep has flagged. Conservative: only counts explicit references.
-    out["FALSE"] = sum(1 for i in active
-                       if any(a in (i.get("text") or "") for a in archived_sup))
+    out["FALSE_ID"] = sum(1 for i in active
+                          if any(a in (i.get("text") or "") for a in archived_sup))
+
+    cert_path = f"{HOME}/projects/{project}.certificate.json"
+    if os.path.exists(cert_path):
+        cert = json.load(open(cert_path))
+        not_checked = cert.get("not_checked") or []
+        out["FALSE_CHECKED"] = cert["counts"].get("contradiction", 0)
+        out["NOT_CHECKED"] = len(not_checked)
+        out["checked_clean"] = (cert["verdict"] in ("NO_KNOWN_FALSEHOOD", "SUSPECT")
+                                 and not not_checked)
+        out["FALSE"] = out["FALSE_CHECKED"]
+    else:
+        out["FALSE_CHECKED"] = None
+        out["NOT_CHECKED"] = None
+        out["checked_clean"] = None
+        out["FALSE"] = out["FALSE_ID"]  # fall back, never silently 0
 
     cpath = f"{HOME}/projects/{project}.contested.json"
     lost = 0
@@ -85,5 +102,6 @@ if __name__ == "__main__":
         r = score(p)
         print(f"=== {r['project']}")
         print(f"  TRUST   FALSE={r['FALSE']}   DIRTY={r['DIRTY_PCT']}% of top-10 results archived")
+        print(f"          checked_clean={r['checked_clean']}  not_checked={r['NOT_CHECKED']}  FALSE_ID={r['FALSE_ID']}")
         print(f"  REACH   LOST={r['LOST']} load_bearing evicted   ACTIVE={r['ACTIVE']}")
         print(f"  COST    TOKENS={r['TOKENS']}   reach/1k={r['REACH_PER_1K']}")
