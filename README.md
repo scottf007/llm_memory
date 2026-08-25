@@ -68,6 +68,12 @@ All four tools are read-only. Memory is written by the narrative pipeline (delta
 | `memory_search` | Fuzzy-search ledger items across *all* projects, for when you don't know which project a fact is in |
 | `narrative_coverage` | Compare on-disk session transcripts against what's already been merged into a project's narrative |
 
+<!-- am-seed-capsule:start -->
+**llm_memory** — persistent, local, cross-session project memory for CLI agents. Reach for it BEFORE starting work on an unfamiliar topic, and whenever you are about to reconstruct context by re-reading code or asking the user something the project already decided. All four MCP tools are read-only and cost milliseconds.
+`resume` — picking up prior work: last session's journal plus a conversation tail. `project_lookup` — you know the project, want its decisions/learnings/done/goals/suggestions. `memory_search` — you do NOT know which project holds the fact; searches every project's ledger. `narrative_coverage` — how far behind a project's narrative is; run before `/narrative`.
+Items are archived, not deleted, so an answer may describe a superseded decision — check status before acting on it.
+<!-- am-seed-capsule:end -->
+
 Each project's ledger holds five kinds of item: **decisions**, **learnings**, **done**, **goals**, **suggestions** — one JSON file per item under `~/.claude/memory/items/{project}/{kind}/`, indexed into SQLite/FTS5 for search. The per-project source of truth is `~/.claude/memory/projects/{project}.json`; a human-readable narrative is rendered from it to `{project}.narrative.md`.
 
 ## Dashboard
