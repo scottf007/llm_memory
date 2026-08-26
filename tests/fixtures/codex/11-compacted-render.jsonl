@@ -1,0 +1,4 @@
+{"timestamp": "2026-01-01T00:00:00.000Z", "type": "session_meta", "payload": {"id": "<id:36>", "cwd": "/home/user/projects/project-12345678", "source": "exec"}}
+{"timestamp": "2026-01-01T00:00:01.000Z", "type": "compacted", "payload": {"message": "<message:12>", "replacement_history": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<text:12>"}]}, {"type": "compaction", "encrypted_content": "<encrypted_content:24>"}]}}
+{"timestamp": "2026-01-01T00:00:02.000Z", "type": "event_msg", "payload": {"type": "user_message", "message": "<message:10>"}}
+{"timestamp": "2026-01-01T00:00:03.000Z", "type": "event_msg", "payload": {"type": "agent_message", "message": "<message:11>"}}
