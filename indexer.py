@@ -111,11 +111,17 @@ def search_items(
     query: str,
     project: str | None = None,
     kind: str | None = None,
-    status: str | None = "active",
+    status: str | None = None,
     limit: int = 20,
     db_path: Path | None = None,
 ) -> list[dict]:
-    """Fuzzy search across item files via the FTS5 index."""
+    """Fuzzy search across item files via the FTS5 index.
+
+    Default (status=None) returns both active and archived hits. Archived
+    rows are ordered after every active row, then by bm25, so they stay
+    reachable but never outrank an active hit. Pass status='active' or
+    'archived' to filter; that contract is unchanged.
+    """
     db_path = db_path or DEFAULT_DB_PATH
     if not db_path.exists():
         return []
@@ -140,7 +146,13 @@ def search_items(
         if status:
             sql += "AND (i.status IS NULL OR i.status = ?) "
             params.append(status)
-        sql += "ORDER BY score ASC LIMIT ?"
+        # Rank-below: status-first sort key, then existing bm25 order.
+        # Applied before LIMIT so a lower-scoring active is not dropped
+        # in favour of a higher-scoring archived row.
+        sql += (
+            "ORDER BY CASE WHEN i.status = 'archived' THEN 1 ELSE 0 END ASC, "
+            "score ASC LIMIT ?"
+        )
         params.append(limit)
 
         try:
