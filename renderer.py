@@ -696,7 +696,7 @@ def _render_source_transcripts(state: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def render_with_report(state: dict) -> tuple[str, dict]:
+def render_with_report(state: dict, now: datetime | None = None) -> tuple[str, dict]:
     """Render the narrative and report which sections hit their budget.
 
     The report is the input to the contested-item re-valuation pass: it names
@@ -704,7 +704,7 @@ def render_with_report(state: dict) -> tuple[str, dict]:
     /narrative run can ask the extractor to re-grade just those rather than
     re-auditing the whole ledger.
     """
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     # --- certification (§9.1) -------------------------------------------
     # Reversible and read-only: `state` is never mutated. Everything below
     # renders from `state_r`, a copy-on-write view carrying the quarantine
@@ -759,8 +759,8 @@ def _integrity_footer(cert) -> str:
     return "\n" + "\n".join(lines) + f"\n> See `{cert.project}.certificate.json`.\n"
 
 
-def render(state: dict) -> str:
-    return render_with_report(state)[0]
+def render(state: dict, now: datetime | None = None) -> str:
+    return render_with_report(state, now=now)[0]
 
 
 def main() -> None:
