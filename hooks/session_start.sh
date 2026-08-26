@@ -264,6 +264,43 @@ print(len(logged - merged))
         NEW_SESSIONS="0"
     fi
 
+    # Age-based liveness (Roadmap #4). File age is not the measure — a dormant
+    # project's old narrative is correct. Compose with narrative_coverage's
+    # filtered-count + _stale_session rather than duplicating them here.
+    # Contained on failure: an empty result means "not aging"; existing
+    # count-based checks still run.
+    LIVENESS=""
+    if [ -n "$PROJECT" ]; then
+        LIVENESS_PY="$MEMORY_DIR/lib/.venv/bin/python3"
+        if [ ! -x "$LIVENESS_PY" ]; then
+            LIVENESS_PY="$SCRIPT_DIR/.venv/bin/python3"
+        fi
+        if [ ! -x "$LIVENESS_PY" ]; then
+            LIVENESS_PY="python3"
+        fi
+        LIVENESS=$("$LIVENESS_PY" -c "
+import json, sys
+sys.path.insert(0, '$SCRIPT_DIR')
+from server import compute_narrative_coverage, narrative_liveness
+print(json.dumps(narrative_liveness(compute_narrative_coverage('$PROJECT')), separators=(',', ':')))
+" 2>/dev/null)
+    fi
+    if [ -n "$LIVENESS" ]; then
+        LIVENESS_AGING=$(printf '%s\n' "$LIVENESS" | jq -r '.aging // false' 2>/dev/null || echo false)
+        LIVENESS_DAYS=$(printf '%s\n' "$LIVENESS" | jq -r '.signal_days // .narrative_age_days // empty' 2>/dev/null || true)
+        LIVENESS_THRESH=$(printf '%s\n' "$LIVENESS" | jq -r '.threshold_days // 7' 2>/dev/null || echo 7)
+        LIVENESS_UNPROC=$(printf '%s\n' "$LIVENESS" | jq -r '.unprocessed_count // 0' 2>/dev/null || echo 0)
+        LIVENESS_STALE=$(printf '%s\n' "$LIVENESS" | jq -r '.stale_count // 0' 2>/dev/null || echo 0)
+        LIVENESS_GREW=$(printf '%s\n' "$LIVENESS" | jq -r '.worst_stale_grew_days // empty' 2>/dev/null || true)
+    else
+        LIVENESS_AGING=false
+        LIVENESS_DAYS=""
+        LIVENESS_THRESH=7
+        LIVENESS_UNPROC=0
+        LIVENESS_STALE=0
+        LIVENESS_GREW=""
+    fi
+
     echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
     # Version banner: shows current SHA every session, loud banner when it changed.
     VERSION_FILE="$MEMORY_DIR/lib/VERSION"
@@ -367,6 +404,12 @@ print(len(list_sessions('$PROJECT')))
         echo ""
         echo "AUTOMATIC TASK: $NEW_SESSIONS new session(s) since last narrative update for project '$PROJECT'."
         echo "You MUST run the /narrative skill NOW. Do not ask the user for permission."
+        if [ "$LIVENESS_AGING" = "true" ]; then
+            echo "AGE: narrative is ${LIVENESS_DAYS}d stale with unprocessed content (threshold ${LIVENESS_THRESH}d; ${LIVENESS_UNPROC} unprocessed, ${LIVENESS_STALE} grown-after-merge). You MUST run /narrative NOW."
+        fi
+    elif [ "$LIVENESS_AGING" = "true" ]; then
+        echo ""
+        echo "AUTOMATIC TASK: project '$PROJECT' narrative is ${LIVENESS_DAYS}d stale with unprocessed content (${LIVENESS_UNPROC} unprocessed, ${LIVENESS_STALE} grown-after-merge, worst +${LIVENESS_GREW}d). File age is not the measure — unprocessed transcripts with real content have been waiting. You MUST run the /narrative skill NOW. Do not ask the user for permission."
     fi
 
     # Cross-project needs-narrative scan: iterate projects derived from
