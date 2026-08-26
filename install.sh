@@ -75,10 +75,21 @@ for cmd in jq sqlite3 python3 curl; do
         MISSING="$MISSING $cmd"
     fi
 done
+# Debian splits ensurepip out of python3, so `command -v python3` is not
+# enough (stock ubuntu:24.04 dies at step [3/8] with "ensurepip is not
+# available"). python3-venv is the generic package (depends on
+# python3.X-venv for the default interpreter) — not python3.12-venv, so
+# this tracks 3.10/3.11/3.12/3.13. It is a package name, not a command:
+# do not add it to the loop above (brew/pacman/dnf stay unchanged).
+if command -v apt-get &> /dev/null; then
+    if ! command -v python3 &> /dev/null || ! python3 -c "import ensurepip" &> /dev/null; then
+        MISSING="$MISSING python3-venv"
+    fi
+fi
 if [ -n "$MISSING" ]; then
     echo "  Missing:$MISSING — attempting to install..."
     if command -v apt-get &> /dev/null; then
-        sudo apt-get install -y $MISSING
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING
     elif command -v brew &> /dev/null; then
         brew install $MISSING
     elif command -v pacman &> /dev/null; then
