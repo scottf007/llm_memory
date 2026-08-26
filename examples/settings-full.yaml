@@ -56,19 +56,13 @@ hooks:
     timeout: 5  # seconds — increase if your machine is slow
 
   # --- PostToolUse ---
-  # Fires after every tool call. Multiple matchers can be specified as a list.
+  # Fires after every tool call.
   PostToolUse:
-    # First matcher: runs on ALL tool uses (empty matcher = match everything).
+    # Empty matcher = match every tool use.
     # Monitors transcript size to warn about compaction risk.
     - matcher: ""
       script: session_monitor.sh
       timeout: 5
-    # Second matcher: runs only after memory_store calls.
-    # Records a timestamp so the monitor knows when memory was last saved.
-    - matcher: "mcp__llm_memory__memory_store"
-      command: "date +%s > /tmp/llm_memory_last_save"
-      async: true  # fire-and-forget, don't block the conversation
-
   # --- PreCompact ---
   # Fires just before Claude compresses its context window.
   # Use this to save anything important before older messages are lost.

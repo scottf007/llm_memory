@@ -24,6 +24,7 @@ import process_transcripts
 
 
 HOOKS_DIR = Path(__file__).parent.parent / "hooks"
+REPO_DIR = Path(__file__).parent.parent
 SERVER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     uuid TEXT PRIMARY KEY,
@@ -116,6 +117,23 @@ def _run_hook(hook_name, home, input_json, timeout=30):
         timeout=timeout,
     )
     return result.stdout, result.stderr, result.returncode
+
+
+def test_session_monitor_has_no_dead_memory_store_timestamp_matcher():
+    matcher = 'matcher: "mcp__llm_memory__memory_store"'
+    for relative in (
+        "settings.yaml",
+        "examples/settings-full.yaml",
+        "examples/settings-minimal.yaml",
+        "docs/configuration.md",
+    ):
+        assert matcher not in (REPO_DIR / relative).read_text()
+
+    installer = (HOOKS_DIR / "install_hooks.sh").read_text()
+    assert "'matcher': 'mcp__llm_memory__memory_store'" not in installer
+    monitor = (HOOKS_DIR / "session_monitor.sh").read_text()
+    assert "llm_memory_last_save" not in monitor
+    assert "/narrative" in monitor
 
 
 def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj"):
