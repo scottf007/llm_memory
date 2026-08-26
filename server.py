@@ -3,10 +3,11 @@ MCP server for persistent Claude Code memory.
 
 Live DB surface is a single FTS5-indexed `items` table (managed by
 indexer.py) that projects per-project ledger items for cross-project
-search. The canonical state for each project is the JSON ledger at
-~/.claude/memory/projects/{project}.json; per-item files under
-~/.claude/memory/items/{project}/{kind}/{id}.json are the indexer's
-input. memory.db is derived; delete it and re-run indexer.py to rebuild.
+search. The canonical state for each project is split between the active JSON
+ledger at ~/.claude/memory/projects/{project}.json and archived ledger items at
+{project}.archived.json; per-item files under
+~/.claude/memory/items/{project}/{kind}/{id}.json are the indexer's input.
+memory.db is derived; delete it and re-run indexer.py to rebuild.
 
 Usage:
     python server.py
@@ -24,6 +25,7 @@ import mcp.types as types
 
 import conversations
 from tools.memory_config import memory_root
+from tools.project_state import load_active, load_full
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -569,26 +571,25 @@ def compute_narrative_coverage(
         min_user_turns_by_client = {c: min_user_turns_override for c in min_user_turns_by_client}
 
     on_disk = _find_project_transcripts(project)
-    state_path = DB_DIR / "projects" / f"{project}.json"
     narrative_path = DB_DIR / "projects" / f"{project}.narrative.md"
 
     # "Processed" is the set of main-session session_ids in {project}.json.sessions[].
     merged_ids: set[str] = set()
     stale: list[dict] = []
-    state_exists = state_path.exists()
-    if state_exists:
-        try:
-            with state_path.open() as f:
-                state = json.load(f)
-            for session in state.get("sessions", []) or []:
-                sid = str(session.get("session_id") or "")
-                if sid and not sid.startswith(("agent-", "audit-")):
-                    merged_ids.add(sid)
-                    info = _stale_session(session)
-                    if info:
-                        stale.append(info)
-        except (OSError, json.JSONDecodeError):
-            pass
+    state_exists = True
+    try:
+        state = load_active(project, DB_DIR / "projects")
+        for session in state.get("sessions", []) or []:
+            sid = str(session.get("session_id") or "")
+            if sid and not sid.startswith(("agent-", "audit-")):
+                merged_ids.add(sid)
+                info = _stale_session(session)
+                if info:
+                    stale.append(info)
+    except FileNotFoundError:
+        state_exists = False
+    except (OSError, json.JSONDecodeError):
+        pass
     stale.sort(key=lambda s: s["grew_days"], reverse=True)
 
     # Map on-disk paths to session_ids.
@@ -824,12 +825,11 @@ def _handle_resume(args: dict[str, Any]) -> list[types.TextContent]:
     if not project:
         return _error("project is required")
 
-    state_path = DB_DIR / "projects" / f"{project}.json"
-    if not state_path.exists():
-        return _error(f"no project state at {state_path}")
-
     try:
-        state = json.loads(state_path.read_text())
+        state = load_active(project, DB_DIR / "projects")
+    except FileNotFoundError:
+        state_path = DB_DIR / "projects" / f"{project}.json"
+        return _error(f"no project state at {state_path}")
     except Exception as exc:
         return _error(f"failed to read state: {exc}")
 
@@ -908,11 +908,11 @@ def _handle_project_lookup(args: dict[str, Any]) -> list[types.TextContent]:
     if status_filter and status_filter not in ("active", "archived"):
         return _error("status must be 'active' or 'archived'")
 
-    state_path = DB_DIR / "projects" / f"{project}.json"
-    if not state_path.exists():
-        return _error(f"no project state at {state_path}")
     try:
-        state = json.loads(state_path.read_text())
+        state = load_full(project, DB_DIR / "projects")
+    except FileNotFoundError:
+        state_path = DB_DIR / "projects" / f"{project}.json"
+        return _error(f"no project state at {state_path}")
     except Exception as exc:
         return _error(f"failed to read state: {exc}")
 
