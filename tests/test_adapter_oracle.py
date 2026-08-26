@@ -87,6 +87,12 @@ def test_project_attribution_is_shared_not_per_adapter():
     assert adapters.project_from_cwd("/home/user/scratch") == ""
 
 
+def test_project_attribution_skips_dotted_infrastructure_directories():
+    cwd = "/home/user/projects/.agent-messaging-worktrees/llm_memory/job/seat"
+    assert adapters.project_from_cwd(cwd) == "llm_memory"
+    assert adapters.project_from_cwd("/home/user/projects/.infrastructure") == ""
+
+
 # --------------------------------------------------------------------------
 # Golden fixtures — the .md contract, rule by rule
 # --------------------------------------------------------------------------

@@ -133,6 +133,12 @@ def project_from_cwd(cwd: str) -> str:
     """
     parts = Path(cwd).parts
     for i, part in enumerate(parts):
-        if part == "projects" and i + 1 < len(parts):
-            return parts[i + 1]
+        if part != "projects":
+            continue
+        for candidate in parts[i + 1:]:
+            # Dotted directories under projects/ are infrastructure (for
+            # example agent-messaging worktree roots), never project names.
+            if not candidate.startswith("."):
+                return candidate
+        return ""
     return ""
