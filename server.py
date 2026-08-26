@@ -617,10 +617,10 @@ def compute_narrative_coverage(
         if sid.startswith("agent-"):
             skipped_subagent += 1
             continue
-        if _is_codex_auto_participant(p):
+        client = client_by_sid.get(sid, "claude")
+        if client == "codex" and _is_codex_auto_participant(p):
             skipped_codex_auto += 1
             continue
-        client = client_by_sid.get(sid, "claude")
         threshold = (min_user_turns_override if min_user_turns_override is not None
                      else _MIN_USER_TURNS_BY_CLIENT.get(client, _DEFAULT_MIN_USER_TURNS))
         if threshold > 0:
