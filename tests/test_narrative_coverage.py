@@ -22,6 +22,7 @@ the same sandbox to keep them in sync.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone, timedelta
 
 import pytest
 
@@ -185,3 +186,189 @@ def test_explicit_min_user_turns_overrides_the_per_client_map(sandbox):
     assert result["unprocessed"] == []
     assert result["skipped_low_turn_count"] == 1
     assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 5}
+
+
+# --------------------------------------------------------------------------
+# Roadmap #4: _stale_session + narrative_liveness
+# --------------------------------------------------------------------------
+
+def test_stale_session_reports_grown_transcript(sandbox):
+    """Direct pin for _stale_session (UAI: UNTESTED_BUT_LIVE, only caller
+    is _handle_narrative_coverage). A merged session whose transcript grew
+    more than STALE_TAIL_HOURS after `ended` must be reported."""
+    ended = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    last = ended + timedelta(days=13)
+    _write_session(sandbox, "grown", "demo", "codex",
+                    [("user", DESIGN_COUNCIL_PROMPT),
+                     ("assistant", SUBSTANTIVE_REPLY)])
+    # Overwrite timestamps: extractor recorded `ended`, tail is 13d later.
+    transcript = sandbox / "transcripts" / "grown.jsonl"
+    lines = []
+    for rec in transcript.read_text().splitlines():
+        obj = json.loads(rec)
+        obj["timestamp"] = (
+            ended.strftime("%Y-%m-%dT%H:%M:%SZ")
+            if obj["type"] == "user"
+            else last.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+        lines.append(json.dumps(obj))
+    transcript.write_text("\n".join(lines) + "\n")
+
+    info = server._stale_session({
+        "session_id": "grown",
+        "ended": ended.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "topic": "long run",
+    })
+    assert info is not None
+    assert info["session_id"] == "grown"
+    assert info["grew_days"] >= 12
+
+
+def test_stale_session_ignores_closing_message_tail(sandbox):
+    """Control: growth inside STALE_TAIL_HOURS is not a stale session."""
+    ended = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    last = ended + timedelta(hours=3)
+    _write_session(sandbox, "tail", "demo", "codex",
+                    [("user", DESIGN_COUNCIL_PROMPT),
+                     ("assistant", SUBSTANTIVE_REPLY)])
+    transcript = sandbox / "transcripts" / "tail.jsonl"
+    lines = []
+    for rec in transcript.read_text().splitlines():
+        obj = json.loads(rec)
+        obj["timestamp"] = last.strftime("%Y-%m-%dT%H:%M:%SZ")
+        lines.append(json.dumps(obj))
+    transcript.write_text("\n".join(lines) + "\n")
+    assert server._stale_session({
+        "session_id": "tail",
+        "ended": ended.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }) is None
+
+
+def test_liveness_dormant_old_file_no_unprocessed():
+    """PM-STATE §3: file age is not the measure."""
+    now = datetime(2026, 8, 26, 5, 15, 36, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-10T05:15:36",
+        "unprocessed_count": 0,
+        "stale_count": 0,
+        "stale": [],
+    }, now=now)
+    assert sig["aging"] is False
+    assert sig["reason"] == "dormant"
+    assert sig["narrative_age_days"] == 16
+
+
+def test_liveness_unprocessed_aging():
+    now = datetime(2026, 8, 26, 5, 15, 36, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-10T05:15:36",
+        "unprocessed_count": 6,
+        "unprocessed_last_activity": ["2026-08-10T05:15:36"],
+        "stale_count": 0,
+        "stale": [],
+    }, now=now)
+    assert sig["aging"] is True
+    assert sig["reason"] == "unprocessed_aging"
+    assert sig["signal_days"] == 16
+    assert sig["threshold_days"] == server.NARRATIVE_LIVENESS_DAYS
+
+
+def test_liveness_fresh_backlog_not_aging():
+    now = datetime(2026, 8, 26, 12, 0, 0, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-25T12:00:00",
+        "unprocessed_count": 3,
+        "unprocessed_last_activity": ["2026-08-25T12:00:00"],
+        "stale_count": 0,
+        "stale": [],
+    }, now=now)
+    assert sig["aging"] is False
+    assert sig["reason"] == "fresh_backlog"
+    assert sig["narrative_age_days"] == 1
+
+
+def test_liveness_stale_merged_aging():
+    now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-25T12:00:00",  # recently rendered
+        "unprocessed_count": 0,
+        "stale_count": 1,
+        "stale": [{
+            "session_id": "long-run",
+            "grew_days": 13.0,
+            "last_activity": "2026-08-13T00:00:00Z",
+        }],
+    }, now=now)
+    assert sig["aging"] is True
+    assert sig["reason"] == "stale_merged_aging"
+    assert sig["signal_days"] == 13
+
+
+def test_liveness_fresh_tail_after_old_merge():
+    """Reviewer adversarial #1: merge 20d ago, tail written now, grew_days=20.
+    The missing content is fresh — wait is 0, must not fire."""
+    now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-25T00:00:00",  # 1d-old narrative
+        "unprocessed_count": 0,
+        "stale_count": 1,
+        "stale": [{
+            "session_id": "fresh-tail",
+            "grew_days": 20.0,
+            "merged_through": "2026-08-06T00:00:00Z",
+            "last_activity": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }],
+    }, now=now)
+    assert sig["aging"] is False
+    assert sig["reason"] == "fresh_backlog"
+    assert sig["signal_days"] is None
+
+
+def test_liveness_old_wait_after_short_growth():
+    """Reviewer adversarial #2: grew_days=1.5 (under the 7d proxy) but
+    last_activity 16d ago. Content has been waiting 16 days — must fire."""
+    now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    last = now - timedelta(days=16)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-25T00:00:00",
+        "unprocessed_count": 0,
+        "stale_count": 1,
+        "stale": [{
+            "session_id": "quiet-tail",
+            "grew_days": 1.5,
+            "merged_through": (last - timedelta(days=1.5)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "last_activity": last.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }],
+    }, now=now)
+    assert sig["aging"] is True
+    assert sig["reason"] == "stale_merged_aging"
+    assert sig["signal_days"] == 16
+
+
+def test_liveness_filtered_noise_does_not_age():
+    """Low-turn / pong sessions are unprocessed_count=0 after coverage's
+    filter — they must not trip the age alarm even if the file is old."""
+    now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    sig = server.narrative_liveness({
+        "narrative_updated": "2026-08-10T05:15:36",
+        "unprocessed_count": 0,
+        "stale_count": 0,
+        "stale": [],
+        "skipped_low_turn_count": 64,
+        "skipped_low_content_count": 1,
+    }, now=now)
+    assert sig["aging"] is False
+    assert sig["reason"] == "dormant"
+
+
+def test_compute_coverage_includes_stale_and_unprocessed(sandbox):
+    """Hook helper must see the same filtered unprocessed set as the MCP tool."""
+    _write_session(sandbox, "fresh", "demo", "codex",
+                    [("user", DESIGN_COUNCIL_PROMPT),
+                     ("assistant", SUBSTANTIVE_REPLY)])
+    via_helper = server.compute_narrative_coverage("demo")
+    via_mcp = _coverage()
+    assert via_helper["unprocessed_count"] == via_mcp["unprocessed_count"]
+    assert via_helper["unprocessed"] == via_mcp["unprocessed"]
+    assert via_helper["stale_count"] == via_mcp["stale_count"]
+    assert set(via_helper) == set(via_mcp)

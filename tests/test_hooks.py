@@ -13,6 +13,9 @@ import json
 import os
 import sqlite3
 import subprocess
+import sys
+import time
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import pytest
@@ -91,10 +94,16 @@ def _register_session(home, session_id, project):
     return path
 
 
-def _run_hook(hook_name, home, input_json, timeout=10):
+def _run_hook(hook_name, home, input_json, timeout=30):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
+    # The age-signal snippet imports server.py (needs mcp). Prefer the
+    # interpreter running this test so a bare `python3` on PATH is not the
+    # system one.
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get(
+        "PATH", "/usr/bin:/bin"
+    )
     # Prevent auto-update check and process_transcripts from running
     (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
 
@@ -331,3 +340,217 @@ class TestPreCompactNarrativeInstruction:
             f"pre_compact should NOT defer narrative update to next session. "
             f"It should say to do it NOW before context is lost. Output:\n{stdout}"
         )
+
+
+# ---- Roadmap #4: age-based liveness (unprocessed content aging) ----
+
+SUBSTANTIVE_ASSISTANT = (
+    "Agreed on eventual consistency for this path. One addition: the "
+    "reconciliation pass needs to be idempotent, because a crash mid-pass "
+    "and a retry must not double-apply a write. I'll add a version check."
+)
+
+
+def _age_file(path, days):
+    ts = time.time() - days * 86400
+    os.utime(path, (ts, ts))
+
+
+def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None):
+    """Archive transcript that clears claude's min_user_turns=5 + content gate."""
+    records = []
+    base = datetime.now(timezone.utc) if last_ts is None else last_ts
+    for i in range(n_user_turns):
+        records.append({
+            "type": "user",
+            "timestamp": (base - timedelta(hours=n_user_turns - i)).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            "message": {"role": "user", "content": f"turn {i}: please continue the work"},
+        })
+        records.append({
+            "type": "assistant",
+            "timestamp": (
+                base if i == n_user_turns - 1
+                else base - timedelta(hours=n_user_turns - i)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "message": {"role": "assistant", "content": SUBSTANTIVE_ASSISTANT},
+        })
+    path = home / ".claude" / "memory" / "transcripts" / f"{session_id}.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in records))
+    return path
+
+
+class TestNarrativeLivenessAgeSignal:
+    """Acceptance: an N-day-stale narrative with unprocessed real content
+    must be visible; a dormant project's old narrative must not."""
+
+    def test_13day_unprocessed_mentions_age(self, tmp_path):
+        """13-day incident shape: old narrative + unmerged substantive
+        transcripts. Check #2 already fires on count; the age line must
+        now also name the days."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        narr = _write_narrative(home, "testproj", "# narrative body")
+        _age_file(narr, 13)
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        _register_session(home, "unmerged-1", "testproj")
+        _write_substantive_transcript(
+            home, "unmerged-1",
+            last_ts=datetime.now(timezone.utc) - timedelta(days=13),
+        )
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "AUTOMATIC TASK" in stdout
+        assert "new session(s) since last narrative" in stdout, (
+            f"count-based check #2 must still fire. Output:\n{stdout}"
+        )
+        assert "AGE:" in stdout and "13d stale" in stdout, (
+            f"13-day unprocessed content must name the age. Output:\n{stdout}"
+        )
+        assert "MUST" in stdout
+
+    def test_stale_merged_no_new_sessions_fires_age(self, tmp_path):
+        """The gap none of the three existing checks cover: NEW_SESSIONS=0
+        (session already in {project}.json) but the transcript grew N+ days
+        after merge (_stale_session)."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        narr = _write_narrative(home, "testproj", "# narrative body")
+        _age_file(narr, 13)
+        ended = (datetime.now(timezone.utc) - timedelta(days=20)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path.write_text(json.dumps({
+            "schema_version": "0.1",
+            "project": "testproj",
+            "sessions": [{"session_id": "long-run", "ended": ended}],
+        }))
+        _register_session(home, "long-run", "testproj")
+        # Tail sat 13d — wait is last_activity, not grew_days (merge-to-tail).
+        _write_substantive_transcript(
+            home, "long-run",
+            last_ts=datetime.now(timezone.utc) - timedelta(days=13),
+        )
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "new session(s) since last narrative" not in stdout, (
+            f"count-based check #2 must stay silent (NEW_SESSIONS=0). Output:\n{stdout}"
+        )
+        assert "AUTOMATIC TASK" in stdout, (
+            f"age signal must fire for grown-after-merge content. Output:\n{stdout}"
+        )
+        assert "stale" in stdout.lower()
+        assert "MUST" in stdout
+
+    def test_dormant_old_narrative_no_automatic_task(self, tmp_path):
+        """Non-trigger control: 13-day-old narrative, everything merged, no
+        grown tail. PM-STATE §3: a dormant project's old narrative is correct."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        narr = _write_narrative(home, "testproj", "# dormant narrative")
+        _age_file(narr, 13)
+        ended = (datetime.now(timezone.utc) - timedelta(days=13)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path.write_text(json.dumps({
+            "schema_version": "0.1",
+            "project": "testproj",
+            "sessions": [{"session_id": "only", "ended": ended}],
+        }))
+        _register_session(home, "only", "testproj")
+        # Transcript last ts matches `ended` — no growth after merge.
+        ended_dt = datetime.fromisoformat(ended.replace("Z", "+00:00"))
+        _write_substantive_transcript(home, "only", last_ts=ended_dt)
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "AUTOMATIC TASK" not in stdout, (
+            f"dormant old narrative must not false-alarm. Output:\n{stdout}"
+        )
+        assert "AGE:" not in stdout
+
+    def test_recent_narrative_with_new_sessions_has_no_age_line(self, tmp_path):
+        """Count-based check #2 still fires for a fresh backlog; the age
+        line must not, because the content has not been aging N days."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        _write_narrative(home, "testproj", "# fresh narrative")  # mtime = now
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        _register_session(home, "today-1", "testproj")
+        _write_substantive_transcript(home, "today-1")
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "AUTOMATIC TASK" in stdout
+        assert "new session(s) since last narrative" in stdout
+        assert "AGE:" not in stdout, (
+            f"fresh backlog must not get the age line. Output:\n{stdout}"
+        )
+
+    def test_fresh_tail_after_old_merge_no_age(self, tmp_path):
+        """Adversarial #1 at the hook: merge 20d ago, tail written now.
+        NEW_SESSIONS=0 and wait=0 — must not AUTOMATIC TASK."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        narr = _write_narrative(home, "testproj", "# narrative body")
+        _age_file(narr, 1)
+        ended = (datetime.now(timezone.utc) - timedelta(days=20)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path.write_text(json.dumps({
+            "schema_version": "0.1",
+            "project": "testproj",
+            "sessions": [{"session_id": "fresh-tail", "ended": ended}],
+        }))
+        _register_session(home, "fresh-tail", "testproj")
+        _write_substantive_transcript(
+            home, "fresh-tail", last_ts=datetime.now(timezone.utc)
+        )
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "AUTOMATIC TASK" not in stdout, (
+            f"fresh tail after old merge must not false-alarm. Output:\n{stdout}"
+        )
+        assert "AGE:" not in stdout
+
+    def test_old_wait_after_short_growth_fires_age(self, tmp_path):
+        """Adversarial #2 at the hook: grew 1.5d after merge, then quiet 16d.
+        NEW_SESSIONS=0, grew_days under 7, wait 16d — must AUTOMATIC TASK."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        narr = _write_narrative(home, "testproj", "# narrative body")
+        _age_file(narr, 1)
+        last = datetime.now(timezone.utc) - timedelta(days=16)
+        ended = last - timedelta(hours=36)
+        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path.write_text(json.dumps({
+            "schema_version": "0.1",
+            "project": "testproj",
+            "sessions": [{
+                "session_id": "quiet-tail",
+                "ended": ended.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }],
+        }))
+        _register_session(home, "quiet-tail", "testproj")
+        _write_substantive_transcript(home, "quiet-tail", last_ts=last)
+        conn.close()
+
+        stdout, _, rc = _run_session_start(home, source="startup",
+                                           cwd="/home/user/projects/testproj")
+        assert rc == 0
+        assert "new session(s) since last narrative" not in stdout
+        assert "AUTOMATIC TASK" in stdout, (
+            f"16d-waiting tail must fire even when grew_days is 1.5. Output:\n{stdout}"
+        )
+        assert "16d stale" in stdout or "AGE:" in stdout

@@ -407,6 +407,12 @@ def _count_substantive_user_turns(jsonl_path: str, cap: int) -> int:
 # contains something the narrative is missing.
 STALE_TAIL_HOURS = 24.0
 
+# Roadmap #4: wall-clock liveness for unprocessed content, not file age.
+# A dormant project's old narrative is correct (PM-STATE §3). A week is
+# longer than a long weekend of still-open work and shorter than the
+# measured 13-day silent death. The roadmap does not mandate a specific N.
+NARRATIVE_LIVENESS_DAYS = 7
+
 
 def _transcript_tail_ts(jsonl_path: Path, tail_bytes: int = 200_000) -> datetime | None:
     """Timestamp of the last message in a transcript, or None.
@@ -545,22 +551,16 @@ def _find_project_transcripts(project: str) -> set[str]:
     return found
 
 
-def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
-    project = args.get("project", "").strip()
-    if not project:
-        return _error("project is required")
+def compute_narrative_coverage(
+    project: str,
+    min_user_turns_override: int | None = None,
+) -> dict[str, Any]:
+    """Filtered coverage dict — same payload `_handle_narrative_coverage` returns.
 
-    raw_min_user_turns = args.get("min_user_turns")
-    min_user_turns_override: int | None = None
-    if raw_min_user_turns is not None:
-        try:
-            min_user_turns_override = int(raw_min_user_turns)
-        except (TypeError, ValueError):
-            min_user_turns_override = None
-        else:
-            if min_user_turns_override < 0:
-                min_user_turns_override = 0
-
+    Extracted so SessionStart can reuse the filtered-count + `_stale_session`
+    logic instead of duplicating it in the hook. JSON keys and values are
+    unchanged; this is a mechanical extract, not a new coverage algorithm.
+    """
     min_user_turns_by_client = {
         "claude": _DEFAULT_MIN_USER_TURNS,
         "codex": _MIN_USER_TURNS_BY_CLIENT["codex"],
@@ -650,7 +650,7 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
     )
 
     if not state_exists:
-        return _text(json.dumps({
+        return {
             "project": project,
             "status": "no_state",
             "on_disk_count": len(on_disk),
@@ -668,9 +668,9 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
                 f"transcript(s) ready to process out of {len(on_disk)} on disk"
                 f"{filter_note} — run /narrative to bootstrap."
             ),
-        }, indent=2))
+        }
 
-    return _text(json.dumps({
+    return {
         "project": project,
         "narrative_path": str(narrative_path) if narrative_path.exists() else None,
         "narrative_updated": narrative_mtime,
@@ -689,7 +689,131 @@ def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
         "summary": _coverage_summary(
             len(unprocessed), len(on_disk), filter_note, stale
         ),
-    }, indent=2))
+    }
+
+
+def _parse_iso_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _content_wait_days(coverage: dict[str, Any], now: datetime) -> float | None:
+    """Longest time unprocessed/stale content has been sitting, in days.
+
+    Clock is last_activity (transcript tail), not narrative file mtime and
+    not `_stale_session.grew_days` (merge-to-tail span). A tail written
+    today after a 20-day-old merge has wait 0; a 1.5-day growth whose tail
+    then sat 16 days has wait 16.
+    """
+    waits: list[float] = []
+    for s in coverage.get("stale") or []:
+        ts = _parse_iso_ts(s.get("last_activity"))
+        if ts is not None:
+            waits.append((now - ts).total_seconds() / 86400.0)
+    for raw in coverage.get("unprocessed_last_activity") or []:
+        ts = _parse_iso_ts(raw)
+        if ts is not None:
+            waits.append((now - ts).total_seconds() / 86400.0)
+    for path in coverage.get("unprocessed") or []:
+        ts = _transcript_tail_ts(Path(path))
+        if ts is None:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        waits.append((now - ts).total_seconds() / 86400.0)
+    if not waits:
+        return None
+    return max(0.0, max(waits))
+
+
+def narrative_liveness(
+    coverage: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    threshold_days: int = NARRATIVE_LIVENESS_DAYS,
+) -> dict[str, Any]:
+    """Age-based liveness over a `compute_narrative_coverage` result.
+
+    Fires only when filtered unprocessed or `_stale_session` content exists
+    AND that content's own last_activity is at least `threshold_days` ago.
+    Narrative file age and merge-to-tail span are not the measure.
+    """
+    now = now or datetime.now(timezone.utc)
+    unprocessed = int(coverage.get("unprocessed_count") or 0)
+    stale = list(coverage.get("stale") or [])
+    stale_count = int(coverage.get("stale_count") if coverage.get("stale_count") is not None else len(stale))
+    worst_grew = max((float(s.get("grew_days") or 0) for s in stale), default=0.0)
+
+    age_days: int | None = None
+    updated = coverage.get("narrative_updated")
+    ts_updated = _parse_iso_ts(updated)
+    if ts_updated is not None:
+        age_days = max(0, int((now - ts_updated).total_seconds() // 86400))
+
+    wait_days = _content_wait_days(coverage, now)
+    has_content = unprocessed > 0 or stale_count > 0
+    aging = (
+        has_content
+        and wait_days is not None
+        and wait_days >= threshold_days
+    )
+
+    unprocessed_aging = aging and unprocessed > 0
+    stale_aging = aging and stale_count > 0 and not unprocessed_aging
+
+    if stale_aging:
+        reason = "stale_merged_aging"
+    elif unprocessed_aging:
+        reason = "unprocessed_aging"
+    elif not has_content:
+        reason = "dormant" if (age_days or 0) >= threshold_days else "current"
+    else:
+        reason = "fresh_backlog"
+
+    signal_days = int(wait_days) if aging and wait_days is not None else None
+
+    return {
+        "aging": aging,
+        "threshold_days": threshold_days,
+        "narrative_age_days": age_days,
+        "wait_days": None if wait_days is None else round(wait_days, 2),
+        "signal_days": signal_days,
+        "unprocessed_count": unprocessed,
+        "stale_count": stale_count,
+        "worst_stale_grew_days": worst_grew if stale_count else None,
+        "reason": reason,
+    }
+
+
+def _handle_narrative_coverage(args: dict[str, Any]) -> list[types.TextContent]:
+    project = args.get("project", "").strip()
+    if not project:
+        return _error("project is required")
+
+    raw_min_user_turns = args.get("min_user_turns")
+    min_user_turns_override: int | None = None
+    if raw_min_user_turns is not None:
+        try:
+            min_user_turns_override = int(raw_min_user_turns)
+        except (TypeError, ValueError):
+            min_user_turns_override = None
+        else:
+            if min_user_turns_override < 0:
+                min_user_turns_override = 0
+
+    return _text(json.dumps(
+        compute_narrative_coverage(
+            project, min_user_turns_override=min_user_turns_override
+        ),
+        indent=2,
+    ))
 
 
 # -- resume ----------------------------------------------------------------
