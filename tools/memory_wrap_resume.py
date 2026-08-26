@@ -7,10 +7,10 @@ other client has no such hook, so tools/memory_wrap calls this script and
 prepends its stdout to the client's first prompt instead.
 
 Calls server._handle_resume() directly — no MCP round-trip, no server
-process. HOME must be set before this process starts (server.py resolves
-Path.home() / ".claude" / "memory" at import time), which is why
-tools/memory_wrap always execs this as a fresh subprocess rather than
-importing it in-process.
+process. LLM_MEMORY_HOME (or its HOME-based fallback) must be set before this
+process starts because server.py resolves its configured root at import time.
+That is why tools/memory_wrap always execs this as a fresh subprocess rather
+than importing it in-process.
 
 Usage:
     python3 tools/memory_wrap_resume.py <project>

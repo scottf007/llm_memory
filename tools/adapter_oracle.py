@@ -39,9 +39,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import adapters  # noqa: E402
 from adapters import claude as claude_adapter  # noqa: E402
+from tools.memory_config import memory_root  # noqa: E402
 
-CONV_DIR = Path.home() / ".claude" / "memory" / "conversations"
-ARCHIVE_DIR = Path.home() / ".claude" / "memory" / "transcripts"
+CONV_DIR = memory_root() / "conversations"
+ARCHIVE_DIR = memory_root() / "transcripts"
 SAMPLE_FILE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "oracle_sample.txt"
 
 # How long a session must have been quiet before it can be sampled. Matches the

@@ -7,6 +7,8 @@ import json
 import sys
 from pathlib import Path
 
+from tools.memory_config import memory_root
+
 try:
     import yaml
 except ImportError:
@@ -21,6 +23,9 @@ def _expand_home(perm: str, home: str) -> str:
     settings.yaml uses "~" instead of a baked-in absolute path so the file
     stays machine-independent; this is where that placeholder gets resolved.
     """
+    memory_placeholder = "~/.claude/memory"
+    if memory_placeholder in perm:
+        perm = perm.replace(memory_placeholder, str(memory_root()))
     return perm.replace("~", home)
 
 

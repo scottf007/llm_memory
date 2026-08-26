@@ -19,11 +19,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from tools.memory_config import memory_root
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DB_PATH = Path.home() / ".claude" / "memory" / "memory.db"
+DB_PATH = memory_root() / "memory.db"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 app = FastAPI(title="LLM Memory Dashboard", version="2.0.0")

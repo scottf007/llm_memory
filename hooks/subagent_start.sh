@@ -2,10 +2,13 @@
 # SubagentStart hook: injects project context (narrative + important notes) into subagents.
 # Fires when a subagent is spawned.
 
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+export LLM_MEMORY_HOME="$MEMORY_DIR"
+
 INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-DB="$HOME/.claude/memory/memory.db"
+DB="$MEMORY_DIR/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
 fi
@@ -21,7 +24,7 @@ if [ -z "$PROJECT" ]; then
 fi
 
 # Narrative source of truth is the rendered .narrative.md file.
-NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+NARRATIVE_FILE="$MEMORY_DIR/projects/$PROJECT.narrative.md"
 if [ -f "$NARRATIVE_FILE" ]; then
     NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
 else

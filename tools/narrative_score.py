@@ -26,7 +26,12 @@ saves. Among changes that do not, higher reach-per-1k-tokens is better.
 """
 import json, os, sqlite3, sys
 
-HOME = os.path.expanduser("~/.claude/memory")
+try:
+    from tools.memory_config import memory_root
+except ModuleNotFoundError:  # Direct `python tools/narrative_score.py` execution.
+    from memory_config import memory_root
+
+HOME = str(memory_root())
 PANEL = ["renderer budget", "adapter codex client", "narrative decay scoring",
          "installer hooks", "merger archive", "min_user_turns filter",
          "session start hook", "syncthing sync"]

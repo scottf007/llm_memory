@@ -18,8 +18,9 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
+from tools.memory_config import memory_root
 
-MEMORY_DIR = Path.home() / ".claude" / "memory"
+MEMORY_DIR = memory_root()
 FOLDER_ID = "llm-memory"
 FOLDER_LABEL = "LLM Memory"
 
@@ -94,7 +95,8 @@ def get_folder_path() -> str:
                 ).stdout.strip().split("\n")[0].strip("\x00")
             except Exception:
                 distro = "Ubuntu"
-            return f"\\\\wsl.localhost\\{distro}\\home\\{Path.home().name}\\.claude\\memory"
+            wsl_path = str(MEMORY_DIR).lstrip("/").replace("/", "\\")
+            return f"\\\\wsl.localhost\\{distro}\\{wsl_path}"
     else:
         return str(MEMORY_DIR)
 

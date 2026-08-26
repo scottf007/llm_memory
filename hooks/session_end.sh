@@ -10,14 +10,17 @@
 # visible on the final session of a `claude --resume` chain where there's no
 # follow-on session_start.sh sweep to recover the missed .md.
 
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+export LLM_MEMORY_HOME="$MEMORY_DIR"
+
 INPUT=$(cat)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
-CONVERSATIONS_DIR="$HOME/.claude/memory/conversations"
-LOG_DIR="$HOME/.claude/memory/logs"
+TRANSCRIPT_DIR="$MEMORY_DIR/transcripts"
+CONVERSATIONS_DIR="$MEMORY_DIR/conversations"
+LOG_DIR="$MEMORY_DIR/logs"
 mkdir -p "$TRANSCRIPT_DIR" "$CONVERSATIONS_DIR" "$LOG_DIR"
 LOG="$LOG_DIR/session_end.log"
 

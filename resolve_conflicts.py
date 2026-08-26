@@ -20,7 +20,9 @@ import json
 import re
 from pathlib import Path
 
-ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
+from tools.memory_config import memory_root
+
+ITEMS_ROOT = memory_root() / "items"
 CONFLICT_SUFFIX_RE = re.compile(r"^(?P<stem>.+?)\.sync-conflict-[^.]+\.json$")
 
 

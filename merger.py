@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 
 from lib import archive_class
 from lib import cascade
+from tools.memory_config import memory_root
 
 
 LEDGER_KEYS = ("decisions", "goals", "suggestions", "learnings", "done")
@@ -38,12 +39,6 @@ ID_PREFIXES = {
 }
 
 ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
-
-
-def _memory_root() -> Path:
-    """Canonical memory root. Resolved at call time (not import time) so a
-    relocated HOME — tests, alternate installs — is honoured."""
-    return Path.home() / ".claude" / "memory"
 
 
 def _same_path(a: Path, b: Path) -> bool:
@@ -69,12 +64,12 @@ def resolve_paths(project_path: Path,
       the items root, so pointing the override at the canonical items root
       reproduces canonical behaviour exactly.
     """
-    memory_root = _memory_root()
-    canonical_items = memory_root / "items"
+    root = memory_root()
+    canonical_items = root / "items"
 
     if items_root_override is not None:
         items_root = Path(items_root_override).expanduser()
-    elif _same_path(Path(project_path).expanduser().parent, memory_root / "projects"):
+    elif _same_path(Path(project_path).expanduser().parent, root / "projects"):
         items_root = canonical_items
     else:
         items_root = Path(project_path).expanduser().parent / "items"
@@ -744,7 +739,7 @@ def main(argv: list[str] | None = None) -> None:
     items_root, db_path, sandboxed = resolve_paths(project_path, items_root_override)
     if sandboxed:
         print(f"merger.py: sandbox mode — {project_path} is outside "
-              f"{_memory_root() / 'projects'}; items → {items_root}, "
+              f"{memory_root() / 'projects'}; items → {items_root}, "
               f"index → {db_path} (real memory tree untouched)", file=sys.stderr)
 
     state = json.loads(project_path.read_text()) if project_path.exists() else {}

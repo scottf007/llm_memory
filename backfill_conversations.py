@@ -17,10 +17,11 @@ import traceback
 from pathlib import Path
 
 from extract_conversation import extract
+from tools.memory_config import memory_root
 
 
-TRANSCRIPTS_DIR = Path.home() / ".claude" / "memory" / "transcripts"
-CONVERSATIONS_DIR = Path.home() / ".claude" / "memory" / "conversations"
+TRANSCRIPTS_DIR = memory_root() / "transcripts"
+CONVERSATIONS_DIR = memory_root() / "conversations"
 
 
 def main() -> int:

@@ -14,8 +14,10 @@ import json
 import sqlite3
 from pathlib import Path
 
-DEFAULT_ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
-DEFAULT_DB_PATH = Path.home() / ".claude" / "memory" / "memory.db"
+from tools.memory_config import memory_root
+
+DEFAULT_ITEMS_ROOT = memory_root() / "items"
+DEFAULT_DB_PATH = memory_root() / "memory.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (

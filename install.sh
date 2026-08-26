@@ -3,7 +3,8 @@ set -e
 
 REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
 BRANCH="${LLM_MEMORY_BRANCH:-main}"
-MEMORY_DIR="$HOME/.claude/memory"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+export LLM_MEMORY_HOME="$MEMORY_DIR"
 LIB_DIR="$MEMORY_DIR/lib"
 VENV_DIR="$LIB_DIR/.venv"
 QUIET=false
@@ -99,12 +100,12 @@ mkdir -p "$MEMORY_DIR" "$LIB_DIR"
 # Token loader for private-repo support. Priority:
 #   1. $GH_TOKEN env var
 #   2. ~/.ssh/github_token (rides your existing Syncthing ~/.ssh sync)
-#   3. ~/.claude/memory/config/github_token (llm_memory config sync)
+#   3. $LLM_MEMORY_HOME/config/github_token (llm_memory config sync)
 #   4. `gh auth token` (local gh CLI)
 # No token = falls through to unauthenticated curl (public repos only).
 _gh_token() {
     if [ -n "$GH_TOKEN" ]; then echo "$GH_TOKEN"; return 0; fi
-    for path in "$HOME/.ssh/github_token" "$HOME/.claude/memory/config/github_token"; do
+    for path in "$HOME/.ssh/github_token" "$MEMORY_DIR/config/github_token"; do
         if [ -f "$path" ]; then
             tr -d '[:space:]' < "$path"
             return 0
@@ -458,16 +459,16 @@ fi
 if "$VENV_DIR/bin/python3" -c "
 import sys, json
 sys.path.insert(0, '$LIB_DIR')
-from pathlib import Path
+from tools.memory_config import memory_root
 from merger import fan_out_items
 import indexer
-projects_dir = Path.home() / '.claude' / 'memory' / 'projects'
+projects_dir = memory_root() / 'projects'
 for p in sorted(projects_dir.glob('*.json')):
     try:
         state = json.loads(p.read_text())
     except Exception:
         continue
-    fan_out_items(state, p.stem)
+    fan_out_items(state, p.stem, memory_root() / 'items')
 indexer.rebuild_items_index()
 "; then
     log "  Items fanned out and index rebuilt."
