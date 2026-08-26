@@ -66,9 +66,14 @@ fi
 # said so: session_end.sh logs its failure to a file nobody reads, and a session
 # that produces no conversation .md is simply absent downstream.
 #
-# The check is one import of the two modules that matter. It runs at every
-# session start, not only after an update, so it also catches a lib left broken
-# by an interrupted install or a partial sync.
+# The check imports the modules the pipeline needs to run: extraction
+# (extract_conversation + adapters) and merge/render (merger + renderer,
+# which transitively import the lib/ package). It runs at every session
+# start, not only after an update, so it also catches a lib left broken
+# by an interrupted install or a partial sync. The 2026-08-26 incident
+# was the same stale-copy class as 17 Aug, against lib/ rather than
+# adapters/: VERSION was current, merger.py/renderer.py were present,
+# lib/ was not, and this check did not look at them so it stayed silent.
 if [ "$SOURCE" != "compact" ]; then
     LIB_DIR="$MEMORY_DIR/lib"
     # Gate on "a lib is installed here", not on the presence of the very file
@@ -95,6 +100,10 @@ if [ "$SOURCE" != "compact" ]; then
         # adapters` to pull it in: a package whose __init__ stops importing a
         # submodule would otherwise leave that submodule's absence undetected,
         # and base.py carries the protocol every adapter is validated against.
+        # merger and renderer are imported by name for the same reason the
+        # adapters check exists: a stale install.sh can copy the new
+        # merger.py/renderer.py without the lib/ package they import, stamp
+        # VERSION, and leave merge/render broken with nothing shouting.
         SELFCHECK_ERR=$("$SELFCHECK_PY" -c "
 import os, sys
 here = os.getcwd()
@@ -104,8 +113,10 @@ import extract_conversation
 import adapters
 import adapters.base
 import adapters.render
+import merger
+import renderer
 assert adapters.names(), 'no adapters registered'
-for _mod in (extract_conversation, adapters, adapters.base):
+for _mod in (extract_conversation, adapters, adapters.base, merger, renderer):
     assert os.path.realpath(_mod.__file__).startswith(os.path.realpath('$LIB_DIR')), \
         _mod.__name__ + ' imported from outside the lib'
 " 2>&1)
@@ -113,9 +124,9 @@ for _mod in (extract_conversation, adapters, adapters.base):
             # Both channels on purpose. stderr is where a broken hook belongs;
             # stdout is the only one that reaches the model, and a silent
             # extraction failure is exactly what went unnoticed last time.
-            echo "LLM_MEMORY_BROKEN: the installed pipeline at $LIB_DIR cannot extract conversations." >&2
+            echo "LLM_MEMORY_BROKEN: the installed pipeline at $LIB_DIR cannot import required modules." >&2
             echo "$SELFCHECK_ERR" >&2
-            echo "LLM_MEMORY_BROKEN: $LIB_DIR is incomplete — extract_conversation/adapters failed to import, so NO conversation .md files are being written and every session since the last good state is missing from memory. Repair with: bash $LIB_DIR/install.sh --update --force"
+            echo "LLM_MEMORY_BROKEN: $LIB_DIR is incomplete — extract_conversation/adapters/merger/renderer failed to import, so extraction and/or merge/render cannot run. Repair with: bash $LIB_DIR/install.sh --update --force"
             echo "  detail: $(echo "$SELFCHECK_ERR" | tail -1)"
         fi
     fi
