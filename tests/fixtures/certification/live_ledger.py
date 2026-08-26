@@ -13,11 +13,21 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 LIVE_LEDGER_PATH = Path.home() / ".claude" / "memory" / "projects" / "llm_memory.json"
 LIVE_LEDGER_SHA256 = "f3d6e0b80f4cf61b30b566b3b54f8db3dc134a84fb117164027a3b268e66ac00"
 
+LIVE_LEDGER_ABSENT = (
+    "pinned live ledger missing: {path} "
+    "(owner personal memory ledger; never committed as fixtures). "
+    "This test runs in full when the file is present."
+)
+
 
 def load_live_state() -> dict:
+    if not LIVE_LEDGER_PATH.is_file():
+        pytest.skip(LIVE_LEDGER_ABSENT.format(path=LIVE_LEDGER_PATH))
     raw = LIVE_LEDGER_PATH.read_bytes()
     actual = hashlib.sha256(raw).hexdigest()
     assert actual == LIVE_LEDGER_SHA256, (
