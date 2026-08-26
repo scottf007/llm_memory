@@ -69,7 +69,8 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "status": {
                         "type": "string",
-                        "description": "Optional: 'active' (default) or 'archived'",
+                        "description": "Optional: 'active' or 'archived'. "
+                        "Default is both; archived hits are ranked below active.",
                     },
                     "limit": {
                         "type": "integer",
@@ -135,7 +136,8 @@ async def list_tools() -> list[types.Tool]:
             description="Fuzzy-search a project's ledger (decisions, learnings, done, goals, suggestions) "
             "for items matching a query. Use this to drill into the full history without loading the whole "
             "project JSON. Searches text, rationale, evidence, quote, and tags. Returns both active and "
-            "archived items by default so historical context stays reachable.",
+            "archived items by default so historical context stays reachable. Archived hits are ranked "
+            "below active hits regardless of score.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -219,7 +221,11 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
     query = args.get("query", "").strip()
     project = args.get("project")
     kind = args.get("kind")
-    status = args.get("status", "active")
+    # Omit/blank => both statuses, archived ranked below (indexer.search_items).
+    # Explicit 'active' / 'archived' keep their filter meaning.
+    status = args.get("status")
+    if status is not None:
+        status = str(status).strip() or None
     limit = min(args.get("limit", 20), 100)
 
     if not query:
@@ -793,7 +799,9 @@ def _handle_project_lookup(args: dict[str, Any]) -> list[types.TextContent]:
     kinds = (kind_filter,) if kind_filter else _LEDGER_KINDS
 
     # Score each item: sum of token occurrences across searchable fields.
-    # Tie-break by importance (load_bearing > standard > minor) then by last_touched_at desc.
+    # Rank-below: archived never precedes active, regardless of score.
+    # Then the existing ties: importance (load_bearing > standard > minor),
+    # then last_touched_at (same direction as before this change).
     imp_rank = {"load_bearing": 3, "standard": 2, "minor": 1}
 
     scored: list[tuple[float, dict, str]] = []
@@ -815,7 +823,14 @@ def _handle_project_lookup(args: dict[str, Any]) -> list[types.TextContent]:
             score += 0.01 * imp_rank.get(item.get("importance") or "standard", 2)
             scored.append((score, item, kind))
 
-    scored.sort(key=lambda x: (-x[0], -(imp_rank.get(x[1].get("importance") or "standard", 2)), x[1].get("last_touched_at") or ""))
+    scored.sort(
+        key=lambda x: (
+            1 if (x[1].get("status") or "active") == "archived" else 0,
+            -x[0],
+            -(imp_rank.get(x[1].get("importance") or "standard", 2)),
+            x[1].get("last_touched_at") or "",
+        )
+    )
     top = scored[:limit]
 
     results = []
