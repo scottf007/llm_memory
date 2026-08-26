@@ -23,12 +23,13 @@ from mcp.server.stdio import stdio_server
 import mcp.types as types
 
 import conversations
+from tools.memory_config import memory_root
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DB_DIR = Path.home() / ".claude" / "memory"
+DB_DIR = memory_root()
 DB_PATH = DB_DIR / "memory.db"
 
 
@@ -523,7 +524,7 @@ def _find_project_transcripts(project: str) -> set[str]:
                     seen_sessions.add(jsonl.stem)
 
     # Archive dir: derive project from the matching conversation.md frontmatter.
-    archive_dir = Path.home() / ".claude" / "memory" / "transcripts"
+    archive_dir = DB_DIR / "transcripts"
     conv_dir = DB_DIR / "conversations"
     if archive_dir.exists():
         try:

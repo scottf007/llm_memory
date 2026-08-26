@@ -7,8 +7,11 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+export LLM_MEMORY_HOME="$MEMORY_DIR"
+
 # Sync CLAUDE.md from shared config if newer
-SHARED_CLAUDE_MD="$HOME/.claude/memory/config/CLAUDE.md"
+SHARED_CLAUDE_MD="$MEMORY_DIR/config/CLAUDE.md"
 LOCAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 if [ -f "$SHARED_CLAUDE_MD" ]; then
     if [ ! -f "$LOCAL_CLAUDE_MD" ] || [ "$SHARED_CLAUDE_MD" -nt "$LOCAL_CLAUDE_MD" ]; then
@@ -18,8 +21,8 @@ fi
 
 # Auto-update: check GitHub for newer version and update in background
 # Skip if the user has opted out via sentinel file
-if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-update" ]; then
-    LIB_DIR="$HOME/.claude/memory/lib"
+if [ "$SOURCE" != "compact" ] && [ ! -f "$MEMORY_DIR/config/no-auto-update" ]; then
+    LIB_DIR="$MEMORY_DIR/lib"
     REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
     BRANCH="${LLM_MEMORY_BRANCH:-main}"
     if [ -f "$LIB_DIR/VERSION" ]; then
@@ -35,8 +38,8 @@ if [ "$SOURCE" != "compact" ] && [ ! -f "$HOME/.claude/memory/config/no-auto-upd
             _tok="$GH_TOKEN"
         elif [ -f "$HOME/.ssh/github_token" ]; then
             _tok=$(tr -d '[:space:]' < "$HOME/.ssh/github_token")
-        elif [ -f "$HOME/.claude/memory/config/github_token" ]; then
-            _tok=$(tr -d '[:space:]' < "$HOME/.claude/memory/config/github_token")
+        elif [ -f "$MEMORY_DIR/config/github_token" ]; then
+            _tok=$(tr -d '[:space:]' < "$MEMORY_DIR/config/github_token")
         elif command -v gh >/dev/null 2>&1; then
             _tok=$(gh auth token 2>/dev/null)
         fi
@@ -67,7 +70,7 @@ fi
 # session start, not only after an update, so it also catches a lib left broken
 # by an interrupted install or a partial sync.
 if [ "$SOURCE" != "compact" ]; then
-    LIB_DIR="$HOME/.claude/memory/lib"
+    LIB_DIR="$MEMORY_DIR/lib"
     # Gate on "a lib is installed here", not on the presence of the very file
     # most likely to be missing. Keying the check off extract_conversation.py
     # meant the one failure where that file itself failed to copy went
@@ -122,7 +125,7 @@ fi
 # Only look at JSONL files modified since the last sweep (sentinel mtime).
 # This keeps startup fast on machines with thousands of accumulated transcripts.
 if [ "$SOURCE" != "compact" ]; then
-    TRANSCRIPT_DIR="$HOME/.claude/memory/transcripts"
+    TRANSCRIPT_DIR="$MEMORY_DIR/transcripts"
     SENTINEL="$TRANSCRIPT_DIR/.last_sweep"
     mkdir -p "$TRANSCRIPT_DIR"
     if [ -f "$SENTINEL" ]; then
@@ -140,7 +143,7 @@ if [ "$SOURCE" != "compact" ]; then
     touch "$SENTINEL"
 fi
 
-DB="$HOME/.claude/memory/memory.db"
+DB="$MEMORY_DIR/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
 fi
@@ -162,7 +165,7 @@ if [ "$SOURCE" != "compact" ] && [ -n "$CWD" ]; then
     MEMORY_INDEX="$AUTO_MEM_DIR/MEMORY.md"
     if [ ! -f "$MEMORY_INDEX" ]; then
         mkdir -p "$AUTO_MEM_DIR"
-        NARR="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        NARR="$MEMORY_DIR/projects/$PROJECT.narrative.md"
         {
             echo "# Memory Index"
             echo ""
@@ -190,7 +193,7 @@ fi
 if [ "$SOURCE" = "compact" ]; then
     # After compaction: reload narrative + recent notes
     if [ -n "$PROJECT" ]; then
-        NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        NARRATIVE_FILE="$MEMORY_DIR/projects/$PROJECT.narrative.md"
         if [ -f "$NARRATIVE_FILE" ]; then
             NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
         else
@@ -204,7 +207,8 @@ from conversations import list_sessions
 proj='$PROJECT'
 logged=set(list_sessions(proj))
 try:
-    with open('$HOME/.claude/memory/projects/'+proj+'.json') as f: d=json.load(f)
+    from tools.memory_config import memory_root
+    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
     merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
 except FileNotFoundError:
     merged=set()
@@ -233,7 +237,7 @@ else
     # Fresh startup or resume
     if [ -n "$PROJECT" ]; then
         # Narrative source of truth is the rendered .narrative.md file.
-        NARRATIVE_FILE="$HOME/.claude/memory/projects/$PROJECT.narrative.md"
+        NARRATIVE_FILE="$MEMORY_DIR/projects/$PROJECT.narrative.md"
         if [ -f "$NARRATIVE_FILE" ]; then
             NARRATIVE=$(cat "$NARRATIVE_FILE" 2>/dev/null)
         else
@@ -247,7 +251,8 @@ from conversations import list_sessions
 proj='$PROJECT'
 logged=set(list_sessions(proj))
 try:
-    with open('$HOME/.claude/memory/projects/'+proj+'.json') as f: d=json.load(f)
+    from tools.memory_config import memory_root
+    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
     merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
 except FileNotFoundError:
     merged=set()
@@ -261,8 +266,8 @@ print(len(logged - merged))
 
     echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
     # Version banner: shows current SHA every session, loud banner when it changed.
-    VERSION_FILE="$HOME/.claude/memory/lib/VERSION"
-    LAST_SEEN_FILE="$HOME/.claude/memory/.last_seen_sha"
+    VERSION_FILE="$MEMORY_DIR/lib/VERSION"
+    LAST_SEEN_FILE="$MEMORY_DIR/.last_seen_sha"
     if [ -f "$VERSION_FILE" ]; then
         CURRENT_SHA=$(cat "$VERSION_FILE" 2>/dev/null)
         LAST_SHA=$(cat "$LAST_SEEN_FILE" 2>/dev/null)
@@ -289,10 +294,13 @@ print(len(logged - merged))
     if [ -n "$PROJECT" ] && [ -n "$SESSION_ID" ]; then
         SUGGESTION_SAMPLE=$(python3 -c "
 import json, random
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-path = Path('$HOME/.claude/memory/projects/$PROJECT.json')
+sys.path.insert(0, '$SCRIPT_DIR')
+from tools.memory_config import memory_root
+path = memory_root() / 'projects' / '$PROJECT.json'
 if not path.exists():
     import sys; sys.exit(0)
 
@@ -368,7 +376,7 @@ print(len(list_sessions('$PROJECT')))
 import sys, json, pathlib
 sys.path.insert(0, '$SCRIPT_DIR')
 from conversations import iter_sessions
-home='$HOME'
+from tools.memory_config import memory_root
 by_project = {}
 for fm in iter_sessions():
     proj = fm.get('project')
@@ -376,8 +384,8 @@ for fm in iter_sessions():
         by_project.setdefault(proj, set()).add(fm.get('session_id'))
 needs=[]
 for proj, logged in sorted(by_project.items()):
-    narr=pathlib.Path(home+'/.claude/memory/projects/'+proj+'.narrative.md')
-    state=pathlib.Path(home+'/.claude/memory/projects/'+proj+'.json')
+    narr=memory_root() / 'projects' / (proj+'.narrative.md')
+    state=memory_root() / 'projects' / (proj+'.json')
     if not narr.exists():
         needs.append(proj); continue
     try:

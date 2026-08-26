@@ -60,6 +60,8 @@ import sys
 from pathlib import Path
 from typing import Iterator
 
+from tools.memory_config import memory_root
+
 from .base import SessionMeta, SessionRef, Turn, project_from_cwd
 
 CLIENT = "codex"
@@ -71,7 +73,7 @@ CLIENT = "codex"
 ID_PREFIX = "codex-"
 
 SESSIONS_DIR = Path.home() / ".codex" / "sessions"
-ARCHIVE_DIR = Path.home() / ".claude" / "memory" / "transcripts"
+ARCHIVE_DIR = memory_root() / "transcripts"
 
 # rollout-2026-08-13T18-25-55-019ffa3a-5670-7b12-8895-334229d49024.jsonl
 _ROLLOUT_RE = re.compile(

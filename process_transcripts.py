@@ -21,8 +21,9 @@ import shutil
 from pathlib import Path
 
 import adapters
+from tools.memory_config import memory_root
 
-DB_DIR = Path.home() / ".claude" / "memory"
+DB_DIR = memory_root()
 ARCHIVE_DIR = DB_DIR / "transcripts"
 CONVERSATIONS_DIR = DB_DIR / "conversations"
 

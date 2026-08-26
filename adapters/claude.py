@@ -18,12 +18,14 @@ import re
 from pathlib import Path
 from typing import Iterator
 
+from tools.memory_config import memory_root
+
 from .base import SessionMeta, SessionRef, Turn, project_from_cwd
 
 CLIENT = "claude"
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
-ARCHIVE_DIR = Path.home() / ".claude" / "memory" / "transcripts"
+ARCHIVE_DIR = memory_root() / "transcripts"
 
 # Claude Code injects context into the user turn wrapped in these tags. It is
 # machinery, not conversation, and it would swamp the extracted text.

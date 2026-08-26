@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from lib import cascade, certify                       # noqa: E402
+from tools.memory_config import memory_root            # noqa: E402
 
 MERGER_PY = REPO_ROOT / "merger.py"
 
@@ -186,7 +187,7 @@ def delta_path_for(project_path: Path, state: dict, deltas_dir: Path | None = No
     different parent pools cannot overwrite each other's audit trail."""
     parents = sorted(certify.parent_set_cascade(state), key=lambda p: p["id"])
     digest = cascade.parent_set_fingerprint(parents).split(":", 1)[1][:12]
-    target_dir = deltas_dir or (Path.home() / ".claude" / "memory" / "deltas")
+    target_dir = deltas_dir or (memory_root() / "deltas")
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / f"{project_path.stem}.cascade-review.{digest}.delta.json"
 

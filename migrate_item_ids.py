@@ -8,8 +8,10 @@ import json
 import secrets
 from pathlib import Path
 
+from tools.memory_config import memory_root
+
 LEDGER_KEYS = ("decisions", "goals", "suggestions", "learnings", "done")
-PROJECTS_DIR = Path.home() / ".claude" / "memory" / "projects"
+PROJECTS_DIR = memory_root() / "projects"
 
 
 def migrate_file(path: Path) -> int:

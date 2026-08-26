@@ -40,6 +40,7 @@ def installed_lib(tmp_path):
     for py in REPO.glob("*.py"):
         shutil.copy2(py, lib / py.name)
     shutil.copytree(REPO / "adapters", lib / "adapters")
+    shutil.copytree(REPO / "tools", lib / "tools")
     return tmp_path, lib
 
 
@@ -66,6 +67,16 @@ def test_missing_adapters_package_is_reported(installed_lib, tmp_path):
     assert "LLM_MEMORY_BROKEN" in output
     assert "No module named 'adapters'" in output
     assert "install.sh --update --force" in output, "the message must say how to fix it"
+
+
+def test_missing_memory_config_is_reported(installed_lib, tmp_path):
+    """The shared resolver is load-bearing for every installed adapter."""
+    home, lib = installed_lib
+    (lib / "tools" / "memory_config.py").unlink()
+
+    output = _run_hook(home, tmp_path)
+    assert "LLM_MEMORY_BROKEN" in output
+    assert "tools.memory_config" in output
 
 
 def test_partially_installed_adapters_package_is_reported(installed_lib, tmp_path):

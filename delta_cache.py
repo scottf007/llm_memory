@@ -35,8 +35,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from tools.memory_config import memory_root
+
 AGENT_PATH = Path.home() / ".claude" / "agents" / "delta-extractor.md"
-DELTAS_DIR = Path.home() / ".claude" / "memory" / "deltas"
+DELTAS_DIR = memory_root() / "deltas"
 DEFAULT_HALF_LIFE_DAYS = 14.0
 LEGACY_HASH = "legacy-pre-stamping"
 

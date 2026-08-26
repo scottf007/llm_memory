@@ -29,7 +29,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 CLIENTS_JSON="${MEMORY_WRAP_CLIENTS:-$SCRIPT_DIR/memory_wrap_clients.json}"
 RESUME_HELPER="$SCRIPT_DIR/memory_wrap_resume.py"
-INSTALLED_PYTHON="$HOME/.claude/memory/lib/.venv/bin/python3"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+export LLM_MEMORY_HOME="$MEMORY_DIR"
+INSTALLED_PYTHON="$MEMORY_DIR/lib/.venv/bin/python3"
 if [ -n "${MEMORY_WRAP_PYTHON:-}" ]; then
     PYTHON="$MEMORY_WRAP_PYTHON"
 elif [ -x "$INSTALLED_PYTHON" ]; then

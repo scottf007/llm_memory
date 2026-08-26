@@ -10,7 +10,9 @@ import pathlib
 import re
 from typing import Iterator
 
-CONV_DIR = pathlib.Path.home() / ".claude" / "memory" / "conversations"
+from tools.memory_config import memory_root
+
+CONV_DIR = memory_root() / "conversations"
 
 _FRONTMATTER_FIELD = re.compile(r"^(?P<key>[a-z_]+):\s*(?P<value>.+?)\s*$", re.MULTILINE)
 
