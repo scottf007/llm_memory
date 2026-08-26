@@ -258,10 +258,16 @@ def test_the_depth_walk_would_catch_nested_prose():
 # synthetic control below still runs everywhere. A public clone therefore
 # proves the mechanism works; the maintainer's machine additionally proves it
 # catches the specific strings an owner ruled out.
+#
+# `_REAL_NAMES_FILE` is a module-level path so tests can isolate the skip
+# path (monkeypatch to a missing tmp path) even when the untracked file is
+# present on this machine. conftest.py exposes the same file as a fixture.
 
 # Real-shaped but fictional. These must be caught by the same code path, so a
 # public clone still has a working trigger control rather than a disabled test.
 SYNTHETIC_REAL_NAMES = ("acme-messaging", "globex-platform", "initech")
+
+_REAL_NAMES_FILE = Path(__file__).parent / ".real-names"
 
 
 def _real_names():
@@ -269,7 +275,7 @@ def _real_names():
     env = os.environ.get("LLM_MEMORY_REAL_NAMES", "").strip()
     if env:
         return tuple(n.strip() for n in env.split(",") if n.strip())
-    local = Path(__file__).parent / ".real-names"
+    local = _REAL_NAMES_FILE
     if local.exists():
         names = tuple(n.strip() for n in local.read_text().splitlines() if n.strip())
         if names:
