@@ -5,7 +5,8 @@ project state JSON, assigning stable IDs and updating ledger statuses.
 Usage:
     python merger.py [--items-root PATH] <project_json_path> <delta_json_path>
 
-Mutates the project JSON in place. Idempotent per delta file (won't
+Mutates the project state in place, splitting archived ledger items into the
+adjacent ``{project}.archived.json`` sidecar. Idempotent per delta file (won't
 re-append if the session_id is already present).
 
 The per-item files and the FTS index are derived from where the state JSON
@@ -15,21 +16,23 @@ treated as a sandbox and fans out into a sibling items/ directory with its own
 memory.db, so dry-running a copy can never mutate the real memory tree.
 """
 
-import errno
 import json
-import os
 import secrets
 import sys
-import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
 from lib import archive_class
 from lib import cascade
 from tools.memory_config import memory_root
+from tools.project_state import (
+    LEDGER_KEYS,
+    _atomic_write_json,
+    load_full,
+    write_full,
+)
 
 
-LEDGER_KEYS = ("decisions", "goals", "suggestions", "learnings", "done")
 ID_PREFIXES = {
     "decisions": "dec",
     "goals": "goal",
@@ -601,53 +604,6 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
     return state
 
 
-def _atomic_write_json(path: Path, value: dict) -> None:
-    """Write `value` to `path` atomically (§8.4).
-
-    Crash windows, deliberate and unchanged from the design:
-      - Before os.replace: nothing durable; a re-run is idempotent by
-        session_id.
-      - After os.replace, before fan_out_items: the state JSON is new and
-        item files may be stale. This is ACCEPTABLE — inbox_merge's
-        archived-wins rule is monotone and its newer-wins field whitelist
-        excludes `status`, so a stale active item file can never resurrect
-        an archived row, and the next merge's fan-out/index rebuild
-        repairs the drift. The fan-out is deliberately NOT transactional.
-      - After fan-out, before the FTS rebuild: the index is derived; the
-        next merge rebuilds it.
-    """
-    data = json.dumps(value, indent=2)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-")
-    tmp_path = Path(tmp_name)
-    try:
-        if path.exists():
-            os.chmod(tmp_path, path.stat().st_mode & 0o777)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-        try:
-            dirfd = os.open(str(path.parent), os.O_RDONLY)
-            try:
-                os.fsync(dirfd)
-            finally:
-                os.close(dirfd)
-        except OSError as e:
-            # §8.4 AMENDED. These constants live in `errno`, not `os`; read
-            # off `os` every getattr returned None, the tuple resolved to
-            # (None, None, None) and EVERY OSError re-raised — the inverse of
-            # the guard's intent. On a filesystem with no directory-fsync
-            # support that reported an ALREADY-SUCCEEDED os.replace as a
-            # failed merge. The guard stays narrow: a genuine I/O error is
-            # still an error.
-            if e.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
-                raise
-    finally:
-        if tmp_path.exists():
-            tmp_path.unlink()
-
-
 def fan_out_items(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
     """Write every ledger item to ~/.claude/memory/items/{project}/{kind}/{id}.json.
 
@@ -742,10 +698,10 @@ def main(argv: list[str] | None = None) -> None:
               f"{memory_root() / 'projects'}; items → {items_root}, "
               f"index → {db_path} (real memory tree untouched)", file=sys.stderr)
 
-    state = json.loads(project_path.read_text()) if project_path.exists() else {}
+    project = project_path.stem
+    state = load_full(project, project_path.parent) if project_path.exists() else {}
     delta = json.loads(delta_path.read_text())
 
-    project = project_path.stem
     if state.get("project") and state["project"] != project:
         print(f"merger.py: warning — state['project'] is {state['project']!r} but "
               f"the filename says {project!r}; using {project!r}", file=sys.stderr)
@@ -762,7 +718,9 @@ def main(argv: list[str] | None = None) -> None:
 
     state = apply_delta(state, delta, rerun=rerun)
     state["last_rebuilt_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    _atomic_write_json(project_path, state)
+    write_full(
+        project, state, project_path.parent, atomic_write=_atomic_write_json
+    )
 
     fanned = fan_out_items(state, project, items_root)
     _rebuild_items_index(db_path, items_root)

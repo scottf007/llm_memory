@@ -468,15 +468,18 @@ fi
 # can be synced and indexed, then rebuild the FTS5 index that memory_search
 # queries.
 if "$VENV_DIR/bin/python3" -c "
-import sys, json
+import sys
 sys.path.insert(0, '$LIB_DIR')
 from tools.memory_config import memory_root
+from tools.project_state import load_full
 from merger import fan_out_items
 import indexer
 projects_dir = memory_root() / 'projects'
 for p in sorted(projects_dir.glob('*.json')):
+    if p.name.endswith('.archived.json'):
+        continue
     try:
-        state = json.loads(p.read_text())
+        state = load_full(p.stem, projects_dir)
     except Exception:
         continue
     fan_out_items(state, p.stem, memory_root() / 'items')

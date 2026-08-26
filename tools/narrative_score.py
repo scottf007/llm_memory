@@ -25,11 +25,14 @@ Rule: any change that raises FALSE or DIRTY is NEGATIVE regardless of what it
 saves. Among changes that do not, higher reach-per-1k-tokens is better.
 """
 import json, os, sqlite3, sys
+from pathlib import Path
 
 try:
     from tools.memory_config import memory_root
+    from tools.project_state import load_full
 except ModuleNotFoundError:  # Direct `python tools/narrative_score.py` execution.
     from memory_config import memory_root
+    from project_state import load_full
 
 HOME = str(memory_root())
 PANEL = ["renderer budget", "adapter codex client", "narrative decay scoring",
@@ -38,7 +41,7 @@ PANEL = ["renderer budget", "adapter codex client", "narrative decay scoring",
 
 
 def score(project):
-    state = json.load(open(f"{HOME}/projects/{project}.json"))
+    state = load_full(project, Path(HOME) / "projects")
     out = {"project": project}
 
     archived_sup = {i["id"] for k, v in state.items() if isinstance(v, list)

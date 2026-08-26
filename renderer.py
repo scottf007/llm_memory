@@ -365,8 +365,8 @@ def _render_approach(decisions: list, state: dict | None = None, now: datetime |
         out.append("")
         out.append(
             f"_{dissolved} older decision(s) and minor conventions "
-            f"dissolved — see `{project}.json` `decisions[]` or use "
-            f"`project_lookup` for drill-down._"
+            f"dissolved — use `project_lookup(project='{project}')` for "
+            f"drill-down._"
         )
 
     return "\n".join(out) + "\n"
@@ -405,8 +405,8 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
         project = state.get("project", "project")
         if archived:
             out.append(
-                f"_{archived} work item(s) archived — see `{project}.json` "
-                f"`done[]` or use `project_lookup` for drill-down._"
+                f"_{archived} work item(s) archived — use "
+                f"`project_lookup(project='{project}')` for drill-down._"
             )
         elif quarantined:
             out.append(
@@ -452,8 +452,8 @@ def _render_done(done: list, state: dict | None = None, now: datetime | None = N
     if dissolved:
         project = state.get("project", "project")
         out.append(
-            f"_{dissolved} earlier work item(s) dissolved — see "
-            f"`{project}.json` `done[]` or use `project_lookup` for drill-down._"
+            f"_{dissolved} earlier work item(s) dissolved — use "
+            f"`project_lookup(project='{project}')` for drill-down._"
         )
 
     return "\n".join(out) + "\n"
@@ -493,8 +493,8 @@ def _render_learnings(learnings: list, state: dict | None = None, now: datetime 
         project = state.get("project", "project")
         out.append("")
         out.append(
-            f"_{dissolved} older learning(s) dissolved — see "
-            f"`{project}.json` `learnings[]` or use `project_lookup` "
+            f"_{dissolved} older learning(s) dissolved — use "
+            f"`project_lookup(project='{project}')` "
             f"for drill-down._"
         )
 
@@ -563,7 +563,7 @@ def _render_goals(goals: list, state: dict | None = None, now: datetime | None =
         out.append("")
         out.append(
             f"_{over_budget} further open goal(s) over section budget — see "
-            f"`{project}.json` `goals[]` or use `project_lookup`. Goals aren't "
+            f"`project_lookup(project='{project}')`. Goals aren't "
             f"meant to dissolve; this many open suggests closure is lagging._"
         )
 
@@ -605,8 +605,8 @@ def _render_suggestions(suggestions: list, state: dict | None = None, now: datet
         project = state.get("project", "project")
         out.append("")
         out.append(
-            f"_{dissolved} unacted suggestion(s) dissolved — see "
-            f"`{project}.json` `suggestions[]` or use `project_lookup`._"
+            f"_{dissolved} unacted suggestion(s) dissolved — use "
+            f"`project_lookup(project='{project}')`._"
         )
 
     out.extend(_stale_callout(kept, "suggestion", now))
