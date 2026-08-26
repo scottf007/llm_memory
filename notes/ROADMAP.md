@@ -147,10 +147,18 @@ ordinary sessions' 1–5. **The drain evidence supports the seam, not against it
 The seam survives all three critiques; the *justification* and the `done[]`
 exclusion do not.
 
-**7. Coverage numbers cause false alarms.** Raw gaps said 5,344 unmerged; real
-figures are 3 and 14. **Three false panics in one day.** `narrative_coverage`
-must lead with the filtered number; no tool should report a raw gap without its
-exclusion breakdown. (F-10 rides along.)
+**7. Coverage numbers cause false alarms. — ALREADY DONE, verified 27 Aug.**
+Raw gaps said 5,344 unmerged; real figures are 3 and 14. **Three false panics
+in one day.** `narrative_coverage` must lead with the filtered number; no tool
+should report a raw gap without its exclusion breakdown. (F-10 rides along.)
+Checked `server.py`: `filter_note`/exclusion-breakdown landed 17 Aug
+(`774e859`), `compute_narrative_coverage`'s summary already leads with the
+filtered count, and `hooks/session_start.sh` reports `LIVENESS_UNPROC`
+(filtered), never the raw `on_disk_count`. Live tool call against this project
+confirms it: `"7 unprocessed transcript(s) out of 144 on disk (excluded 95: 0
+sub-agent, 95 <5-turn)."` — filtered number first, raw number and full
+breakdown alongside it. This roadmap entry predates that fix; no further work
+needed.
 
 ---
 
