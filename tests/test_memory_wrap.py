@@ -163,6 +163,8 @@ class TestProjectResolution:
         final_prompt = args[-1]
         assert "memory_wrap:" in final_prompt
         assert "no-such-project" in final_prompt
+        assert "memory_wrap:" in result.stderr
+        assert "no-such-project" in result.stderr
         # still runs the client, and still carries the original prompt
         assert "what should I do next?" in final_prompt
 
