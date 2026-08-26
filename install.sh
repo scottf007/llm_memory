@@ -297,7 +297,7 @@ fi
 
 # --- Step 3: Python environment ---
 log "[3/8] Setting up Python environment..."
-if [ ! -d "$VENV_DIR" ] || [ ! -f "$VENV_DIR/bin/python3" ]; then
+if ! "$VENV_DIR/bin/python3" -m pip --version >/dev/null 2>&1; then
     rm -rf "$VENV_DIR"
     python3 -m venv "$VENV_DIR"
 fi
