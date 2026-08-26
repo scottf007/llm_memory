@@ -5,6 +5,7 @@ import json
 import pytest
 
 import merger
+import renderer
 import server
 from tools import resolve_cascade_reviews
 from tools.project_state import LEDGER_KEYS, _atomic_write_json, load_active, load_full, write_full
@@ -109,6 +110,14 @@ def test_project_lookup_reads_archive_sidecar(tmp_path, monkeypatch):
     payload = json.loads(response[0].text)
 
     assert [row["id"] for row in payload["results"]] == ["dec-archived"]
+
+
+def test_renderer_drill_down_does_not_name_one_split_file():
+    state = _state()
+    state["done"] = [{"id": "work-old", "status": "archived", "text": "old"}]
+    rendered = renderer.render(state)
+    assert "project_lookup(project='demo')" in rendered
+    assert "demo.json` `done[]`" not in rendered
 
 
 def test_merger_reads_full_state_and_splits_on_write(tmp_path):
