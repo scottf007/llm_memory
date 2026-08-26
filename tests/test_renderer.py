@@ -177,7 +177,9 @@ def test_trim_to_budget_keeps_rank_prefix():
     everything below it stops, even a short item that would have fit."""
     budget_chars = renderer.SECTION_TOKEN_BUDGETS["suggestions"] * renderer.CHARS_PER_TOKEN
     items = [_item("A" * 100), _item("B" * budget_chars), _item("C")]
-    (kept,), dropped = renderer._trim_to_budget([items], lambda i: i["text"], "suggestions")
+    (kept,), dropped = renderer._trim_to_budget(
+        [items], lambda i: i["text"], "suggestions", NOW
+    )
     assert [i["text"] for i in kept] == ["A" * 100]
     assert dropped == 2
 
@@ -185,7 +187,9 @@ def test_trim_to_budget_keeps_rank_prefix():
 def test_trim_to_budget_always_keeps_one_item():
     """An over-long top item must not blank the section."""
     items = [_item("Z" * 100_000)]
-    (kept,), dropped = renderer._trim_to_budget([items], lambda i: i["text"], "done")
+    (kept,), dropped = renderer._trim_to_budget(
+        [items], lambda i: i["text"], "done", NOW
+    )
     assert len(kept) == 1
     assert dropped == 0
 
@@ -194,7 +198,7 @@ def test_trim_to_budget_preserves_group_arity():
     primary = [_item(f"lb{i}", "load_bearing") for i in range(3)]
     secondary = [_item(f"std{i}") for i in range(3)]
     groups, _ = renderer._trim_to_budget(
-        [primary, secondary], lambda i: i["text"], "approach"
+        [primary, secondary], lambda i: i["text"], "approach", NOW
     )
     assert len(groups) == 2
 
@@ -202,7 +206,9 @@ def test_trim_to_budget_preserves_group_arity():
 def test_unbudgeted_section_is_untouched():
     """Operations has no entry in SECTION_TOKEN_BUDGETS and is spec-exempt."""
     items = [_item(f"op{i}") for i in range(500)]
-    (kept,), dropped = renderer._trim_to_budget([items], lambda i: i["text"], "operations")
+    (kept,), dropped = renderer._trim_to_budget(
+        [items], lambda i: i["text"], "operations", NOW
+    )
     assert len(kept) == 500
     assert dropped == 0
 
@@ -223,7 +229,7 @@ def test_narrative_is_bounded_by_project_size():
         suggestions=[_item(f"suggestion {i} " + "s" * 300, days_ago=0)
                      for i in range(400)],
     )
-    md = renderer.render(big)
+    md = renderer.render(big, now=NOW)
     ceiling = (sum(renderer.SECTION_TOKEN_BUDGETS.values())
                * renderer.HARD_BUDGET_MULTIPLIER)
     # Budgeted sections dominate; the fixed sections add a small constant.
@@ -238,7 +244,7 @@ def test_narrative_growth_saturates():
                        for i in range(n)],
             done=[_item(f"w{i} " + "x" * 300, "load_bearing", days_ago=i % 60)
                   for i in range(n)],
-        ))
+        ), now=NOW)
 
     # 10x the ledger. Output may grow — the soft budget has an overflow
     # allowance — but it must saturate, not scale.
@@ -253,7 +259,7 @@ def test_small_project_is_unaffected_by_budget():
         decisions=[_item(f"decision {i}", "load_bearing") for i in range(5)],
         done=[_item(f"work {i}") for i in range(5)],
     )
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     for i in range(5):
         assert f"decision {i}" in md
         assert f"work {i}" in md
@@ -271,14 +277,14 @@ def test_small_project_is_unaffected_by_budget():
 def test_over_budget_items_are_reported_not_silently_dropped(kind, section):
     state = _state(**{kind: [_item(f"{kind} {i} " + "y" * 400, "load_bearing")
                              for i in range(200)]})
-    body = renderer.render(state).split(section)[1].split("\n## ")[0]
+    body = renderer.render(state, now=NOW).split(section)[1].split("\n## ")[0]
     assert "dissolved" in body
     assert "project_lookup" in body
 
 
 def test_goals_over_budget_are_reported():
     state = _state(goals=[_item(f"goal {i} " + "y" * 400) for i in range(200)])
-    body = renderer.render(state).split("## What We Want To Do")[1].split("\n## ")[0]
+    body = renderer.render(state, now=NOW).split("## What We Want To Do")[1].split("\n## ")[0]
     assert "over section budget" in body
     assert "project_lookup" in body
 
@@ -287,7 +293,7 @@ def test_goals_are_not_decayed_away():
     """The format spec exempts goals from decay — only the budget backstop
     may drop them, never age alone."""
     state = _state(goals=[_item("very old goal", days_ago=3650)])
-    body = renderer.render(state).split("## What We Want To Do")[1].split("\n## ")[0]
+    body = renderer.render(state, now=NOW).split("## What We Want To Do")[1].split("\n## ")[0]
     assert "very old goal" in body
 
 
@@ -297,10 +303,30 @@ def test_suggestions_do_decay():
         _item("fresh idea", days_ago=1),
         _item("forgotten idea", days_ago=120),
     ])
-    body = renderer.render(state).split("## Suggested Work")[1].split("\n## ")[0]
+    body = renderer.render(state, now=NOW).split("## Suggested Work")[1].split("\n## ")[0]
     assert "fresh idea" in body
     assert "forgotten idea" not in body
     assert "dissolved" in body
+
+
+def test_explicit_now_is_independent_of_system_clock(monkeypatch):
+    state = _state(suggestions=[
+        _item("fresh idea", days_ago=1),
+        _item("forgotten idea", days_ago=120),
+    ])
+    pinned = renderer.render_with_report(state, now=NOW)
+
+    class ShiftedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            shifted = cls(2036, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+            return shifted if tz is not None else shifted.replace(tzinfo=None)
+
+    monkeypatch.setattr(renderer, "datetime", ShiftedDateTime)
+
+    assert renderer.render_with_report(state, now=NOW) == pinned
+    _, default_report = renderer.render_with_report(state)
+    assert default_report["rendered_at"] == "2036-01-02T03:04:05Z"
 
 
 def test_archived_items_never_render():
@@ -308,7 +334,7 @@ def test_archived_items_never_render():
         _item("live one", "load_bearing"),
         dict(_item("dead one", "load_bearing"), status="archived"),
     ])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     assert "live one" in md
     assert "dead one" not in md
 
@@ -319,7 +345,7 @@ def test_no_report_when_nothing_is_cut():
     """Presence of the report is the signal that re-valuation has work."""
     _, report = renderer.render_with_report(_state(
         decisions=[_item(f"d{i}", "load_bearing") for i in range(3)],
-    ))
+    ), now=NOW)
     assert report["sections"] == {}
 
 
@@ -328,7 +354,7 @@ def test_report_names_items_either_side_of_the_cut():
         _item(f"decision {i} " + "z" * 400, "load_bearing", days_ago=i)
         for i in range(120)
     ])
-    _, report = renderer.render_with_report(state)
+    _, report = renderer.render_with_report(state, now=NOW)
     approach = report["sections"]["approach"]
     assert approach["dropped"] > 0
     outcomes = {c["outcome"] for c in approach["contested"]}
@@ -348,7 +374,7 @@ def test_contested_captures_the_whole_tie_band():
         _item(f"decision {i} " + "z" * 400, "load_bearing", days_ago=400)
         for i in range(60)
     ])
-    _, report = renderer.render_with_report(state)
+    _, report = renderer.render_with_report(state, now=NOW)
     contested = report["sections"]["approach"]["contested"]
     # Every item is tied at the floor, so the band is far wider than a window.
     assert len(contested) > renderer.CONTESTED_WINDOW * 2
@@ -364,7 +390,7 @@ def test_contested_band_shrinks_once_values_separate_items():
              value=i / 60)
         for i in range(60)
     ])
-    _, report = renderer.render_with_report(state)
+    _, report = renderer.render_with_report(state, now=NOW)
     contested = report["sections"]["approach"]["contested"]
     assert len(contested) <= renderer.CONTESTED_WINDOW * 2
 
@@ -376,7 +402,7 @@ def test_report_contested_straddles_the_boundary():
         _item(f"decision {i} " + "z" * 400, "load_bearing", days_ago=i)
         for i in range(120)
     ])
-    _, report = renderer.render_with_report(state)
+    _, report = renderer.render_with_report(state, now=NOW)
     contested = report["sections"]["approach"]["contested"]
     kept = [c["score"] for c in contested if c["outcome"] == "kept"]
     dropped = [c["score"] for c in contested if c["outcome"] == "dropped"]
@@ -384,7 +410,7 @@ def test_report_contested_straddles_the_boundary():
 
 
 def test_all_required_sections_present():
-    md = renderer.render(_state())
+    md = renderer.render(_state(), now=NOW)
     for section in ("## The Idea", "## Approach", "## Operations", "## What's Done",
                     "## What We've Learnt", "## What We Want To Do",
                     "## Suggested Work", "## Resuming", "## Source Transcripts"):
@@ -430,7 +456,7 @@ def test_two_codex_sessions_render_with_distinct_short_ids():
         _session("codex-019ff8c5-af16-72a2-aecf-a6e9b1e41f00", days_ago=2),
         _session("codex-019d41af-1234-5678-9abc-def012345678", days_ago=1),
     ])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     assert "codex-019ff8c5" in md
     assert "codex-019d41af" in md
     assert "codex-01`" not in md, "sessions collided into the old codex-01 display id"
@@ -440,7 +466,7 @@ def test_claude_short_ids_in_source_transcripts_are_unchanged():
     state = _state(sessions=[
         _session("5c243ece-1ba3-4609-a5e3-daa2a349dcee", days_ago=1),
     ])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     assert "`5c243ece`" in md
 
 
@@ -525,7 +551,7 @@ def test_quarantined_done_not_counted_as_archived():
     really_archived = dict(_item("archived work", "standard"), status="archived")
 
     state = _state(decisions=[parent, reversal], done=[quarantine_target, really_archived])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     body = md.split("## What's Done")[1].split("\n## ")[0]
     assert "1 work item(s) archived" in body
 
@@ -537,7 +563,7 @@ def test_done_all_quarantined_withheld_wording():
     quarantine_target = _cert_child("work-quarantine2", "dec-rparent2")
 
     state = _state(decisions=[parent, reversal], done=[quarantine_target])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     body = md.split("## What's Done")[1].split("\n## ")[0]
     assert "withheld pending review" in body
     assert "archived" not in body
@@ -603,7 +629,7 @@ def test_load_bearing_suspect_inline_callout():
                              text="This restates dec-suspectparent1 directly [std-marker].")
     state = _state(decisions=[parent], done=[lb_child, std_child])
 
-    md, report = renderer.render_with_report(state)
+    md, report = renderer.render_with_report(state, now=NOW)
     lb_line = next(line for line in md.splitlines() if "[lb-marker]" in line)
     std_line = next(line for line in md.splitlines() if "[std-marker]" in line)
     assert "⚠ SUSPECT" in lb_line
@@ -616,14 +642,14 @@ def test_load_bearing_suspect_inline_callout():
 
 def test_founding_case_omitted_before_ranking():
     oracle = build_oracle(merger)
-    md = renderer.render(oracle)
+    md = renderer.render(oracle, now=NOW)
     assert "load_bearing items always render in full" not in md
 
     # Non-trigger: the current (live, post-cascade) state -- already
     # archived on both sides, so omission here is a no-op, not evidence the
     # certification-quarantine fix actually engaged.
     current = load_live_state()
-    md_current = renderer.render(current)
+    md_current = renderer.render(current, now=NOW)
     assert "load_bearing items always render in full" not in md_current
 
 
@@ -638,7 +664,7 @@ def test_review_footer_ttl_five_triggers():
         "parent_set_fingerprint": "sha256:y", "resolved_in": None, "resolution_reason": None,
     }
     state = _state(sessions=_sessions(5), cascade_reviews=[review_row])
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     assert "await confirmation" in md
     assert "Integrity:" not in md
 
@@ -646,8 +672,8 @@ def test_review_footer_ttl_five_triggers():
     # string appended, no stray blank line) -- byte-identical to a render
     # with no cascade_reviews at all.
     state4 = _state(sessions=_sessions(4), cascade_reviews=[dict(review_row)])
-    md4 = renderer.render(state4)
-    baseline = renderer.render(_state(sessions=_sessions(4)))
+    md4 = renderer.render(state4, now=NOW)
+    baseline = renderer.render(_state(sessions=_sessions(4)), now=NOW)
     assert md4 == baseline
     assert "await confirmation" not in md4
     assert "Integrity:" not in md4
@@ -662,14 +688,14 @@ def test_footer_renders_backlog_line_independent_of_quarantine_count():
         "parent_set_fingerprint": "sha256:y", "resolved_in": None, "resolution_reason": None,
     }
     aged_state = _state(sessions=_sessions(6), cascade_reviews=[review_row])
-    md = renderer.render(aged_state)
+    md = renderer.render(aged_state, now=NOW)
     assert "Integrity:" not in md
     assert "await confirmation" in md
 
     # Non-trigger: zero quarantine + fresh (age < 5) backlog -> absent.
     fresh_row = dict(review_row, first_seen_render=5)
     fresh_state = _state(sessions=_sessions(6), cascade_reviews=[fresh_row])
-    md_fresh = renderer.render(fresh_state)
+    md_fresh = renderer.render(fresh_state, now=NOW)
     assert "Integrity:" not in md_fresh
     assert "await confirmation" not in md_fresh
 
@@ -690,6 +716,6 @@ def test_footer_renders_both_lines_when_both_conditions_hold():
         decisions=[parent, reversal], done=[child],
         sessions=_sessions(5), cascade_reviews=[review_row],
     )
-    md = renderer.render(state)
+    md = renderer.render(state, now=NOW)
     assert "Integrity:" in md
     assert "await confirmation" in md
