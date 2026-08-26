@@ -16,6 +16,11 @@ import pytest
 # named guard skips and the synthetic trigger control still runs.
 REAL_NAMES_FILE = Path(__file__).resolve().parent / ".real-names"
 
+# Live-corpus certification tests (the 19 CI FileNotFoundError rows) skip
+# when the pinned owner files are absent. The skip lives in the loaders
+# (tests/fixtures/certification/live_ledger.py and replay_oracle.py) so
+# every existing caller is covered without changing frozen assertion bodies.
+
 
 @pytest.fixture
 def real_names_file():

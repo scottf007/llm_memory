@@ -11,6 +11,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 SNAPSHOT_PATH = (Path.home() / ".claude" / "memory" / "snapshots-pm-2026-08-24"
                   / "llm_memory.json.before")
 SNAPSHOT_SHA256 = "57510144a88704003d229ebd6bec3822cca51d49755cf62d2bc06598acfc03b3"
@@ -18,12 +20,20 @@ SNAPSHOT_SHA256 = "57510144a88704003d229ebd6bec3822cca51d49755cf62d2bc06598acfc0
 DELTA_PATH = Path.home() / ".claude" / "memory" / "deltas" / "llm_memory.audit.delta.json"
 DELTA_SHA256 = "4b6c344372d9e7deab155de9c8afc2a11214914b0ff72c80a021b47ff6954d7b"
 
+REPLAY_SOURCE_ABSENT = (
+    "pinned replay-oracle source missing: {path} "
+    "(owner personal snapshot/delta; never committed as fixtures). "
+    "This test runs in full when the file is present."
+)
+
 AUDIT_DELTA_SESSION_ID = "audit-20260824-llm_memory"
 
 PAIR_INVARIANT_SHA256 = "994d597de7ecc34e79c08ca42a49e6032772723cd9fceb2271db93e6293febd2"
 
 
 def _verify(path: Path, expected: str) -> bytes:
+    if not path.is_file():
+        pytest.skip(REPLAY_SOURCE_ABSENT.format(path=path))
     raw = path.read_bytes()
     actual = hashlib.sha256(raw).hexdigest()
     assert actual == expected, (
