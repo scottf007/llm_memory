@@ -9,6 +9,11 @@ and nothing said so: `session_end.sh` writes its failure to a log nobody reads,
 and a session that produces no conversation .md is simply absent from every
 narrative afterwards.
 
+On 2026-08-26 the same class hit `lib/`: VERSION stamped 86a3f06, merger.py
+and renderer.py present, the `lib/` subpackage they import absent. Merge
+failed with `ModuleNotFoundError: No module named 'lib'`. The self-check
+did not import merger/renderer, so it stayed silent.
+
 The check is one import at session start. These tests are the trigger and the
 control — a guard that cannot fail is not a guard, and this one nearly was: the
 first version imported the modules from the *working directory* instead of the
@@ -20,6 +25,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -41,6 +47,7 @@ def installed_lib(tmp_path):
         shutil.copy2(py, lib / py.name)
     shutil.copytree(REPO / "adapters", lib / "adapters")
     shutil.copytree(REPO / "tools", lib / "tools")
+    shutil.copytree(REPO / "lib", lib / "lib")
     return tmp_path, lib
 
 
@@ -163,3 +170,90 @@ def test_absent_lib_is_not_reported_as_broken(tmp_path):
     (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
 
     assert "LLM_MEMORY_BROKEN" not in _run_hook(home, tmp_path)
+
+
+def test_missing_lib_package_is_reported(installed_lib, tmp_path):
+    """The 2026-08-26 incident, reproduced exactly.
+
+    merger.py and renderer.py are present; the lib/ subpackage they import
+    is not. The self-check must shout LLM_MEMORY_BROKEN — this is the test
+    that would have caught the incident before it needed a manual workaround.
+    """
+    home, lib = installed_lib
+    shutil.rmtree(lib / "lib")
+
+    output = _run_hook(home, tmp_path)
+    assert "LLM_MEMORY_BROKEN" in output
+    assert "No module named 'lib'" in output
+    assert "install.sh --update --force" in output, "the message must say how to fix it"
+
+
+def test_missing_lib_package_is_reported_even_from_checkout(installed_lib):
+    """Same incident, started inside a checkout of this repository.
+
+    `python3 -c` puts the working directory on sys.path first, so `from lib
+    import ...` would otherwise succeed from the repo while the installed
+    copy was missing lib/. The check must report on the lib it was pointed
+    at, not on whatever happens to be importable.
+    """
+    home, lib = installed_lib
+    shutil.rmtree(lib / "lib")
+
+    output = _run_hook(home, REPO)
+    assert "LLM_MEMORY_BROKEN" in output
+    assert "No module named 'lib'" in output
+
+
+def _install_sh_copy_block() -> list[str]:
+    """The real copy-source-files lines from install.sh, not a paraphrase."""
+    content = (REPO / "install.sh").read_text().splitlines()
+    start = next(i for i, line in enumerate(content)
+                 if line.strip() == 'rm -f "$LIB_DIR/"*.py')
+    end = next(i for i, line in enumerate(content[start:], start)
+               if 'chmod +x "$LIB_DIR/tools/memory_wrap"' in line)
+    return content[start:end + 1]
+
+
+def test_fresh_install_can_import_merger_and_renderer(tmp_path):
+    """A FRESH install (current install.sh copy instructions) can import
+    merger and renderer from the installed $LIB_DIR, not from cwd.
+
+    install.sh already copies these correctly on a first-time install; this
+    is the regression so that stays proven rather than observed once.
+    """
+    lib_dir = tmp_path / "installed-lib"
+    lib_dir.mkdir()
+    script = "\n".join([
+        "set -e",
+        f'LIB_DIR="{lib_dir}"',
+        f'EXTRACTED="{REPO}"',
+        *_install_sh_copy_block(),
+    ])
+    copied = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, timeout=60,
+    )
+    assert copied.returncode == 0, copied.stdout + copied.stderr
+    assert (lib_dir / "merger.py").is_file()
+    assert (lib_dir / "renderer.py").is_file()
+    assert (lib_dir / "lib" / "archive_class.py").is_file()
+
+    probe = f"""
+import os, sys
+here = os.getcwd()
+sys.path = [p for p in sys.path if p not in ('', here)]
+sys.path.insert(0, {str(lib_dir)!r})
+import merger
+import renderer
+lib_root = os.path.realpath({str(lib_dir)!r})
+assert os.path.realpath(merger.__file__).startswith(lib_root), merger.__file__
+assert os.path.realpath(renderer.__file__).startswith(lib_root), renderer.__file__
+print(merger.__file__)
+print(renderer.__file__)
+"""
+    proc = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=str(tmp_path),
+        capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert str(lib_dir) in proc.stdout
