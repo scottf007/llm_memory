@@ -41,17 +41,9 @@ def _ensure_stignore() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Server setup
-# ---------------------------------------------------------------------------
-
-app = Server("llm-memory")
-
-
-# ---------------------------------------------------------------------------
 # Tool definitions
 # ---------------------------------------------------------------------------
 
-@app.list_tools()
 async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
@@ -180,7 +172,6 @@ def _error(message: str) -> list[types.TextContent]:
     return _text(f"Error: {message}")
 
 
-@app.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextContent]:
     try:
         handlers = {
@@ -195,6 +186,31 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
         return handler(arguments)
     except Exception as exc:
         return _error(str(exc))
+
+
+# MCP 2.x's low-level Server registers protocol handlers at construction time.
+# Keep the tool catalogue and dispatcher above transport-agnostic so their
+# behaviour remains directly testable and shared with installed MCP 1.x clients.
+async def _list_tools_request(_context, _params) -> types.ListToolsResult:
+    return types.ListToolsResult(tools=await list_tools())
+
+
+async def _call_tool_request(_context, params: types.CallToolRequestParams) -> types.CallToolResult:
+    return types.CallToolResult(content=await call_tool(params.name, params.arguments or {}))
+
+
+if hasattr(Server, "list_tools"):
+    # MCP 1.x compatibility matters for existing memory_wrap installations,
+    # which run this module from their own venv during an in-place upgrade.
+    app = Server("llm-memory")
+    app.list_tools()(list_tools)
+    app.call_tool()(call_tool)
+else:
+    app = Server(
+        "llm-memory",
+        on_list_tools=_list_tools_request,
+        on_call_tool=_call_tool_request,
+    )
 
 
 # -- memory_search ---------------------------------------------------------
