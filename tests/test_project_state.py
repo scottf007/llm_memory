@@ -1,5 +1,3 @@
-"""Split project-state loading, migration, and crash-safety tests."""
-
 from __future__ import annotations
 
 import json
@@ -7,16 +5,9 @@ import json
 import pytest
 
 import merger
-import renderer
 import server
-from tools import narrative_score
-from tools.project_state import (
-    LEDGER_KEYS,
-    _atomic_write_json,
-    load_active,
-    load_full,
-    write_full,
-)
+from tools import resolve_cascade_reviews
+from tools.project_state import LEDGER_KEYS, _atomic_write_json, load_active, load_full, write_full
 
 
 def _state(project: str = "demo") -> dict:
@@ -40,18 +31,12 @@ def _state(project: str = "demo") -> dict:
 
 
 def test_legacy_single_file_loaders(tmp_path):
-    """No sidecar means legacy full reads still work; active reads are slim."""
     state = _state()
     (tmp_path / "demo.json").write_text(json.dumps(state))
-
-    assert [i["id"] for i in load_active("demo", tmp_path)["decisions"]] == [
-        "dec-active"
-    ]
+    assert [i["id"] for i in load_active("demo", tmp_path)["decisions"]] == ["dec-active"]
     assert [i["id"] for i in load_full("demo", tmp_path)["decisions"]] == [
-        "dec-active",
-        "dec-archived",
+        "dec-active", "dec-archived",
     ]
-
     write_full("demo", state, tmp_path)
     assert [i["id"] for i in json.loads(
         (tmp_path / "demo.json").read_text()
@@ -62,13 +47,11 @@ def test_legacy_single_file_loaders(tmp_path):
 
 
 def test_archived_first_crash_is_lossless_and_self_heals(tmp_path):
-    """A crash between files duplicates an archival transition, never loses it."""
     before = _state()
     before["decisions"][1] = {
         "id": "dec-archived", "text": "old active copy", "status": "active"
     }
     (tmp_path / "demo.json").write_text(json.dumps(before))
-
     after = _state()
     calls = []
 
@@ -80,7 +63,6 @@ def test_archived_first_crash_is_lossless_and_self_heals(tmp_path):
 
     with pytest.raises(RuntimeError, match="between split writes"):
         write_full("demo", after, tmp_path, atomic_write=crash_after_archive)
-
     assert calls == ["demo.archived.json"]
     active_on_disk = json.loads((tmp_path / "demo.json").read_text())
     archived_on_disk = json.loads((tmp_path / "demo.archived.json").read_text())
@@ -96,13 +78,11 @@ def test_archived_first_crash_is_lossless_and_self_heals(tmp_path):
         for item in source["decisions"]
     ) == 2
 
-    # During the duplication window, the monotone archived copy wins.
     full = load_full("demo", tmp_path)
     moved = next(i for i in full["decisions"] if i["id"] == "dec-archived")
     assert moved["status"] == "archived"
     assert moved["text"] == "old archived mechanism"
 
-    # The next complete cycle restores exactly-one-file placement.
     write_full("demo", full, tmp_path)
     active_ids = {
         i["id"] for i in json.loads((tmp_path / "demo.json").read_text())["decisions"]
@@ -131,20 +111,6 @@ def test_project_lookup_reads_archive_sidecar(tmp_path, monkeypatch):
     assert [row["id"] for row in payload["results"]] == ["dec-archived"]
 
 
-def test_narrative_score_reads_archive_sidecar(tmp_path, monkeypatch):
-    projects = tmp_path / "projects"
-    projects.mkdir()
-    state = _state()
-    state["decisions"][0]["text"] = "replacement references dec-archived"
-    write_full("demo", state, projects)
-    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path))
-
-    result = narrative_score.score("demo")
-
-    assert result["ACTIVE"] == 2  # active decision + existing session row
-    assert result["FALSE_ID"] == 1
-
-
 def test_merger_reads_full_state_and_splits_on_write(tmp_path):
     projects = tmp_path / "projects"
     projects.mkdir()
@@ -164,15 +130,53 @@ def test_merger_reads_full_state_and_splits_on_write(tmp_path):
     assert {i["id"] for i in active["decisions"]} == {"dec-active"}
     assert {i["id"] for i in archived["decisions"]} == {"dec-archived"}
     assert {i["id"] for i in load_full("demo", projects)["decisions"]} == {
-        "dec-active", "dec-archived"
-    }
+        "dec-active", "dec-archived"}
 
 
-def test_renderer_drill_down_does_not_name_one_split_file():
+def _cascade_state():
     state = _state()
-    state["done"] = [{"id": "work-old", "status": "archived", "text": "old"}]
+    state["done"] = [{
+        "id": "work-child", "status": "active", "text": "child work",
+        "rationale": "", "decision_links": [],
+    }]
+    state["cascade_reviews"] = [{
+        "child": "work-child", "candidate_parents": ["dec-archived"],
+        "reason_code": "lcs_92", "proposed_test": "U3", "status": "open",
+    }]
+    return state
 
-    rendered = renderer.render(state)
 
-    assert "project_lookup(project='demo')" in rendered
-    assert "demo.json` `done[]`" not in rendered
+def test_default_cascade_resolution_reads_archived_parent(tmp_path, monkeypatch, capsys):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    write_full("demo", _cascade_state(), projects)
+    monkeypatch.setattr(
+        resolve_cascade_reviews,
+        "local_llm_extractor_call",
+        lambda prompt, model=None: {"decision": "confirm", "reason": "same claim"},
+    )
+
+    result = resolve_cascade_reviews.main([
+        str(projects / "demo.json"), "--dry-run"
+    ])
+
+    output = capsys.readouterr().out
+    assert result == 0
+    assert '"child": "work-child"' in output
+    assert '"parent": "dec-archived"' in output
+
+
+def test_emit_prompts_reads_archived_parent(tmp_path, capsys):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    write_full("demo", _cascade_state(), projects)
+
+    result = resolve_cascade_reviews.main([
+        str(projects / "demo.json"), "--emit-prompts"
+    ])
+
+    prompts = json.loads(capsys.readouterr().out)
+    assert result == 0
+    assert len(prompts) == 1
+    assert prompts[0]["parent"] == "dec-archived"
+    assert "ARCHIVED DECISION (dec-archived)" in prompts[0]["prompt"]

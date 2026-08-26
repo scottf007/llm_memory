@@ -34,7 +34,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from lib import cascade, certify                       # noqa: E402
 from tools.memory_config import memory_root            # noqa: E402
-from tools.project_state import load_active             # noqa: E402
+from tools.project_state import load_full               # noqa: E402
 
 MERGER_PY = REPO_ROOT / "merger.py"
 
@@ -279,7 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--deltas-dir", type=Path, default=None)
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
 
-    state = load_active(args.project_json.stem, args.project_json.parent)
+    state = load_full(args.project_json.stem, args.project_json.parent)
     pending = open_reviews(state)
 
     if args.emit_prompts:
