@@ -4,14 +4,11 @@
 
 permissions:
   # Allow memory MCP tools without prompting each time.
-  # These correspond to the 7 tools exposed by the llm_memory MCP server.
-  - "mcp__llm_memory__memory_store"
+  # These are the 4 tools exposed by the llm_memory MCP server.
   - "mcp__llm_memory__memory_search"
-  - "mcp__llm_memory__memory_recent"
-  - "mcp__llm_memory__memory_get"
-  - "mcp__llm_memory__memory_connect"
-  - "mcp__llm_memory__memory_explore"
-  - "mcp__llm_memory__memory_delete"
+  - "mcp__llm_memory__narrative_coverage"
+  - "mcp__llm_memory__resume"
+  - "mcp__llm_memory__project_lookup"
 
 hooks:
   # Runs when a session starts, resumes, or compacts.

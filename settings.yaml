@@ -21,16 +21,12 @@ permissions:
   # subagent can write deltas to ~/.claude/memory/deltas/ without prompting.
   # Without these, every /narrative run prompts ~4× and parent-Claude tends
   # to invent a /tmp workaround that triggers more prompts.
-  - "Write(/home/scott/.claude/memory/**)"
-  - "Edit(/home/scott/.claude/memory/**)"
-  # MCP memory server tools
-  - "mcp__llm_memory__memory_store"
+  # "~" is expanded to the installing user's home directory by
+  # apply_settings.py — do not hardcode an absolute path here.
+  - "Write(~/.claude/memory/**)"
+  - "Edit(~/.claude/memory/**)"
+  # MCP memory server tools (the 4 tools server.py actually exposes)
   - "mcp__llm_memory__memory_search"
-  - "mcp__llm_memory__memory_recent"
-  - "mcp__llm_memory__memory_get"
-  - "mcp__llm_memory__memory_connect"
-  - "mcp__llm_memory__memory_explore"
-  - "mcp__llm_memory__memory_delete"
   - "mcp__llm_memory__narrative_coverage"
   - "mcp__llm_memory__project_lookup"
   - "mcp__llm_memory__resume"

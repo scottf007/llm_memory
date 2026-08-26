@@ -15,12 +15,29 @@ except ImportError:
     sys.exit(0)
 
 
+def _expand_home(perm: str, home: str) -> str:
+    """Expand a literal '~' placeholder in a permission pattern to `home`.
+
+    settings.yaml uses "~" instead of a baked-in absolute path so the file
+    stays machine-independent; this is where that placeholder gets resolved.
+    """
+    return perm.replace("~", home)
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: apply_settings.py <settings.yaml>")
         sys.exit(1)
 
     yaml_path = Path(sys.argv[1])
+
+    try:
+        home = str(Path.home())
+    except RuntimeError as e:
+        print(f"  apply_settings.py: could not resolve home directory, "
+              f"permissions using '~' were NOT applied: {e}", file=sys.stderr)
+        sys.exit(1)
+
     settings_path = Path.home() / ".claude" / "settings.json"
     hooks_dir = yaml_path.parent / "hooks"
 
@@ -44,7 +61,7 @@ def main():
     if "permissions" in shared:
         existing = set(settings.get("permissions", {}).get("allow", []))
         for perm in shared["permissions"]:
-            existing.add(perm)
+            existing.add(_expand_home(perm, home))
         settings.setdefault("permissions", {})["allow"] = sorted(existing)
 
     # Apply hooks (resolve script paths)

@@ -13,11 +13,21 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo '{}' > "$SETTINGS_FILE"
 fi
 
-python3 -c "
+# The python below is fed through a QUOTED heredoc (<<'PYEOF') and the two
+# paths it needs arrive as argv rather than being interpolated. This is not a
+# style preference. The previous form was `python3 -c "` ... `"` — a
+# double-quoted bash string — so bash evaluated anything inside it that looked
+# like shell syntax before python ever saw it. A `claude --resume` written in
+# backticks inside a python COMMENT (see SessionEnd below) was therefore
+# EXECUTED as a command on every install, on every machine with the claude CLI
+# on PATH. A quoted heredoc cannot do that, and it also stops a home directory
+# containing a quote or a $ from breaking the script.
+python3 - "$SETTINGS_FILE" "$HOOKS_DIR" <<'PYEOF'
 import json
+import sys
 
-settings_path = '$SETTINGS_FILE'
-hooks_dir = '$HOOKS_DIR'
+settings_path = sys.argv[1]
+hooks_dir = sys.argv[2]
 
 with open(settings_path, 'r') as f:
     settings = json.load(f)
@@ -130,7 +140,7 @@ print('  - PreCompact     (save before compaction)')
 print('  - SessionEnd     (auto-save session summary)')
 print('  - SubagentStart  (inject narrative into agents)')
 print('  - SubagentStop   (notify parent of narrative updates)')
-"
+PYEOF
 
 echo ""
 echo "Restart Claude Code to activate hooks."

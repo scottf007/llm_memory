@@ -3,6 +3,16 @@
 2026-08-24, `llm-memory-pm`. Reconciled against all 28 ledger rows, the design
 cohort, the critique cohort, and the cascade cross-check. Every status measured.
 
+**Updated 2026-08-25 02:20 by `llm-memory-pm2`** — overnight run. Changed:
+Tier 1 status (BUILT, gate running), the perf note under THE MEASURE (47s → 0.55s),
+Tier 3 #8 (done) + new #8a, Tier 4 #14/#15/#17. Everything else is untouched and
+still `llm-memory-pm`'s. Nothing pushed; `origin/main` unchanged.
+
+**Three decisions still waiting on Scott** — unchanged, and D-C is the one that
+blocks the next item of work: **D-C** retrieval default (filter / rank below /
+separate) blocks Tier 1 #2 · **D-A** F-17 native-memory displacement · **D-B**
+F-22 Q1 confirm. Plus the standing one: publish, or stay local.
+
 **The bar (Scott):** *"a correct narrative that lets someone who has never seen
 anything make a much better decision"* at *"the most efficient token length"* —
 a ratio, not a ceiling. Working **for anyone, on any client**.
@@ -21,6 +31,17 @@ COST    TOKENS=10,759   reach/1k=23.4
 
 Any change raising FALSE or DIRTY is **negative**, whatever it saves.
 Otherwise higher reach/1k wins.
+
+**Perf, resolved 25 Aug (was going to block the wiring).** Certification cost
+**47.25s** per `/narrative` render on the live ledger — a new parent×child
+cross-product (36 × 187 = 6,732 fuzzy comparisons), each an O(n·m) pure-Python
+DP. Owner called it: bad algorithm, not natural cost. Replaced with a memoized
+suffix automaton, **47.25s → 0.55s (86×)**; the test suite came down 208s → 12s
+with it. Proven exact against the original DP before landing — 4,000 randomized
+adversarial pairs, all edge cases, and all 2,970 live-corpus pairs, 0
+mismatches. Lookup paths were never affected and were measured: `memory_search`
+2.9–26.4 ms, `project_lookup` 4.6 ms, `resume` 2.7 ms, session-start injection
+0.8 ms. **Bar for wiring certification into `/narrative`: under 1 second. Met.**
 
 **Known weakness, do not over-trust:** FALSE only catches active items that
 textually cite a superseded id — archiving *more* can raise it (it went 2→3 when
@@ -46,6 +67,32 @@ to eliminate, and it was invisible to every metric we had.**
 ## TIER 1 — The memory tells strangers things that are false
 
 One defect, three costumes: **archival is a flag where it should be a state.**
+
+**Status (25 Aug 02:15, `llm-memory-pm2`): BUILT. Merge gate running.**
+The full chain ran overnight: design → spec (`SPEC-rev2-certification-cascade.md`)
+→ lock-audit judge PASS → 81 frozen tests with RED proof → code → gate.
+
+Suite on the integrated base: **1 failed, 361 passed, 1 skipped (12.3s)**. The
+one failure is `test_suggestions_do_decay`, a pre-existing frozen-NOW fixture
+excluded by name — not ours. At the code-stage fork it was 25 failures.
+
+Five coder seats, disjoint files, author ≠ coder ≠ judge held throughout:
+`code-root` (archive_class + claim_match) · `cert` (certify + renderer wire) ·
+`merger` (M2/M3 schema, atomic write, inbox_merge, §8.2) · `score`
+(narrative_score) · `cascade` (cascade.py, §8.1 wire, resolver tools).
+**No seat edited a frozen test.** All 8 hashes + both fixtures verified
+unchanged at every landing — which was the point of the drill.
+
+Three items were raised rather than decided unilaterally and are with the gate
+judge: cert's `_ID_TOKEN_RE` widening (the spec's hex-only regex cannot match
+its own frozen fixtures), §8.4's directory-fsync errno guard being a measured
+no-op (constants read off `os`, but they live in `errno`), and cascade's N5
+ruling (adopted the guard: `item_fingerprint` structurally cannot see
+`decision_links`, and cascade is monotone — a wrong archive has no recovery).
+
+Still open, not built: **certification is NOT yet wired into the live
+`/narrative` path.** See the perf note under THE MEASURE. See
+`notes/PM-STATE.md` §10 for the full chain.
 
 **1. Cascade rule.** Cross-check done: 92 active `done` items vs 73 archived
 decisions → **2 orphans found and archived**; 6 flagged ambiguous and correctly
@@ -109,11 +156,24 @@ exclusion breakdown. (F-10 rides along.)
 
 ## TIER 3 — It only works for Scott, on this machine
 
-**8. `settings.yaml` ships one person's home directory.** Hardcodes
-`/home/scott/.claude/memory/**`; `apply_settings.py` does no expansion — so every
-other user gets a rule matching nothing, silently, degrading `/narrative`.
-Personal information in a repo heading for release. Also grants 7 retired MCP
-tools. (T-06)
+**8. `settings.yaml` ships one person's home directory. — DONE 25 Aug.** Now
+`Write(~/.claude/memory/**)`, with `apply_settings.py` expanding `~` and failing
+LOUDLY (exit 1) instead of silently producing broken permissions. MCP list cut
+from 10 entries to the 4 real tools — verified against `server.py`'s
+`list_tools()`, not against any document. `install.sh` no longer swallows that
+call's stderr or ignores its exit code. (T-06)
+
+**8a. STILL OPEN, same class, found 25 Aug:** `examples/claude-rules-{full,
+minimal}.md` document all **7 retired tools**, including *"include the project
+name in every `memory_store` call"* — a new user pastes that into their
+CLAUDE.md and Claude then calls tools that do not exist. Deliberately not fixed:
+the fix is rewriting a memory protocol around four read-only tools, which is
+authorship, not a correction. **Needs its own slice.** Mitigating, and checked
+rather than assumed: `claude-rules-example.md`, the file `install.sh` actually
+deploys, is already correct. Only the unshipped examples rot. Also: the
+`mcp__llm_memory__memory_store` PostToolUse matcher is dead in four files, so
+`/tmp/llm_memory_last_save` is never written and `session_monitor.sh`'s
+staleness check runs against a file that never updates.
 
 **9. `LLM_MEMORY_HOME` — 0 references, 42 hardcoded files.** `~/.llm-memory` is
 a symlink: the cosmetic half. Must land **before** F-08 consolidation. (F-18)
@@ -140,10 +200,31 @@ existing install, all hit a new user first.
 
 ## TIER 4 — Release. Gated on Scott (currently NOT YET).
 
-**14.** 14+ commits unpushed; `origin/main` at `e3ae2a7`.
-**15.** B-1 identifying strings — **DONE** (`b45b077`).
+**14.** 15 commits unpushed; `origin/main` still at `e3ae2a7`. Nothing pushed,
+nothing tagged.
+**15.** B-1 identifying strings — **DONE** (`b45b077`); `docs/FEEDBACK.md`
+scrubbed 25 Aug. `.agent-messages/` was untracked-but-NOT-gitignored — hundreds
+of files of host paths and internal deliberation, one `git add -A` from
+publication. Now ignored. **Remaining and NOT text-scrubbable:** every commit in
+this repo's history is authored `scott <scott@fletchcorp.com>`. Fixing it means a
+history rewrite. Owner's call — for a personal project under your own name it may
+be exactly right.
 **16.** F-26 mcp 2.x port (deferred, trigger stated).
-**17.** Fresh install **never** verified on another machine. (F-20 rides along.)
+**17. Fresh install — VERIFIED FOR THE FIRST TIME, 25 Aug. It did not work.**
+Three defects, each of which killed the installer *silently* under `set -e` with
+stderr discarded: (a) `install.sh` called `from server import init_db` — a
+function that does not exist anywhere in the repo; (b) `_gh_token()` returned
+non-zero when no token was configured, which is the DEFAULT state of a fresh
+machine, killing the install at step 2 after printing only its banner; (c) the
+`lib/` package was never deployed at all, so the deployed tree could not import.
+All three fixed. **(d) The one that matters most: `hooks/install_hooks.sh` opened
+its embedded Python with `python3 -c "` — a double-quoted bash string — and the
+Python source contains ``` `claude --resume` ``` inside a COMMENT. Bash
+command-substituted it. Our installer has been launching Claude Code mid-install
+on every machine with the CLI on PATH.** It never failed the install, which is
+why it survived. Fixed with a quoted heredoc, which retires the class rather than
+the instance. A fresh install now runs to completion and the deployed tree
+imports. (F-20 closed.)
 **18.** F-16 compacted-record render path has no rendered pin.
 
 ## TIER 5 — agent-messaging, reported and worked around

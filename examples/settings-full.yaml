@@ -28,16 +28,22 @@ permissions:
   # --- Web search ---
   - "WebSearch"                # Allow web searches without confirmation
 
+  # --- File ops on the memory dir ---
+  # Needed by /narrative so the delta-extractor subagent can write deltas to
+  # ~/.claude/memory/deltas/ without prompting. Without these, every
+  # /narrative run prompts ~4x.
+  # The "~" is a placeholder: apply_settings.py expands it to the installing
+  # user's home directory. Do not hardcode an absolute path here.
+  - "Write(~/.claude/memory/**)"
+  - "Edit(~/.claude/memory/**)"
+
   # --- MCP memory server tools ---
-  # These are the 7 tools exposed by the llm_memory MCP server.
-  # All are safe to auto-approve — they only read/write local JSON files.
-  - "mcp__llm_memory__memory_store"    # Save a memory record
-  - "mcp__llm_memory__memory_search"   # Full-text search across memories
-  - "mcp__llm_memory__memory_recent"   # Get most recent memories
-  - "mcp__llm_memory__memory_get"      # Get a specific memory by ID
-  - "mcp__llm_memory__memory_connect"  # Create relationship between memories
-  - "mcp__llm_memory__memory_explore"  # Browse memory graph connections
-  - "mcp__llm_memory__memory_delete"   # Delete a memory record
+  # These are the 4 tools exposed by the llm_memory MCP server.
+  # All are safe to auto-approve — they only read local JSON files.
+  - "mcp__llm_memory__memory_search"      # Cross-project fuzzy search over ledger items
+  - "mcp__llm_memory__narrative_coverage" # Merged vs. unprocessed sessions for a project
+  - "mcp__llm_memory__resume"             # Last real session's journal + conversation tail
+  - "mcp__llm_memory__project_lookup"     # Single-project drill-down into that ledger
 
 hooks:
   # --- SessionStart ---
