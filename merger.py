@@ -568,7 +568,10 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
         "ended": delta.get("ended"),
         "topic": delta.get("topic", ""),
         "jsonl": f"~/.claude/memory/transcripts/{session_id}.jsonl",
-        "conversation_md": f"~/.claude/memory/conversations/{session_id}.md",
+        # Keep this relative to memory_root().  The store may be relocated
+        # after this session is merged; resume derives the canonical path from
+        # the session id at read time instead of preserving an obsolete root.
+        "conversation_md": f"conversations/{session_id}.md",
         "status": "active",
         "closure_status": delta.get("closure_status"),
         "journal": delta.get("journal", ""),

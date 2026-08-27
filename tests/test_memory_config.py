@@ -10,6 +10,7 @@ from pathlib import Path
 import apply_settings
 import merger
 import renderer
+import setup_syncthing
 from tools.memory_config import memory_root
 
 
@@ -95,6 +96,31 @@ def test_renderer_drill_down_uses_configured_memory_root(tmp_path, monkeypatch):
 
     assert str(configured / "projects" / "demo.json") in rendered
     assert "~/.claude/memory/projects/demo.json" not in rendered
+
+
+def test_syncthing_second_device_guidance_uses_configured_root(
+    tmp_path, monkeypatch, capsys
+):
+    configured = tmp_path / "relocated"
+    config_path = tmp_path / "config.xml"
+    config_path.touch()
+    monkeypatch.setattr(setup_syncthing, "MEMORY_DIR", configured)
+    monkeypatch.setattr(setup_syncthing, "find_syncthing_config", lambda: config_path)
+    monkeypatch.setattr(
+        setup_syncthing, "parse_config", lambda _path: ("127.0.0.1:8384", "key")
+    )
+    monkeypatch.setattr(setup_syncthing, "folder_exists_in_xml", lambda _path: False)
+    monkeypatch.setattr(setup_syncthing, "get_folder_path", lambda: str(configured))
+    monkeypatch.setattr(setup_syncthing, "get_device_id", lambda *_args: "device-id")
+    monkeypatch.setattr(setup_syncthing, "get_other_devices", lambda *_args: [])
+    monkeypatch.setattr(setup_syncthing, "add_folder", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("sys.argv", ["setup_syncthing.py", "--dry-run"])
+
+    setup_syncthing.main()
+
+    output = capsys.readouterr().out
+    assert f"point it to {configured}/" in output
+    assert "point it to ~/.claude/memory/" not in output
 
 
 def test_permission_expansion_uses_configured_memory_root(tmp_path, monkeypatch):

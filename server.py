@@ -851,7 +851,10 @@ def _handle_resume(args: dict[str, Any]) -> list[types.TextContent]:
     conv_rel = last.get("conversation_md") or ""
     excerpt = "(no conversation transcript recorded)"
     if conv_rel:
-        conv_path = Path(conv_rel.replace("~", str(Path.home())))
+        # conversation_md used to contain ~/.claude/memory/... and is now
+        # stored relative to the configured root.  Derive from session_id so
+        # both forms survive a store relocation after the merge was recorded.
+        conv_path = memory_root() / "conversations" / f"{sid}.md"
         if conv_path.exists():
             try:
                 text = conv_path.read_text(errors="replace")

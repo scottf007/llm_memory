@@ -327,7 +327,7 @@ def main():
                 print("Restart Syncthing to pick up the change.")
 
     print("\nOn your other device, accept the folder share in the Syncthing GUI")
-    print(f"and point it to ~/.claude/memory/ (or run install.sh + this script).")
+    print(f"and point it to {MEMORY_DIR}/ (or run install.sh + this script).")
 
 
 if __name__ == "__main__":

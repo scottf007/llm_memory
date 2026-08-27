@@ -73,3 +73,36 @@ def test_resume_with_empty_conversation_path_reports_no_transcript(tmp_path, mon
     payload = json.loads(server._handle_resume({"project": "demo"})[0].text)
 
     assert payload["conversation_tail"] == "(no conversation transcript recorded)"
+
+
+@pytest.mark.parametrize(
+    "recorded_path",
+    [
+        "~/.claude/memory/conversations/session-1.md",
+        "conversations/session-1.md",
+    ],
+)
+def test_resume_resolves_conversation_at_current_memory_root(
+    tmp_path, monkeypatch, recorded_path
+):
+    configured = tmp_path / "relocated"
+    projects = configured / "projects"
+    conversations = configured / "conversations"
+    projects.mkdir(parents=True)
+    conversations.mkdir()
+    (conversations / "session-1.md").write_text("first line\nrelocated tail\n")
+    (projects / "demo.json").write_text(json.dumps({
+        "project": "demo",
+        "sessions": [{
+            "status": "active",
+            "session_id": "session-1",
+            "started": "2026-01-01T00:00:00Z",
+            "conversation_md": recorded_path,
+        }],
+    }))
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
+    monkeypatch.setattr(server, "DB_DIR", configured)
+
+    payload = json.loads(server._handle_resume({"project": "demo", "lines": 1})[0].text)
+
+    assert payload["conversation_tail"] == "relocated tail"
