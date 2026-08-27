@@ -213,10 +213,10 @@ nothing tagged.
 **15.** B-1 identifying strings — **DONE** (`b45b077`); `docs/FEEDBACK.md`
 scrubbed 25 Aug. `.agent-messages/` was untracked-but-NOT-gitignored — hundreds
 of files of host paths and internal deliberation, one `git add -A` from
-publication. Now ignored. **Remaining and NOT text-scrubbable:** every commit in
-this repo's history is authored `scott <scott@fletchcorp.com>`. Fixing it means a
-history rewrite. Owner's call — for a personal project under your own name it may
-be exactly right.
+publication. Now ignored. **Commit authorship — DECIDED 27 Aug, leave as-is.**
+Every commit in this repo's history is authored `scott <scott@fletchcorp.com>`.
+Owner's call was to leave it: a personal project under the owner's own name, no
+history rewrite warranted.
 **16.** F-26 mcp 2.x port (deferred, trigger stated).
 **17. Fresh install — VERIFIED FOR THE FIRST TIME, 25 Aug. It did not work.**
 Three defects, each of which killed the installer *silently* under `set -e` with
