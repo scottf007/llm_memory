@@ -660,6 +660,40 @@ def test_envelope_cwd_round_trips_to_the_same_project():
     assert adapters.project_from_cwd(rec["cwd"]) == "demo"
 
 
+def test_dotted_project_frontmatter_is_reattributed_without_reextracting(
+        tmp_path, monkeypatch):
+    import process_transcripts
+
+    conversations = tmp_path / "conversations"
+    transcripts = tmp_path / "transcripts"
+    conversations.mkdir()
+    transcripts.mkdir()
+    monkeypatch.setattr(process_transcripts, "CONVERSATIONS_DIR", conversations)
+    monkeypatch.setattr(process_transcripts, "ARCHIVE_DIR", transcripts)
+
+    sid = "codex-worktree"
+    original = (
+        "---\n"
+        f"session_id: {sid}\n"
+        "project: .agent-messaging-worktrees\n"
+        "client: codex\n"
+        "---\n\n"
+        "body remains byte-for-byte\n"
+    )
+    md = conversations / f"{sid}.md"
+    md.write_text(original)
+    (transcripts / f"{sid}.jsonl").write_text(json.dumps({
+        "cwd": "/home/user/projects/.agent-messaging-worktrees/real-project/job/seat",
+    }) + "\n")
+
+    assert process_transcripts.reattribute_dotted_conversations(dry_run=True) == (1, 1)
+    assert md.read_text() == original
+    assert process_transcripts.reattribute_dotted_conversations() == (1, 1)
+    assert "project: real-project\n" in md.read_text()
+    assert md.read_text().endswith("body remains byte-for-byte\n")
+    assert process_transcripts.reattribute_dotted_conversations() == (0, 0)
+
+
 def test_envelope_is_ascii_so_the_server_can_open_it_as_utf8(tmp_path):
     """`server.py` opens transcripts with `encoding="utf-8"` and no error
     handler, so an envelope it cannot decode raises inside the counter."""

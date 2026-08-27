@@ -554,6 +554,9 @@ class TestInlinePythonIsNotShellInterpolated:
             "SessionStart", "PostToolUse", "PreCompact",
             "SessionEnd", "SubagentStart", "SubagentStop",
         }
+        assert len(settings["hooks"]["PostToolUse"]) == 1
+        assert settings["hooks"]["PostToolUse"][0]["matcher"] == ""
+        assert "llm_memory_last_save" not in json.dumps(settings)
 
     def test_a_home_path_with_shell_metacharacters_does_not_break_it(self, tmp_path):
         """The old interpolated form would have expanded these."""

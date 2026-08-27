@@ -55,14 +55,6 @@ hook_configs = {
                 'command': f'{hooks_dir}/session_monitor.sh',
                 'timeout': 5
             }]
-        },
-        {
-            'matcher': 'mcp__llm_memory__memory_store',
-            'hooks': [{
-                'type': 'command',
-                'command': 'date +%s > /tmp/llm_memory_last_save',
-                'async': True
-            }]
         }
     ],
     'PreCompact': [
@@ -135,7 +127,7 @@ with open(settings_path, 'w') as f:
 
 print('All hooks installed:')
 print('  - SessionStart   (auto-load narrative + memories)')
-print('  - PostToolUse    (session monitor + save timestamp)')
+print('  - PostToolUse    (session size monitor)')
 print('  - PreCompact     (save before compaction)')
 print('  - SessionEnd     (auto-save session summary)')
 print('  - SubagentStart  (inject narrative into agents)')

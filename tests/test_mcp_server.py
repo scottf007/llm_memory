@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -53,3 +54,22 @@ def test_handlers_are_registered_with_mcp_2_constructor_api():
     assert not hasattr(server.app, "call_tool")
     assert server.app.get_request_handler("tools/list") is not None
     assert server.app.get_request_handler("tools/call") is not None
+
+
+def test_resume_with_empty_conversation_path_reports_no_transcript(tmp_path, monkeypatch):
+    projects = tmp_path / "projects"
+    projects.mkdir()
+    (projects / "demo.json").write_text(json.dumps({
+        "project": "demo",
+        "sessions": [{
+            "status": "active",
+            "session_id": "session-1",
+            "started": "2026-01-01T00:00:00Z",
+            "conversation_md": "",
+        }],
+    }))
+    monkeypatch.setattr(server, "DB_DIR", tmp_path)
+
+    payload = json.loads(server._handle_resume({"project": "demo"})[0].text)
+
+    assert payload["conversation_tail"] == "(no conversation transcript recorded)"

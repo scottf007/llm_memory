@@ -23,10 +23,6 @@ hooks:
     - matcher: ""
       script: session_monitor.sh
       timeout: 5
-    # Records timestamp of the last memory save for staleness detection.
-    - matcher: "mcp__llm_memory__memory_store"
-      command: "date +%s > /tmp/llm_memory_last_save"
-      async: true
 
   # Runs before context compaction — saves important context before it's lost.
   PreCompact:

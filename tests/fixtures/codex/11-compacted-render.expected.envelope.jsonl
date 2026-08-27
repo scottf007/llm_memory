@@ -1,0 +1,2 @@
+{"type": "user", "timestamp": "2026-01-01T00:00:02.000Z", "sessionId": "codex-11-compacted-render", "client": "codex", "cwd": "/home/user/projects/project-12345678", "message": {"role": "user", "content": "<message:10>"}}
+{"type": "assistant", "timestamp": "2026-01-01T00:00:03.000Z", "sessionId": "codex-11-compacted-render", "client": "codex", "cwd": "/home/user/projects/project-12345678", "message": {"role": "assistant", "content": [{"type": "text", "text": "<message:11>"}]}}

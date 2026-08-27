@@ -117,6 +117,21 @@ def test_codex_auto_session_with_substantive_reply_excluded(sandbox):
     assert result["skipped_low_content_count"] == 0
 
 
+def test_claude_session_quoting_codex_auto_preamble_is_not_excluded(sandbox):
+    turns = [("user", CODEX_AUTO_PREAMBLE), ("assistant", SUBSTANTIVE_REPLY)]
+    for i in range(4):
+        turns.extend([
+            ("user", f"follow-up {i}: {DESIGN_COUNCIL_PROMPT}"),
+            ("assistant", SUBSTANTIVE_REPLY),
+        ])
+    transcript = _write_session(sandbox, "claude-quotes-harness", "demo", "claude", turns)
+
+    result = _coverage()
+
+    assert str(transcript) in result["unprocessed"]
+    assert result["skipped_codex_auto_count"] == 0
+
+
 # --------------------------------------------------------------------------
 # (2) Per-client min_user_turns
 # --------------------------------------------------------------------------

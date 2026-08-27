@@ -56,9 +56,6 @@ hooks:
     - matcher: ""
       script: session_monitor.sh
       timeout: 5
-    - matcher: "mcp__llm_memory__memory_store"
-      command: "date +%s > /tmp/llm_memory_last_save"
-      async: true
   PreCompact:
     matcher: ""
     script: pre_compact.sh

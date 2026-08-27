@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import json
 import shutil
 from pathlib import Path
 
@@ -26,6 +27,59 @@ from tools.memory_config import memory_root
 DB_DIR = memory_root()
 ARCHIVE_DIR = DB_DIR / "transcripts"
 CONVERSATIONS_DIR = DB_DIR / "conversations"
+
+
+def reattribute_dotted_conversations(*, dry_run: bool = False) -> tuple[int, int]:
+    """Repair conversation frontmatter stamped with a dotted project name.
+
+    The archived transcript (including foreign-client envelopes) retains the
+    original cwd, so attribution can be corrected without re-extraction. The
+    return value is ``(found, repaired)``; an unreadable transcript or one
+    without a usable cwd is counted as found but left alone.
+    """
+    found = repaired = 0
+    for md in sorted(CONVERSATIONS_DIR.glob("*.md")):
+        try:
+            text = md.read_text(errors="replace")
+        except OSError:
+            continue
+        frontmatter_end = text.find("\n---\n", 4)
+        if not text.startswith("---\n") or frontmatter_end < 0:
+            continue
+        lines = text[:frontmatter_end].splitlines()
+        project_index = next(
+            (i for i, line in enumerate(lines) if line.startswith("project: ")),
+            None,
+        )
+        if project_index is None or not lines[project_index][len("project: "):].startswith("."):
+            continue
+        found += 1
+
+        cwd = ""
+        transcript = ARCHIVE_DIR / f"{md.stem}.jsonl"
+        try:
+            with transcript.open(errors="replace") as source:
+                for line in source:
+                    try:
+                        record = json.loads(line)
+                    except (json.JSONDecodeError, ValueError):
+                        continue
+                    if isinstance(record, dict) and record.get("cwd"):
+                        cwd = str(record["cwd"])
+                        break
+        except OSError:
+            continue
+
+        project = adapters.project_from_cwd(cwd)
+        if not project:
+            continue
+        repaired += 1
+        if dry_run:
+            continue
+        lines[project_index] = f"project: {project}"
+        rewritten = "\n".join(lines) + text[frontmatter_end:]
+        md.write_text(rewritten)
+    return found, repaired
 
 
 def find_transcripts(client: str = adapters.DEFAULT) -> list[tuple[Path, str]]:
@@ -117,6 +171,10 @@ def main() -> None:
                         help="Only process this client (repeatable). Default: all registered.")
     args = parser.parse_args()
 
+    dotted_found, dotted_repaired = reattribute_dotted_conversations(
+        dry_run=args.dry_run,
+    )
+
     clients = args.client or adapters.names()
     total = archived = extracted = 0
 
@@ -151,6 +209,9 @@ def main() -> None:
                     print(f"  WARN: {ref.session_id}: {e}")
 
     if not args.quiet:
+        action = "would repair" if args.dry_run else "repaired"
+        print(f"Dotted project attributions: found {dotted_found}; "
+              f"{action} {dotted_repaired}.")
         print(f"Scanned {total} transcripts across {len(clients)} client(s) "
               f"({', '.join(clients)}); archived {archived}, produced "
               f"{extracted} conversation.md.")

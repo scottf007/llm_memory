@@ -617,10 +617,10 @@ def compute_narrative_coverage(
         if sid.startswith("agent-"):
             skipped_subagent += 1
             continue
-        if _is_codex_auto_participant(p):
+        client = client_by_sid.get(sid, "claude")
+        if client == "codex" and _is_codex_auto_participant(p):
             skipped_codex_auto += 1
             continue
-        client = client_by_sid.get(sid, "claude")
         threshold = (min_user_turns_override if min_user_turns_override is not None
                      else _MIN_USER_TURNS_BY_CLIENT.get(client, _DEFAULT_MIN_USER_TURNS))
         if threshold > 0:
@@ -849,16 +849,17 @@ def _handle_resume(args: dict[str, Any]) -> list[types.TextContent]:
     closure = last.get("closure_status") or "unknown"
 
     conv_rel = last.get("conversation_md") or ""
-    conv_path = Path(conv_rel.replace("~", str(Path.home())))
-    excerpt = ""
-    if conv_path.exists():
-        try:
-            text = conv_path.read_text(errors="replace")
-            excerpt = "\n".join(text.splitlines()[-lines_wanted:])
-        except Exception as exc:
-            excerpt = f"(failed to read conversation.md: {exc})"
-    else:
-        excerpt = f"(conversation.md not found at {conv_path})"
+    excerpt = "(no conversation transcript recorded)"
+    if conv_rel:
+        conv_path = Path(conv_rel.replace("~", str(Path.home())))
+        if conv_path.exists():
+            try:
+                text = conv_path.read_text(errors="replace")
+                excerpt = "\n".join(text.splitlines()[-lines_wanted:])
+            except Exception as exc:
+                excerpt = f"(failed to read conversation.md: {exc})"
+        else:
+            excerpt = f"(conversation.md not found at {conv_path})"
 
     result = {
         "project": project,
