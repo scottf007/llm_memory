@@ -9,6 +9,7 @@ from pathlib import Path
 
 import apply_settings
 import merger
+import renderer
 from tools.memory_config import memory_root
 
 
@@ -36,6 +37,64 @@ def test_merger_real_caller_resolves_config_at_call_time(tmp_path, monkeypatch):
     assert items_root == configured / "items"
     assert db_path == configured / "memory.db"
     assert sandboxed is False
+
+
+def test_merger_helper_defaults_resolve_config_at_call_time(tmp_path, monkeypatch):
+    configured = tmp_path / "relocated"
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
+    incoming_dir = configured / "items" / "demo" / "learnings"
+    incoming_dir.mkdir(parents=True)
+    (incoming_dir / "lrn-feed0001.json").write_text(json.dumps({
+        "id": "lrn-feed0001",
+        "kind": "learnings",
+        "project": "demo",
+        "text": "read from the relocated inbox",
+        "status": "active",
+        "last_touched_at": "2026-01-01T00:00:00Z",
+    }))
+    state = {
+        "project": "demo",
+        "decisions": [],
+        "goals": [],
+        "suggestions": [],
+        "learnings": [],
+        "done": [],
+        "sessions": [],
+    }
+
+    assert merger.inbox_merge(state, "demo") == 1
+    assert state["learnings"][0]["id"] == "lrn-feed0001"
+
+    state["decisions"].append({
+        "id": "dec-feed0001",
+        "text": "write to the relocated item tree",
+        "status": "active",
+    })
+    assert merger.fan_out_items(state, "demo") == 2
+    fanned = configured / "items" / "demo" / "decisions" / "dec-feed0001.json"
+    assert json.loads(fanned.read_text())["project"] == "demo"
+
+
+def test_renderer_drill_down_uses_configured_memory_root(tmp_path, monkeypatch):
+    configured = tmp_path / "relocated"
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
+    state = {
+        "project": "demo",
+        "sessions": [
+            {
+                "session_id": f"session-{index}",
+                "started": f"2026-01-{index + 1:02d}T00:00:00Z",
+                "topic": "relocation test",
+                "status": "active",
+            }
+            for index in range(11)
+        ],
+    }
+
+    rendered = renderer._render_source_transcripts(state)
+
+    assert str(configured / "projects" / "demo.json") in rendered
+    assert "~/.claude/memory/projects/demo.json" not in rendered
 
 
 def test_permission_expansion_uses_configured_memory_root(tmp_path, monkeypatch):
