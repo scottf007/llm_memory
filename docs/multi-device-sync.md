@@ -7,13 +7,21 @@ LLM Memory is designed for use across multiple machines using [Syncthing](https:
 The architecture separates synced data (JSON files) from local-only data (SQLite index):
 
 ```
-~/.claude/memory/
+$MEMORY_ROOT/          (default ~/.claude/memory, or $LLM_MEMORY_HOME if set)
 ├── records/        ← SYNCED (source of truth)
 ├── transcripts/    ← SYNCED (raw session data)
 ├── config/         ← SYNCED (shared CLAUDE.md rules)
 ├── memory.db       ← LOCAL ONLY (rebuilt from records/)
 └── lib/.venv/      ← LOCAL ONLY (per-machine Python env)
 ```
+
+The store's location is configurable per machine via the `LLM_MEMORY_HOME`
+environment variable; every command below substitutes
+`MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"` the same way the
+installed scripts do. Each device can use a different real location —
+Syncthing pairs devices by folder ID, not by local path, so what matters is
+pointing each machine's Syncthing folder at *that machine's* configured
+root, not that the paths match across machines.
 
 Each machine has its own SQLite database. The MCP server rebuilds it from the JSON record files on startup. No conflicts are possible because every record uses a globally unique 32-character hex UUID as its filename.
 
@@ -34,16 +42,19 @@ Follow the [Syncthing installation guide](https://docs.syncthing.net/intro/getti
 Run the included setup script:
 
 ```bash
-python3 ~/.claude/memory/lib/setup_syncthing.py
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+python3 "$MEMORY_ROOT/lib/setup_syncthing.py"
 ```
 
 This script:
 - Finds your local Syncthing instance (Linux, macOS, or WSL)
-- Adds `~/.claude/memory/` as a shared folder with ID `llm-memory`
+- Adds the configured memory root as a shared folder with ID `llm-memory`
 - Applies the `.stignore` rules
 
 Alternatively, add the folder manually in the Syncthing web UI (`http://localhost:8384`):
-1. Add a new folder with path `~/.claude/memory/`
+1. Add a new folder with path set to *this machine's* configured memory root
+   (`echo "${LLM_MEMORY_HOME:-$HOME/.claude/memory}"` to see it) — use the
+   real underlying directory, not a symlink, as the folder path
 2. Set the folder ID to `llm-memory`
 3. Share it with your other devices
 
@@ -81,7 +92,8 @@ lib/.venv
 If the SQLite index does not reflect recently synced records:
 
 ```bash
-python3 ~/.claude/memory/lib/server.py --rebuild
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+python3 "$MEMORY_ROOT/lib/server.py" --rebuild
 ```
 
 This deletes `memory.db` and rebuilds it from all JSON files in `records/`.
@@ -90,7 +102,8 @@ This deletes `memory.db` and rebuilds it from all JSON files in `records/`.
 
 1. Check Syncthing is running on both machines: `http://localhost:8384`
 2. Verify the `llm-memory` folder is connected and not paused
-3. Check that new `.json` files exist in `~/.claude/memory/records/`
+3. Check that new `.json` files exist under `records/` in the configured
+   memory root (`echo "${LLM_MEMORY_HOME:-$HOME/.claude/memory}"`)
 4. Rebuild the database if files are present but not indexed
 
 ### Conflict files
@@ -102,4 +115,4 @@ Syncthing never produces conflicts for LLM Memory because:
 
 ### WSL-specific notes
 
-On WSL, Syncthing typically runs on the Windows side. The `setup_syncthing.py` script detects this and looks for the config at `/mnt/c/Users/*/AppData/Local/Syncthing/config.xml`. The `~/.claude/memory/` path is inside WSL's filesystem, so Syncthing must be configured to access it via the WSL path (e.g., `\\wsl$\Ubuntu\home\user\.claude\memory\`).
+On WSL, Syncthing typically runs on the Windows side. The `setup_syncthing.py` script detects this and looks for the config at `/mnt/c/Users/*/AppData/Local/Syncthing/config.xml`. The configured memory root is inside WSL's filesystem, so Syncthing must be configured to access it via the WSL path (e.g., `\\wsl$\Ubuntu\home\user\.claude\memory\`, or wherever `$LLM_MEMORY_HOME` points if it's been relocated).
