@@ -18,11 +18,13 @@ the merger applies.
 
 ## Input Contract
 
-Your prompt will include:
-- `project_state_path`: `~/.claude/memory/projects/{project}.json`
+The launcher resolves `<memory-root>` from `LLM_MEMORY_HOME`, defaulting to
+`$HOME/.claude/memory`, and hands you absolute paths in the prompt. The
+launcher-provided values are:
+- `project_state_path`: `<memory-root>/projects/{project}.json`
 - `project`: project name (e.g. `llm_memory`)
-- `output_path`: where to Write your audit delta (e.g.
-  `~/.claude/memory/deltas/{project}.audit.delta.json`)
+- `output_path`: `<memory-root>/deltas/{project}.audit.delta.json`, where to
+  Write your audit delta.
 - `audit_session_id`: a synthetic session_id for this audit
   (e.g. `audit-20260418-llm_memory`) — the merger uses this to stamp
   `archived_in` on swept items.
