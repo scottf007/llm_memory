@@ -2,7 +2,7 @@
 session_id: codex-04-depth_75-user-turns-u39-prefix
 project: project-580b9887
 client: codex
-raw: ~/.claude/memory/transcripts/codex-04-depth_75-user-turns-u39-prefix.jsonl
+raw: transcripts/codex-04-depth_75-user-turns-u39-prefix.jsonl
 turns: 39
 started: 2026-03-31T02:18:45.601Z
 ended: 2026-03-31T06:19:33.299Z

@@ -170,7 +170,7 @@ def discover() -> list[SessionRef]:
 
 
 def _archive_path(session_id: str) -> str:
-    return f"~/.claude/memory/transcripts/{session_id}.jsonl"
+    return f"transcripts/{session_id}.jsonl"
 
 
 def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:

@@ -113,7 +113,7 @@ def test_fixture_frontmatter_carries_codex_provenance(path):
     md = (FIXTURE_DIR / f"{path.stem}.expected.md").read_text()
     head = md.split("\n---\n", 1)[0]
     assert "client: codex\n" in head
-    assert "raw: ~/.claude/memory/transcripts/codex-" in head
+    assert "raw: transcripts/codex-" in head
 
 
 def test_both_dialogue_dialects_are_covered_by_the_fixture_set():

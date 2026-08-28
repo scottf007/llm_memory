@@ -12,8 +12,22 @@ living narrative document. Works across all projects automatically.
 One pipeline, no branching: each session becomes a structured delta
 (`delta-extractor` agent), deltas merge into a per-project JSON state
 (`merger.py`), and the state renders to markdown (`renderer.py`). The rendered
-`~/.claude/memory/projects/{project}.narrative.md` file is the narrative.
+`$MEMORY_ROOT/projects/{project}.narrative.md` file is the narrative.
 Projects that don't yet have a state JSON are bootstrapped with an empty stub.
+
+Before any step, resolve the store root with the same convention as the
+runtime code and hooks:
+
+```bash
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+printf '%s\n' "$MEMORY_ROOT"
+```
+
+Keep this value for the whole run. Bash tool calls do not share exported shell
+state, so every independently executed shell snippet below repeats the
+assignment before expanding `$MEMORY_ROOT`. The `Agent(...)` prompt is not a
+shell, so interpolate the printed absolute value there before launching the
+extractor; do not hand the subagent a literal `$MEMORY_ROOT` token.
 
 ## Step 1: Discover work
 
@@ -25,8 +39,9 @@ against `{project}.json.sessions[]` (i.e. sessions already merged).
 To enumerate all projects with session activity:
 
 ```bash
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
 python3 -c "
-import sys; sys.path.insert(0, '/home/user/.claude/memory/lib')
+import sys; sys.path.insert(0, '$MEMORY_ROOT/lib')
 from conversations import iter_sessions
 seen = {fm.get('project') for fm in iter_sessions() if fm.get('project')}
 for p in sorted(seen): print(p)
@@ -63,7 +78,7 @@ exists, `narrative_coverage` returns the usual incremental diff.
 
 ### 2a. Create `{project}.json` if it doesn't exist
 
-- Write the empty stub to `~/.claude/memory/projects/<project>.json`:
+- Write the empty stub to `$MEMORY_ROOT/projects/<project>.json`:
 
 ```json
 {
@@ -98,7 +113,7 @@ must not trigger this pipeline. Sort the survivors chronologically by their
 `started` timestamp (read the first JSONL record's `timestamp`, or derive
 from file mtime if unavailable).
 
-If a session's `~/.claude/memory/conversations/<session_id>.md` is missing,
+If a session's `$MEMORY_ROOT/conversations/<session_id>.md` is missing,
 **generate it rather than dropping the session**. The sweep in
 `session_start.sh` is lazy — it only runs at session start against files newer
 than its sentinel — so a session that ended after the last session start has
@@ -106,10 +121,11 @@ not been archived yet, and silently skipping it loses the work permanently:
 
 ```bash
 # Find the live transcript (it may not be in the archive yet) and strip it.
-SRC=$(find ~/.claude/projects -maxdepth 2 -name 'SESSION_ID.jsonl' | head -1)
-cp -n "$SRC" ~/.claude/memory/transcripts/SESSION_ID.jsonl
-python3 ~/.claude/memory/lib/extract_conversation.py "$SRC" \
-  --output ~/.claude/memory/conversations/SESSION_ID.md --force
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+SRC=$(find "$HOME/.claude/projects" -maxdepth 2 -name 'SESSION_ID.jsonl' | head -1)
+cp -n "$SRC" "$MEMORY_ROOT/transcripts/SESSION_ID.jsonl"
+python3 "$MEMORY_ROOT/lib/extract_conversation.py" "$SRC" \
+  --output "$MEMORY_ROOT/conversations/SESSION_ID.md" --force
 ```
 
 Only drop a session when no transcript exists in either location, and say so
@@ -121,7 +137,8 @@ that had nothing to say.
 1. **Check the delta cache** before spawning an agent:
 
    ```bash
-   python3 ~/.claude/memory/lib/delta_cache.py check SESSION_ID ISO8601_START
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   python3 "$MEMORY_ROOT/lib/delta_cache.py" check SESSION_ID ISO8601_START
    ```
 
    Prints `use_cache` or `reextract` on stdout; decision reason on stderr.
@@ -138,13 +155,13 @@ that had nothing to say.
      description="Delta PROJECT: SESSION_ID",
      subagent_type="delta-extractor",
      prompt="""Project: PROJECT_NAME
-   conversation_md_path: /home/user/.claude/memory/conversations/SESSION_ID.md
-   project_state_path:   /home/user/.claude/memory/projects/PROJECT_NAME.json
+   conversation_md_path: ${MEMORY_ROOT}/conversations/SESSION_ID.md
+   project_state_path:   ${MEMORY_ROOT}/projects/PROJECT_NAME.json
    session_id:           SESSION_ID
    session_started_at:   ISO8601_START
    session_ended_at:     ISO8601_END
-   output_path:          /home/user/.claude/memory/deltas/SESSION_ID.delta.json
-   contested_path:       /home/user/.claude/memory/projects/PROJECT_NAME.contested.json
+   output_path:          ${MEMORY_ROOT}/deltas/SESSION_ID.delta.json
+   contested_path:       ${MEMORY_ROOT}/projects/PROJECT_NAME.contested.json
 
    Read the project state JSON and the conversation markdown. Produce the
    structured delta per your prompt spec and write it as JSON (only) to
@@ -158,16 +175,18 @@ that had nothing to say.
    ```
 
    ```bash
-   python3 ~/.claude/memory/lib/delta_cache.py stamp \
-     ~/.claude/memory/deltas/SESSION_ID.delta.json
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   python3 "$MEMORY_ROOT/lib/delta_cache.py" stamp \
+     "$MEMORY_ROOT/deltas/SESSION_ID.delta.json"
    ```
 
 3. **Run the merger** on whichever delta is now on disk (cached or fresh):
 
    ```bash
-   python3 ~/.claude/memory/lib/merger.py \
-     ~/.claude/memory/projects/PROJECT_NAME.json \
-     ~/.claude/memory/deltas/SESSION_ID.delta.json
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   python3 "$MEMORY_ROOT/lib/merger.py" \
+     "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
+     "$MEMORY_ROOT/deltas/SESSION_ID.delta.json"
    ```
 
    For a session from the `stale` list, add `--rerun`. Without it the merger
@@ -182,15 +201,17 @@ that had nothing to say.
    project — the next agent reads the updated `{project}.json` as input.
 
 4. Before the first delta-extractor call for a run, ensure the deltas dir
-   exists: `mkdir -p ~/.claude/memory/deltas`. The merger is idempotent
+   exists in that Bash call:
+   `MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"; mkdir -p "$MEMORY_ROOT/deltas"`.
+   The merger is idempotent
    per session_id; the cache is idempotent by `extractor_hash`. Leftover
    delta files are a feature, not debt — they act as the pre-processed
    cache so repeat runs skip LLM calls.
 
-5. **If the delta-extractor's Write to `~/.claude/memory/deltas/...` fails
+5. **If the delta-extractor's Write to `$MEMORY_ROOT/deltas/...` fails
    or prompts repeatedly,** that's a missing permission, not a sandbox
    block. Do NOT reroute through `/tmp/` and `mv` — that just multiplies
-   the prompts. Tell the user to add `Write(/home/user/.claude/memory/**)`
+   the prompts. Tell the user to add `Write(<resolved-memory-root>/**)`
    to `~/.claude/settings.json`'s `permissions.allow` (it ships in
    `settings.yaml` as of the post-2026-05-11 install; older installs need
    to re-run `install.sh` or add it manually) and stop.
@@ -198,9 +219,10 @@ that had nothing to say.
 ### 2d. Render after every merge
 
 ```bash
-python3 ~/.claude/memory/lib/renderer.py \
-  ~/.claude/memory/projects/PROJECT_NAME.json \
-  ~/.claude/memory/projects/PROJECT_NAME.narrative.md
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+python3 "$MEMORY_ROOT/lib/renderer.py" \
+  "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
+  "$MEMORY_ROOT/projects/PROJECT_NAME.narrative.md"
 ```
 
 Render after **each** session's merge, not once at the end of the project.
@@ -226,8 +248,9 @@ written, integrity work remains", not a failed render, so treat it as continue,
 not abort:
 
 ```bash
-python3 ~/.claude/memory/lib/tools/resolve_cascade_reviews.py \
-  ~/.claude/memory/projects/PROJECT_NAME.json
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+python3 "$MEMORY_ROOT/lib/tools/resolve_cascade_reviews.py" \
+  "$MEMORY_ROOT/projects/PROJECT_NAME.json"
 ```
 
 Why this step is not optional. A fuzzy claim match (U2/U3/U4) never archives
@@ -265,8 +288,9 @@ whenever a pair looks contestable.
 To resolve a single review by hand:
 
 ```bash
-python3 ~/.claude/memory/lib/tools/cascade_review.py list ~/.claude/memory/projects/PROJECT_NAME.json
-python3 ~/.claude/memory/lib/tools/cascade_review.py confirm ~/.claude/memory/projects/PROJECT_NAME.json \
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+python3 "$MEMORY_ROOT/lib/tools/cascade_review.py" list "$MEMORY_ROOT/projects/PROJECT_NAME.json"
+python3 "$MEMORY_ROOT/lib/tools/cascade_review.py" confirm "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
   --child work-abcd1234 --parent dec-abcd1234 --reason "restates the same claim"
 ```
 
@@ -280,8 +304,8 @@ When all projects finish, emit a compact summary:
 
 ```
 Narrative update complete:
-  - PROJECT_A: N session(s) processed -> ~/.claude/memory/projects/PROJECT_A.narrative.md
-  - PROJECT_B: M session(s) processed -> ~/.claude/memory/projects/PROJECT_B.narrative.md
+  - PROJECT_A: N session(s) processed -> $MEMORY_ROOT/projects/PROJECT_A.narrative.md
+  - PROJECT_B: M session(s) processed -> $MEMORY_ROOT/projects/PROJECT_B.narrative.md
   - PROJECT_C: no unprocessed transcripts
 ```
 

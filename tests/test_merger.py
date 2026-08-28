@@ -132,9 +132,10 @@ def test_delta_without_revaluations_still_merges():
     assert state["decisions"][0]["value"] == pytest.approx(0.5)
 
 
-def test_session_conversation_path_is_relative_to_relocatable_root():
+def test_session_paths_are_relative_to_relocatable_root():
     state = merger.apply_delta(_state_with(_item()), _delta([]))
 
+    assert state["sessions"][0]["jsonl"] == "transcripts/sess-new.jsonl"
     assert state["sessions"][0]["conversation_md"] == "conversations/sess-new.md"
 
 

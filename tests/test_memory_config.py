@@ -164,3 +164,48 @@ def test_installer_exports_root_and_deploys_resolver():
     assert 'export LLM_MEMORY_HOME="$MEMORY_DIR"' in install
     assert 'cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/"' in install
     assert "fan_out_items(state, p.stem, memory_root() / 'items')" in install
+
+
+def test_narrative_skill_threads_configured_root_into_extractor_prompt():
+    skill = (
+        Path(__file__).parent.parent / "skills" / "narrative" / "SKILL.md"
+    ).read_text()
+
+    assert 'MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"' in skill
+    assert skill.count('MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"') >= 8
+    assert "Bash tool calls do not share exported shell" in skill
+    for relative_path in (
+        "conversations/SESSION_ID.md",
+        "projects/PROJECT_NAME.json",
+        "deltas/SESSION_ID.delta.json",
+        "projects/PROJECT_NAME.contested.json",
+    ):
+        assert f"${{MEMORY_ROOT}}/{relative_path}" in skill
+
+    assert "/home/user/.claude/memory/conversations/SESSION_ID.md" not in skill
+    assert "/home/user/.claude/memory/projects/PROJECT_NAME.json" not in skill
+    assert "/home/user/.claude/memory/deltas/SESSION_ID.delta.json" not in skill
+
+
+def test_delta_extractor_contract_describes_configured_root_paths():
+    contract = (
+        Path(__file__).parent.parent / "agents" / "delta-extractor.md"
+    ).read_text()
+
+    assert "resolves `<memory-root>` from `LLM_MEMORY_HOME`" in contract
+    for relative_path in (
+        "conversations/{session_id}.md",
+        "projects/{project}.json",
+        "deltas/{session_id}.delta.json",
+        "projects/{project}.contested.json",
+    ):
+        assert f"<memory-root>/{relative_path}" in contract
+
+
+def test_project_state_schema_documents_portable_session_paths():
+    schema = (
+        Path(__file__).parent.parent / "docs" / "project_state_schema.md"
+    ).read_text()
+
+    assert '"jsonl":            "transcripts/13dad5a6.jsonl"' in schema
+    assert '"conversation_md":  "conversations/13dad5a6.md"' in schema
