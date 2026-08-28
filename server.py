@@ -446,6 +446,29 @@ def _transcript_tail_ts(jsonl_path: Path, tail_bytes: int = 200_000) -> datetime
     return None
 
 
+def _transcript_start_ts(jsonl_path: Path) -> datetime | None:
+    """Timestamp of the first timestamped record in a transcript, or None."""
+    try:
+        with jsonl_path.open(encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line.startswith("{"):
+                    continue
+                try:
+                    ts = json.loads(line).get("timestamp")
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+                if not ts:
+                    return None
+                try:
+                    return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                except ValueError:
+                    return None
+    except OSError:
+        return None
+    return None
+
+
 def _stale_session(session: dict) -> dict | None:
     """Report a merged session whose transcript kept growing after the merge."""
     session_id = str(session.get("session_id") or "")
@@ -633,6 +656,28 @@ def compute_narrative_coverage(
             continue
         unprocessed.append(p)
 
+    # Preserve the public `unprocessed: list[str]` contract. The narrative
+    # skill consumes this parallel, chronologically sorted representation so
+    # it need not re-read transcript timestamps in shell before each run.
+    unprocessed_sorted: list[dict[str, str | None]] = []
+    for p in unprocessed:
+        timestamp = _transcript_start_ts(Path(p))
+        if timestamp is None:
+            try:
+                timestamp = datetime.fromtimestamp(Path(p).stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                pass
+        if timestamp is not None:
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp_text: str | None = timestamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        else:
+            timestamp_text = None
+        unprocessed_sorted.append({"path": p, "timestamp": timestamp_text})
+    unprocessed_sorted.sort(key=lambda entry: (
+        entry["timestamp"] is None, entry["timestamp"] or "", entry["path"]
+    ))
+
     narrative_mtime = None
     if narrative_path.exists():
         try:
@@ -658,6 +703,7 @@ def compute_narrative_coverage(
             "processed_count": 0,
             "unprocessed_count": len(unprocessed),
             "unprocessed": unprocessed,
+            "unprocessed_sorted": unprocessed_sorted,
             "skipped_subagent_count": skipped_subagent,
             "skipped_codex_auto_count": skipped_codex_auto,
             "skipped_low_turn_count": skipped_low_turn,
@@ -679,6 +725,7 @@ def compute_narrative_coverage(
         "processed_count": len(merged_ids),
         "unprocessed_count": len(unprocessed),
         "unprocessed": unprocessed,
+        "unprocessed_sorted": unprocessed_sorted,
         "skipped_subagent_count": skipped_subagent,
         "skipped_codex_auto_count": skipped_codex_auto,
         "skipped_low_turn_count": skipped_low_turn,

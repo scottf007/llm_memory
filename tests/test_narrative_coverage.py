@@ -22,6 +22,7 @@ the same sandbox to keep them in sync.
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -387,3 +388,53 @@ def test_compute_coverage_includes_stale_and_unprocessed(sandbox):
     assert via_helper["unprocessed"] == via_mcp["unprocessed"]
     assert via_helper["stale_count"] == via_mcp["stale_count"]
     assert set(via_helper) == set(via_mcp)
+
+
+def test_unprocessed_sorted_has_chronological_timestamped_paths(sandbox):
+    """The skill queue is chronological without changing legacy paths."""
+    early = _write_session(sandbox, "z-early", "demo", "codex",
+                           [("user", DESIGN_COUNCIL_PROMPT),
+                            ("assistant", SUBSTANTIVE_REPLY)])
+    fallback = _write_session(sandbox, "m-fallback", "demo", "codex",
+                              [("user", DESIGN_COUNCIL_PROMPT),
+                               ("assistant", SUBSTANTIVE_REPLY)])
+    late = _write_session(sandbox, "a-late", "demo", "codex",
+                          [("user", DESIGN_COUNCIL_PROMPT),
+                           ("assistant", SUBSTANTIVE_REPLY)])
+
+    def set_timestamps(path, stamp):
+        records = [json.loads(line) for line in path.read_text().splitlines()]
+        for record in records:
+            record["timestamp"] = stamp
+        path.write_text("".join(json.dumps(record) + "\n" for record in records))
+
+    set_timestamps(early, "2026-01-01T00:00:00Z")
+    set_timestamps(late, "2026-01-03T00:00:00Z")
+    records = [json.loads(line) for line in fallback.read_text().splitlines()]
+    for record in records:
+        record.pop("timestamp")
+    fallback.write_text("".join(json.dumps(record) + "\n" for record in records))
+    os.utime(fallback, (datetime(2026, 1, 2, tzinfo=timezone.utc).timestamp(),) * 2)
+
+    result = _coverage()
+    assert result["unprocessed"] == [str(late), str(fallback), str(early)]
+    assert result["unprocessed_sorted"] == [
+        {"path": str(early), "timestamp": "2026-01-01T00:00:00Z"},
+        {"path": str(fallback), "timestamp": "2026-01-02T00:00:00Z"},
+        {"path": str(late), "timestamp": "2026-01-03T00:00:00Z"},
+    ]
+
+
+def test_unprocessed_sorted_is_available_when_bootstrapping(sandbox):
+    (sandbox / "projects" / "demo.json").unlink()
+    transcript = _write_session(sandbox, "bootstrap", "demo", "codex",
+                                [("user", DESIGN_COUNCIL_PROMPT),
+                                 ("assistant", SUBSTANTIVE_REPLY)])
+
+    result = _coverage()
+    assert result["status"] == "no_state"
+    assert result["unprocessed"] == [str(transcript)]
+    assert result["unprocessed_sorted"] == [{
+        "path": str(transcript),
+        "timestamp": "2026-01-01T00:00:00Z",
+    }]
