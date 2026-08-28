@@ -147,6 +147,29 @@ ordinary sessions' 1–5. **The drain evidence supports the seam, not against it
 The seam survives all three critiques; the *justification* and the `done[]`
 exclusion do not.
 
+**6b. STATUS 28 Aug — PARKED, narrowed further.** Three of four sub-problems
+are solved and independently reviewed: atomic write-once (hardlink
+publish), the completion marker (reuses `merger.py`'s real
+`_atomic_write_json`), and observation-zero identity (shared across
+local/remote/backfill producers). The fourth, attempt identity, has now
+failed adversarial review three times, each pass narrowing the target:
+(1) `B = hash(project, session-ID set, epoch)` aliases a `--rerun`-grown
+session to its stale predecessor; (2) adding a ledger-population digest
+`D` was independently proven wrong too — `D` changes 6 times over 12 days
+from pure score decay with zero new evidence; (3) a content-hash design
+(`rev(sid) = {bytes: N, sha256: sha256(transcript[0:N])}`, correctly
+rejecting a position-watermark hypothesis with hard measurement — only
+20-27% of transcript lines emit a parseable `Turn`) is sound in isolation
+but doesn't integrate with `delta_cache.py`'s existing cache-hit
+shortcut: an exact extractor-hash cache hit skips the proposed stamping
+step, so a genuinely grown `--rerun` transcript can still alias to its
+stale cached `source_rev`. **The precise remaining target for whoever
+picks this up next:** cache validity must be keyed to the mechanically
+stamped revision, with a revision mismatch forcing re-extraction — not a
+new identity primitive, an integration between the (already-designed)
+stamping mechanism and the existing cache-decision logic in
+`delta_cache.should_reextract`.
+
 **7. Coverage numbers cause false alarms. — ALREADY DONE, verified 27 Aug.**
 Raw gaps said 5,344 unmerged; real figures are 3 and 14. **Three false panics
 in one day.** `narrative_coverage` must lead with the filtered number; no tool
