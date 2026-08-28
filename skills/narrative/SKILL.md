@@ -106,12 +106,13 @@ subsequent runs follow the normal incremental path automatically.
 
 ### 2b. Filter transcripts (applies to both paths)
 
-Whichever list you picked in 2a (full history for bootstrap, or `unprocessed`
-for incremental), keep only **main-session** transcripts. Skip any file
-whose session_id starts with `agent-` — those are subagent transcripts and
-must not trigger this pipeline. Sort the survivors chronologically by their
-`started` timestamp (read the first JSONL record's `timestamp`, or derive
-from file mtime if unavailable).
+Use `unprocessed_sorted` from `narrative_coverage` for both bootstrap and
+incremental runs. It already contains only qualifying main-session
+transcripts, sorted chronologically. Each entry is `{ "path", "timestamp" }`:
+`timestamp` is the first JSONL record's timestamp, with file mtime as its
+fallback. Use `path` as the transcript and `timestamp` as `ISO8601_START`;
+do not re-read timestamps or re-sort them in Bash. The legacy `unprocessed`
+field remains a path-only compatibility field for existing consumers.
 
 If a session's `$MEMORY_ROOT/conversations/<session_id>.md` is missing,
 **generate it rather than dropping the session**. The sweep in
