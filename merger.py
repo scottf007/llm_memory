@@ -41,9 +41,6 @@ ID_PREFIXES = {
     "done": "work",
 }
 
-ITEMS_ROOT = Path.home() / ".claude" / "memory" / "items"
-
-
 def _same_path(a: Path, b: Path) -> bool:
     try:
         return a.expanduser().resolve() == b.expanduser().resolve()
@@ -176,7 +173,8 @@ def _reconcile_link(current: dict, incoming: dict) -> None:
             current[field] = incoming[field]
 
 
-def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
+def inbox_merge(state: dict, project: str,
+                items_root: Path | None = None) -> int:
     """Reconcile incoming per-item file changes into state.
 
     Walks ~/.claude/memory/items/{project}/{kind}/*.json and for each file:
@@ -198,6 +196,9 @@ def inbox_merge(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int
 
     Returns the number of items added or updated.
     """
+    if items_root is None:
+        items_root = memory_root() / "items"
+
     proj_dir = items_root / project
     if not proj_dir.exists():
         return 0
@@ -567,7 +568,10 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
         "ended": delta.get("ended"),
         "topic": delta.get("topic", ""),
         "jsonl": f"~/.claude/memory/transcripts/{session_id}.jsonl",
-        "conversation_md": f"~/.claude/memory/conversations/{session_id}.md",
+        # Keep this relative to memory_root().  The store may be relocated
+        # after this session is merged; resume derives the canonical path from
+        # the session id at read time instead of preserving an obsolete root.
+        "conversation_md": f"conversations/{session_id}.md",
         "status": "active",
         "closure_status": delta.get("closure_status"),
         "journal": delta.get("journal", ""),
@@ -604,13 +608,17 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
     return state
 
 
-def fan_out_items(state: dict, project: str, items_root: Path = ITEMS_ROOT) -> int:
+def fan_out_items(state: dict, project: str,
+                  items_root: Path | None = None) -> int:
     """Write every ledger item to ~/.claude/memory/items/{project}/{kind}/{id}.json.
 
     Idempotent — each write overwrites the file in place. Returns the count
     of files written. Archived items are fanned out too (their status field
     carries the archive state).
     """
+    if items_root is None:
+        items_root = memory_root() / "items"
+
     proj_dir = items_root / project
     proj_dir.mkdir(parents=True, exist_ok=True)
     written = 0

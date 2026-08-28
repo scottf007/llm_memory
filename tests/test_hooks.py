@@ -148,6 +148,29 @@ def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj
     return stdout, stderr, rc
 
 
+def test_memory_index_drill_down_uses_configured_root(tmp_path, monkeypatch):
+    home, conn, _ = _setup_test_home(tmp_path)
+    configured = tmp_path / "relocated"
+    (configured / "config").mkdir(parents=True)
+    (configured / "projects").mkdir()
+    (configured / "transcripts").mkdir()
+    (configured / "memory.db").touch()
+    (configured / "config" / "no-auto-update").touch()
+    (configured / "projects" / "testproj.narrative.md").write_text("narrative")
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
+    conn.close()
+
+    _, stderr, rc = _run_session_start(home)
+
+    assert rc == 0, stderr
+    memory_index = (
+        home / ".claude" / "projects" / "-home-user-projects-testproj" /
+        "memory" / "MEMORY.md"
+    ).read_text()
+    assert str(configured / "projects" / "testproj.json") in memory_index
+    assert "~/.claude/memory/projects/testproj.json" not in memory_index
+
+
 # ---- Post-compaction narrative staleness ----
 
 class TestPostCompactNarrativeStaleness:

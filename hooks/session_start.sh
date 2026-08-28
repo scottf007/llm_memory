@@ -184,7 +184,7 @@ if [ "$SOURCE" != "compact" ] && [ -n "$CWD" ]; then
                 echo "- [Project narrative]($NARR) — living story of $PROJECT, rendered by llm_memory each session. Read for past context."
             fi
             if [ -n "$PROJECT" ]; then
-                echo "- Use project_lookup (MCP) to drill into ~/.claude/memory/projects/$PROJECT.json."
+                echo "- Use project_lookup (MCP) to drill into $MEMORY_DIR/projects/$PROJECT.json."
             fi
         } > "$MEMORY_INDEX"
     fi

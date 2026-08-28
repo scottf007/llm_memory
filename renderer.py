@@ -30,6 +30,7 @@ from pathlib import Path
 
 import adapters
 from lib import certify
+from tools.memory_config import memory_root
 
 HOME = Path.home()
 
@@ -689,10 +690,12 @@ def _render_source_transcripts(state: dict) -> str:
         out.append(f"| {started} | `{sid}` | {topic} |")
 
     if older_count > 0:
+        project = state.get("project", "?")
+        project_path = memory_root() / "projects" / f"{project}.json"
         out.append("")
         out.append(f"_{older_count} earlier session(s) dissolved into the ledger above._ "
-                   f"Full list and drill-down available in `~/.claude/memory/projects/{state.get('project','?')}.json` "
-                   f"or via `narrative_coverage(project='{state.get('project','?')}')`.")
+                   f"Full list and drill-down available in `{project_path}` "
+                   f"or via `narrative_coverage(project='{project}')`.")
     return "\n".join(out) + "\n"
 
 
