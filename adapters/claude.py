@@ -1,7 +1,7 @@
 """Claude Code adapter.
 
 Reads `~/.claude/projects/<encoded-cwd>/<sid>.jsonl` and the archived copies in
-`~/.claude/memory/transcripts/`. One JSON object per line; `type` is `user`,
+the configured memory root's `transcripts/` directory. One JSON object per line; `type` is `user`,
 `assistant`, or plumbing we ignore. Everything Claude-specific lives here —
 the noise tags it wraps injected context in, the `message.content` block
 shapes, the `agent-` session-id convention for subagents.
@@ -101,9 +101,8 @@ def ref_for_path(path: Path) -> SessionRef:
 
 
 def _archive_path(session_id: str) -> str:
-    # Recorded verbatim in frontmatter — the tilde form is what every existing
-    # conversation .md carries, so it stays a literal, not an expanded path.
-    return f"~/.claude/memory/transcripts/{session_id}.jsonl"
+    # Keep persisted provenance portable when the configured store moves.
+    return f"transcripts/{session_id}.jsonl"
 
 
 def discover() -> list[SessionRef]:

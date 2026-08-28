@@ -1,7 +1,7 @@
 ---
 session_id: codex-06-depth_44-user-turns-u30-prefix
 client: codex
-raw: ~/.claude/memory/transcripts/codex-06-depth_44-user-turns-u30-prefix.jsonl
+raw: transcripts/codex-06-depth_44-user-turns-u30-prefix.jsonl
 turns: 30
 started: 2026-05-25T11:36:18.417Z
 ended: 2026-05-29T01:45:16.450Z

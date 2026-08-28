@@ -2,7 +2,7 @@
 session_id: codex-10-depth_3-user-turns-u3
 project: project-aad8ac1e
 client: codex
-raw: ~/.claude/memory/transcripts/codex-10-depth_3-user-turns-u3.jsonl
+raw: transcripts/codex-10-depth_3-user-turns-u3.jsonl
 turns: 3
 started: 2026-03-31T02:22:22.785Z
 ended: 2026-03-31T02:26:56.819Z

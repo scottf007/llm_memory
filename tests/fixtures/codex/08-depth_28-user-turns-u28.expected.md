@@ -1,7 +1,7 @@
 ---
 session_id: codex-08-depth_28-user-turns-u28
 client: codex
-raw: ~/.claude/memory/transcripts/codex-08-depth_28-user-turns-u28.jsonl
+raw: transcripts/codex-08-depth_28-user-turns-u28.jsonl
 turns: 28
 started: 2026-05-25T04:23:23.997Z
 ended: 2026-05-25T11:36:01.937Z

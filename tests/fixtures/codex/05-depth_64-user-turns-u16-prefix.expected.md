@@ -1,7 +1,7 @@
 ---
 session_id: codex-05-depth_64-user-turns-u16-prefix
 client: codex
-raw: ~/.claude/memory/transcripts/codex-05-depth_64-user-turns-u16-prefix.jsonl
+raw: transcripts/codex-05-depth_64-user-turns-u16-prefix.jsonl
 turns: 16
 started: 2026-05-18T11:06:38.816Z
 ended: 2026-05-18T22:34:53.181Z

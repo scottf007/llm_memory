@@ -236,8 +236,8 @@ pointer to the JSON.
   "ended":   "2026-03-08T01:46:00Z",
   "topic": "Chunking design lands",
   "closure_status": "complete",  // or "interrupted"
-  "jsonl":            "~/.claude/memory/transcripts/13dad5a6.jsonl",
-  "conversation_md":  "~/.claude/memory/conversations/13dad5a6.md",
+  "jsonl":            "transcripts/13dad5a6.jsonl",
+  "conversation_md":  "conversations/13dad5a6.md",
   "status": "active",
   "journal": "Scott opens by asking Claude to read a handoff doc...(full prose, multi-paragraph)",
 

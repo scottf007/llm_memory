@@ -11,10 +11,10 @@ What it asserts, per sampled session:
 
     render(adapters.claude.parse(transcript))  ==  the stored .md
 
-byte for byte, with exactly one declared exception: the `client:` frontmatter
-line that S1 added. That line is removed from the regenerated text before
-comparison *and* checked to be the only difference — so it cannot hide a
-second change.
+byte for byte, with two declared frontmatter migrations: the `client:` line
+that S1 added, and the relocation-safe `raw: transcripts/<sid>.jsonl` form.
+Both exceptions are restricted to frontmatter and checked explicitly, so
+neither can hide a second change.
 
 Usage:
     python tools/adapter_oracle.py                  # run the pinned sample
@@ -50,6 +50,9 @@ SAMPLE_FILE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "o
 SETTLED_AFTER_HOURS = 24
 
 _CLIENT_LINE = re.compile(r"^client: [A-Za-z0-9_.-]+\n", re.MULTILINE)
+_LEGACY_RAW_LINE = re.compile(
+    r"^raw: ~/.claude/memory/transcripts/([^/\r\n]+\.jsonl)\n", re.MULTILINE
+)
 
 
 def strip_client_line(text: str) -> tuple[str, list[str]]:
@@ -67,6 +70,19 @@ def strip_client_line(text: str) -> tuple[str, list[str]]:
     head, rest = text[: end + 5], text[end + 5 :]
     removed = [m.group(0).rstrip("\n") for m in _CLIENT_LINE.finditer(head)]
     return _CLIENT_LINE.sub("", head) + rest, removed
+
+
+def normalize_archive_path(text: str) -> tuple[str, list[str]]:
+    """Relativize the one legacy `raw:` frontmatter line, if present."""
+    if not text.startswith("---\n"):
+        return text, []
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return text, []
+    head, rest = text[: end + 5], text[end + 5 :]
+    legacy = [m.group(0).rstrip("\n") for m in _LEGACY_RAW_LINE.finditer(head)]
+    normalized = _LEGACY_RAW_LINE.sub(r"raw: transcripts/\1\n", head)
+    return normalized + rest, legacy
 
 
 def regenerate(session_id: str) -> str:
@@ -89,20 +105,18 @@ def compare(
     do not exist on disk. Bytes are the thing the acceptance criterion is
     about, so bytes are what this compares.
 
-    Equality is byte equality after excusing the `client:` frontmatter line.
-    The excuse is narrow on purpose: exactly one line, carrying exactly the
-    expected client name. Excusing "any number of client: lines, saying
-    anything" would let the one line this oracle exists to permit become a
-    place to hide — a duplicated line, or `client: nonsense`, would both pass
-    while the oracle still printed a reassuring byte count. That matters most
-    at the next adapter, since `client:` is precisely the line a second client
-    changes.
+    Equality is byte equality after excusing the `client:` frontmatter line
+    and normalizing one exact legacy archive prefix. Both excuses are narrow:
+    exactly one `client:` line carrying the expected name, and at most one
+    `raw: ~/.claude/memory/transcripts/<filename>.jsonl` line rewritten to
+    `raw: transcripts/<filename>.jsonl` without changing the filename.
 
-    A stored file that already carries provenance needs no excuse at all, so
-    it is held to plain byte equality.
+    A stored file that already carries `client:` needs no client-line excuse;
+    its archive reference may still be in either declared form.
     """
     stored_text = stored.decode("utf-8", errors="replace")
-    _, stored_client = strip_client_line(stored_text)
+    normalized_stored, legacy_raw = normalize_archive_path(stored_text)
+    _, stored_client = strip_client_line(normalized_stored)
     expected = f"client: {expected_client}"
 
     if stored_client:
@@ -112,24 +126,36 @@ def compare(
         compared, removed = strip_client_line(produced)
 
     compared_bytes = compared.encode("utf-8", errors="surrogatepass")
-    excuse_ok = removed == ([] if stored_client else [expected])
+    expected_bytes = normalized_stored.encode("utf-8", errors="surrogatepass")
+    client_ok = removed == ([] if stored_client else [expected])
+    archive_ok = len(legacy_raw) <= 1
+    excuse_ok = client_ok and archive_ok
 
-    if compared_bytes == stored and excuse_ok:
+    if compared_bytes == expected_bytes and excuse_ok:
         detail = f"identical ({len(stored)} bytes)"
         if removed:
             detail += f"; declared addition: {removed[0]}"
+        if legacy_raw:
+            detail += "; declared path migration: raw: transcripts/..."
         return True, detail, []
 
     if not excuse_ok:
         found = ", ".join(removed) if removed else "none"
-        detail = f"excused frontmatter must be exactly [{expected}]; found: {found}"
-        if compared_bytes != stored:
+        problems = []
+        if not client_ok:
+            problems.append(
+                f"excused frontmatter must be exactly [{expected}]; found: {found}"
+            )
+        if not archive_ok:
+            problems.append("legacy raw frontmatter must occur at most once")
+        detail = "; ".join(problems)
+        if compared_bytes != expected_bytes:
             detail += " (and the rest differs too)"
         return False, detail, [f"- {expected}\n", f"+ {found}\n"]
 
     diff = list(
         difflib.unified_diff(
-            stored_text.splitlines(keepends=True),
+            normalized_stored.splitlines(keepends=True),
             compared.splitlines(keepends=True),
             fromfile=f"stored/{label}.md",
             tofile=f"regenerated/{label}.md",

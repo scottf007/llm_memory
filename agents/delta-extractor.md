@@ -11,14 +11,18 @@ in the project's ledger. You do not modify the conversation or the project
 state file — the merger does that after you emit your output.
 
 ## Input Contract
-The launcher hands you these values in your prompt:
-- `conversation_md_path`: `~/.claude/memory/conversations/{session_id}.md` —
+The launcher resolves `<memory-root>` from `LLM_MEMORY_HOME`, defaulting to
+`$HOME/.claude/memory`, and hands you absolute paths in the prompt. The
+launcher-provided values are:
+- `conversation_md_path`: `<memory-root>/conversations/{session_id}.md` —
   stripped dialogue for the session just completed.
-- `project_state_path`: `~/.claude/memory/projects/{project}.json` — current
+- `project_state_path`: `<memory-root>/projects/{project}.json` — current
   state of the project. May not exist yet (first session).
-- `output_path`: where to Write your JSON delta.
+- `output_path`: `<memory-root>/deltas/{session_id}.delta.json`, where you
+  Write your JSON delta.
 - `session_id`, `session_started_at`, `session_ended_at`, `project`.
-- `contested_path` (**optional**): `~/.claude/memory/projects/{project}.contested.json`
+- `contested_path` (**optional**):
+  `<memory-root>/projects/{project}.contested.json`
   — written by the renderer when a section hit its token budget. Lists the
   items either side of the cut line. When present, read it and emit
   `revaluations` (Rule 9). When absent, nothing was cut and there is nothing

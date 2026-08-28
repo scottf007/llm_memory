@@ -1,7 +1,7 @@
 ---
 session_id: codex-02-dialect_event_msg-tool_web_search_call-u19
 client: codex
-raw: ~/.claude/memory/transcripts/codex-02-dialect_event_msg-tool_web_search_call-u19.jsonl
+raw: transcripts/codex-02-dialect_event_msg-tool_web_search_call-u19.jsonl
 turns: 19
 started: 2026-05-18T02:36:07.226Z
 ended: 2026-05-18T04:20:25.811Z

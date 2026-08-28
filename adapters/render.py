@@ -9,7 +9,7 @@ body — so the shape below is a contract, not a preference:
     session_id: <sid>
     project: <name>          (omitted when unattributed)
     client: <client>
-    raw: ~/.claude/memory/transcripts/<sid>.jsonl
+    raw: transcripts/<sid>.jsonl
     turns: <user turn count>
     started: <iso>           (omitted when unknown)
     ended: <iso>             (omitted when unknown)

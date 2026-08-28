@@ -2,7 +2,7 @@
 session_id: codex-11-compacted-render
 project: project-12345678
 client: codex
-raw: ~/.claude/memory/transcripts/codex-11-compacted-render.jsonl
+raw: transcripts/codex-11-compacted-render.jsonl
 turns: 1
 started: 2026-01-01T00:00:00.000Z
 ended: 2026-01-01T00:00:03.000Z

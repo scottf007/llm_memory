@@ -121,7 +121,7 @@ def test_full_session_renders_the_documented_contract(tmp_path):
         "session_id: demo-session\n"
         "project: demo\n"
         "client: claude\n"
-        "raw: ~/.claude/memory/transcripts/demo-session.jsonl\n"
+        "raw: transcripts/demo-session.jsonl\n"
         "turns: 2\n"
         "started: 2026-01-01T00:00:00.000Z\n"
         "ended: 2026-01-01T00:00:04.000Z\n"
@@ -197,7 +197,7 @@ def test_empty_transcript_still_renders_a_valid_registry_entry(tmp_path):
         "---\n"
         "session_id: empty\n"
         "client: claude\n"
-        "raw: ~/.claude/memory/transcripts/empty.jsonl\n"
+        "raw: transcripts/empty.jsonl\n"
         "turns: 0\n"
         "---\n"
         "\n"
@@ -215,7 +215,7 @@ def test_subagent_session_is_stubbed_without_reading_the_transcript(tmp_path):
         "client: claude\n"
         "agent_session: true\n"
         "skipped: true\n"
-        "raw: ~/.claude/memory/transcripts/agent-abc123.jsonl\n"
+        "raw: transcripts/agent-abc123.jsonl\n"
         "---\n"
         "\n"
         "_This is a subagent session. Full conversation is in the parent "
@@ -263,6 +263,36 @@ def test_oracle_accepts_only_the_declared_client_line():
     ok, detail, _ = adapter_oracle.compare(stored.encode(), produced)
     assert ok
     assert "client: claude" in detail
+
+
+def test_oracle_accepts_only_the_declared_archive_path_migration():
+    stored = (
+        "---\nsession_id: s\n"
+        "raw: ~/.claude/memory/transcripts/s.jsonl\nturns: 1\n---\n\nbody\n"
+    )
+    produced = (
+        "---\nsession_id: s\nclient: claude\n"
+        "raw: transcripts/s.jsonl\nturns: 1\n---\n\nbody\n"
+    )
+
+    ok, detail, _ = adapter_oracle.compare(stored.encode(), produced)
+    assert ok
+    assert "declared path migration" in detail
+
+    wrong_session = produced.replace("transcripts/s.jsonl", "transcripts/other.jsonl")
+    ok2, _, _ = adapter_oracle.compare(stored.encode(), wrong_session)
+    assert not ok2
+
+
+def test_archive_path_normalization_does_not_touch_conversation_body():
+    text = (
+        "---\nsession_id: s\nraw: transcripts/s.jsonl\n---\n\n"
+        "raw: ~/.claude/memory/transcripts/s.jsonl\n"
+    )
+
+    normalized, legacy = adapter_oracle.normalize_archive_path(text)
+    assert normalized == text
+    assert legacy == []
 
 
 def test_oracle_rejects_a_duplicated_client_line():
