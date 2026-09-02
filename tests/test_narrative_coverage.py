@@ -161,7 +161,7 @@ def test_one_turn_claude_session_still_excluded(sandbox):
     result = _coverage()
     assert result["unprocessed"] == []
     assert result["skipped_low_turn_count"] == 1
-    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 1}
+    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 1, "grok": 1}
 
 
 def test_five_turn_claude_session_included(sandbox):
@@ -201,7 +201,7 @@ def test_explicit_min_user_turns_overrides_the_per_client_map(sandbox):
     result = _coverage(min_user_turns=5)
     assert result["unprocessed"] == []
     assert result["skipped_low_turn_count"] == 1
-    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 5}
+    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 5, "grok": 5}
 
 
 # --------------------------------------------------------------------------
