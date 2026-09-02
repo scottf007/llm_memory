@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import ModuleType
 
-from . import claude, codex
+from . import claude, codex, grok
 from .base import ClientAdapter, SessionMeta, SessionRef, Turn, conforms, project_from_cwd
 from .envelope import render_envelope, verify_envelope, write_envelope
 from .render import render_conversation, render_subagent
@@ -22,6 +22,7 @@ from .render import render_conversation, render_subagent
 _REGISTRY: dict[str, ModuleType] = {
     claude.client_name(): claude,
     codex.client_name(): codex,
+    grok.client_name(): grok,
 }
 
 for _name, _module in _REGISTRY.items():
@@ -40,6 +41,7 @@ DEFAULT = claude.client_name()
 # load-bearing filters in conversations.py and process_transcripts.py.
 _PREFIXES: dict[str, str] = {
     codex.ID_PREFIX: codex.client_name(),
+    grok.ID_PREFIX: grok.client_name(),
 }
 
 RESERVED_PREFIXES = ("agent-", "audit-")

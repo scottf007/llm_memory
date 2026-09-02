@@ -129,6 +129,25 @@ parameter, and it exists because short Claude sessions are usually noise —
 but "codex ingest works" and "codex work reaches the narrative" are different
 claims, and only the first is true by default.
 
+## What the grok adapter cost
+
+Grok's `chat_history.jsonl` has no per-record timestamp. The adapter reads
+`events.jsonl` once and assigns each retained user prompt the matching
+`turn_started` timestamp; assistant turns inherit it. A missing or short event
+stream falls back to `summary.json.created_at` and is reported in parse notes.
+
+Grok's `subagent_resume` sessions fork with a byte-identical prefix. The
+adapter retains only chain tails: a session is superseded precisely when a
+sibling names it as `parent_session_id`. On the 3 September implementation
+census that left 535 chain tails from 1,006 sessions (471 superseded parents), preventing repeated
+extraction of the same work while retaining each tail's `fork_of` provenance.
+
+The client also records many harness messages. The one reliable dialogue rule
+is **keep iff a user record carries `prompt_index`**; synthetic and keyless
+preamble records are not prompts. The same census measured 9,566 user records,
+of which 4,337 carried `prompt_index`; the remaining records were harness
+injections or startup context and are intentionally absent from the archive.
+
 ## The oracle
 
 `tools/adapter_oracle.py` regenerates stored conversations through the

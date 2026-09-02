@@ -140,6 +140,16 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
     captured inside their parent, same rule as Claude's `agent-` transcripts.
     """
     adapter = adapters.get(ref.client)
+    source_path = getattr(adapter, "source_path", lambda item: item.path)(ref)
+    envelope_path = ARCHIVE_DIR / f"{ref.session_id}.jsonl"
+    try:
+        if envelope_path.exists() and envelope_path.stat().st_mtime >= source_path.stat().st_mtime:
+            return envelope_path, CONVERSATIONS_DIR / f"{ref.session_id}.md"
+    except OSError:
+        # Parsing below provides the existing tolerant behaviour for a source
+        # that disappears or cannot be read during a sweep.
+        pass
+
     meta, turns = adapter.parse(ref)
     if meta.is_subagent:
         return None
