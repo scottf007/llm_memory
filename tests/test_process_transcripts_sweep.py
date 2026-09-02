@@ -150,3 +150,101 @@ def test_skip_applies_to_codex_too(sandbox, tmp_path, monkeypatch):
         "the D8 skip must not be grok-only -- codex sessions never change once "
         "written, so re-parsing all 127 of them on every sweep is exactly the "
         "cost D8 exists to remove")
+
+
+# ---------------------------------------------------------------------------
+# PM amendment 2 (3 Sep 2026, ruling on judge verdict 7a00ec19, finding B1):
+# D4 outranks D8. A session ingested as a chain tail can later be forked; its
+# own source file is untouched by the fork, so a skip evaluated before the
+# supersession check keeps the stale envelope + .md forever and the parent's
+# prose is extracted twice. The contract: an adapter may expose
+# `is_superseded(ref) -> bool`; process_foreign_session consults it BEFORE the
+# mtime skip, removes stale artifacts for a superseded session and returns
+# None. Adapters without that hook get the same cleanup after parse when the
+# meta reports is_subagent. The unchanged-and-not-superseded case is the
+# non-trigger control: the skip must still fire.
+# ---------------------------------------------------------------------------
+
+def test_superseded_after_envelope_exists_removes_stale_artifacts(sandbox, tmp_path, monkeypatch):
+    """Trigger (B1): tail becomes superseded; source untouched; artifacts must go."""
+    state = {"superseded": False}
+    fake = _register(monkeypatch, "fakefork", text="PARENT_PROSE")
+    fake.is_superseded = lambda ref: state["superseded"]
+    source = tmp_path / "parent.txt"
+    source.write_text("parent v1")
+    ref = SessionRef(session_id="fakefork-parent", path=source, client="fakefork")
+
+    first = pt.process_foreign_session(ref)
+    assert first is not None
+    envelope_path, md_path = first
+    assert envelope_path.exists() and md_path.exists()
+    assert "PARENT_PROSE" in md_path.read_text()
+
+    # A child fork now names this session as its parent. The parent's own
+    # source file does not change, so the mtime skip would fire if consulted
+    # first.
+    state["superseded"] = True
+    second = pt.process_foreign_session(ref)
+    assert second is None, (
+        "a superseded session must return None even when its envelope already "
+        "exists and its source is unchanged -- D4 outranks the D8 skip")
+    assert not envelope_path.exists(), "stale envelope of a superseded session must be removed"
+    assert not md_path.exists(), "stale conversation.md of a superseded session must be removed"
+    archive, conv = sandbox
+    assert sum(p.read_text().count("PARENT_PROSE") for p in conv.glob("*.md")) == 0
+
+
+def test_reparse_reporting_subagent_removes_stale_artifacts(sandbox, tmp_path, monkeypatch):
+    """Trigger (post-parse path): an adapter with no is_superseded hook whose
+    parse now reports is_subagent, after a source change, must clean up too."""
+    state = {"sub": False}
+    fake = _register(monkeypatch, "fakesub", text="PARENT_PROSE")
+    assert not hasattr(fake, "is_superseded")
+    base_meta = fake.session_meta
+
+    def session_meta(ref):
+        meta = base_meta(ref)
+        meta.is_subagent = state["sub"]
+        return meta
+
+    fake.session_meta = session_meta
+    fake.parse = lambda ref: (session_meta(ref), list(fake.turns(ref)))
+    source = tmp_path / "parent2.txt"
+    source.write_text("v1")
+    ref = SessionRef(session_id="fakesub-parent", path=source, client="fakesub")
+
+    first = pt.process_foreign_session(ref)
+    assert first is not None
+    envelope_path, md_path = first
+
+    state["sub"] = True
+    time.sleep(0.01)
+    source.write_text("v2")
+    import os
+    st = source.stat()
+    os.utime(source, (st.st_atime, st.st_mtime + 5))
+
+    second = pt.process_foreign_session(ref)
+    assert second is None
+    assert not envelope_path.exists() and not md_path.exists(), (
+        "a re-parse that reports is_subagent must remove the artifacts it "
+        "previously wrote, not leave them beside a None")
+
+
+def test_not_superseded_unchanged_source_still_skips(sandbox, tmp_path, monkeypatch):
+    """Non-trigger control: consulting is_superseded must not cost the skip."""
+    fake = _register(monkeypatch, "fakefork2")
+    fake.is_superseded = lambda ref: False
+    source = tmp_path / "tail.txt"
+    source.write_text("v1")
+    ref = SessionRef(session_id="fakefork2-tail", path=source, client="fakefork2")
+
+    first = pt.process_foreign_session(ref)
+    assert first is not None
+    envelope_path, md_path = first
+    env_mtime_1 = envelope_path.stat().st_mtime_ns
+
+    time.sleep(0.01)
+    second = pt.process_foreign_session(ref)
+    assert second is not None
+    assert second[0].stat().st_mtime_ns == env_mtime_1, "the D8 skip must still fire for a live tail"
