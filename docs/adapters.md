@@ -142,11 +142,14 @@ sibling names it as `parent_session_id`. On the 3 September implementation
 census that left 535 chain tails from 1,006 sessions (471 superseded parents), preventing repeated
 extraction of the same work while retaining each tail's `fork_of` provenance.
 
-The client also records many harness messages. The one reliable dialogue rule
-is **keep iff a user record carries `prompt_index`**; synthetic and keyless
-preamble records are not prompts. The same census measured 9,566 user records,
-of which 4,337 carried `prompt_index`; the remaining records were harness
-injections or startup context and are intentionally absent from the archive.
+The client also records many harness messages. The one reliable shipped rule
+is **keep iff a user record carries `prompt_index`**. A synthetic reason does
+not override that key: the frozen corpus includes records carrying both, and
+the pinned expectations retain them. Current implementation-census figures
+(while the live store was growing) were 9,756 user records, 4,413 carrying
+`prompt_index`, and 1,131 carrying both `prompt_index` and
+`synthetic_reason`; records without `prompt_index` are intentionally absent
+from the archive.
 
 ## The oracle
 

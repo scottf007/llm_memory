@@ -7,7 +7,7 @@ dropping the remaining record kinds:
 | Dropped | Why |
 | --- | --- |
 | ``system`` / ``reasoning`` / ``tool_result`` | Preamble, encrypted thought, or tool output; none is dialogue. |
-| user records with ``synthetic_reason`` or neither key | Harness injections and startup context, not user prompts. |
+| user records without ``prompt_index`` | Startup context and harness records not selected as prompts. |
 | ``backend_tool_call`` content | It is represented as a tool-use line marker, not prose. |
 
 Forked ``subagent_resume`` sessions duplicate their parent's complete history.
@@ -99,6 +99,11 @@ def ref_for_path(path: Path, session_id: str | None = None) -> SessionRef:
 def source_path(ref: SessionRef) -> Path:
     """The mutable source file used by the incremental-sweep mtime check."""
     return ref.path / "chat_history.jsonl"
+
+
+def is_superseded(ref: SessionRef) -> bool:
+    """Whether this session is now a fork prefix owned by a later sibling."""
+    return _is_superseded(ref)
 
 
 def _created_sort_key(path: Path) -> tuple[str, int]:
