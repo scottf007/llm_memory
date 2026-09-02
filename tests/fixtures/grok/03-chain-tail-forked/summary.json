@@ -1,0 +1,26 @@
+{
+  "info": {
+    "id": "03-chain-tail-forked",
+    "cwd": "/home/user/projects/project-67ba102a"
+  },
+  "session_summary": "<session_summary:43>",
+  "created_at": "2026-08-26T09:42:27.103069566Z",
+  "updated_at": "2026-08-26T09:42:51.010152173Z",
+  "num_messages": 32,
+  "num_chat_messages": 18,
+  "current_model_id": "grok-4.6",
+  "parent_session_id": "04-superseded-parent",
+  "forked_at": "2026-08-26T09:42:27.103069884Z",
+  "next_trace_turn": 0,
+  "chat_format_version": 1,
+  "session_kind": "subagent_resume",
+  "fork_context_source": "resumed",
+  "head_commit": "<head_commit:40>",
+  "head_branch": "<head_branch:6>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-26T09:42:51.010152173Z",
+  "generated_title": "<generated_title:43>",
+  "agent_name": "general-purpose",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

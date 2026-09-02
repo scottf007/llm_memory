@@ -1,0 +1,2 @@
+{"type": "user", "timestamp": "2026-08-23T12:40:24.544Z", "sessionId": "grok-02-single-prompt-primary", "client": "grok", "cwd": "/home/user", "message": {"role": "user", "content": "<inner:24>"}}
+{"type": "assistant", "timestamp": "2026-08-23T12:40:24.544Z", "sessionId": "grok-02-single-prompt-primary", "client": "grok", "cwd": "/home/user", "message": {"role": "assistant", "content": [{"type": "text", "text": "PONG"}]}}

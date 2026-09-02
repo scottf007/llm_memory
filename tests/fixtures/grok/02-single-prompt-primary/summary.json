@@ -1,0 +1,20 @@
+{
+  "info": {
+    "id": "02-single-prompt-primary",
+    "cwd": "/home/user"
+  },
+  "session_summary": "",
+  "created_at": "2026-08-23T12:40:23.464697416Z",
+  "updated_at": "2026-08-23T12:40:26.226454449Z",
+  "num_messages": 5,
+  "num_chat_messages": 7,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 1,
+  "chat_format_version": 1,
+  "request_id": "<request_id:36>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-23T12:40:26.226454449Z",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

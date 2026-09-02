@@ -1,0 +1,42 @@
+{"ts": "2026-08-23T12:40:23.563Z", "type": "mcp_config_resolved", "servers": [{"name": "<name:5>", "transport": "stdio", "source": "local"}, {"name": "<name:10>", "transport": "stdio", "source": "local"}], "disabled": []}
+{"ts": "2026-08-23T12:40:23.614Z", "type": "mcp_server_starting", "server_name": "fizzy", "transport": "stdio", "target": "<target:16>", "timeout_sec": 30}
+{"ts": "2026-08-23T12:40:23.614Z", "type": "mcp_server_starting", "server_name": "llm_memory", "transport": "stdio", "target": "<target:89>", "timeout_sec": 30}
+{"ts": "2026-08-23T12:40:24.541Z", "type": "mcp_server_connected", "server_name": "llm_memory", "transport": "stdio", "tool_count": 4, "duration_ms": 351, "tools": ["memory_search", "narrative_coverage", "resume", "project_lookup"]}
+{"ts": "2026-08-23T12:40:24.542Z", "type": "mcp_server_connected", "server_name": "fizzy", "transport": "stdio", "tool_count": 47, "duration_ms": 927, "tools": ["fizzy_get_identity", "fizzy_get_accounts", "fizzy_get_boards", "fizzy_get_board", "fizzy_create_board", "fizzy_update_board", "fizzy_delete_board", "fizzy_get_cards", "fizzy_get_card", "fizzy_create_card", "fizzy_update_card", "fizzy_delete_card", "fizzy_get_card_comments", "fizzy_create_comment", "fizzy_delete_comment", "fizzy_get_columns", "fizzy_get_column", "fizzy_create_column", "fizzy_update_column", "fizzy_delete_column", "fizzy_get_tags", "fizzy_get_users", "fizzy_get_user", "fizzy_update_user", "fizzy_deactivate_user", "fizzy_get_notifications", "fizzy_mark_notification_read", "fizzy_mark_notification_unread", "fizzy_mark_all_notifications_read", "fizzy_close_card", "fizzy_reopen_card", "fizzy_move_card_to_not_now", "fizzy_move_card_to_column", "fizzy_send_card_to_triage", "fizzy_toggle_card_tag", "fizzy_toggle_card_assignment", "fizzy_watch_card", "fizzy_unwatch_card", "fizzy_get_comment", "fizzy_update_comment", "fizzy_get_reactions", "fizzy_add_reaction", "fizzy_remove_reaction", "fizzy_get_step", "fizzy_create_step", "fizzy_update_step", "fizzy_delete_step"]}
+{"ts": "2026-08-23T12:40:24.542Z", "type": "mcp_init_completed", "total_servers": 2, "succeeded": 2, "failed": 0, "auth_required": 0, "total_tools": 51, "duration_ms": 928, "is_reinit": false}
+{"ts": "2026-08-23T12:40:24.544Z", "type": "turn_started", "session_id": "02-single-prompt-primary", "turn_number": 0, "model_id": "grok-4.6", "yolo_mode": true, "conversation_message_count": 3, "session_relationship": "primary", "schema_version": "1.0"}
+{"ts": "2026-08-23T12:40:24.547Z", "type": "loop_started", "loop_index": 0}
+{"ts": "2026-08-23T12:40:24.548Z", "type": "phase_changed", "phase": "waiting_for_model"}
+{"ts": "2026-08-23T12:40:25.743Z", "type": "first_token"}
+{"ts": "2026-08-23T12:40:25.743Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.743Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.743Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.746Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.746Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.746Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.746Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.791Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.791Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.791Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.791Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.823Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.823Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.873Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.874Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.874Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.874Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.914Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.958Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:25.959Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.001Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.001Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.001Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.001Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.045Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.088Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.088Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.132Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.132Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-23T12:40:26.176Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-23T12:40:26.176Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-23T12:40:26.191Z", "type": "turn_ended", "outcome": "completed"}

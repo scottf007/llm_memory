@@ -1,0 +1,23 @@
+{
+  "info": {
+    "id": "07-unattributed-cwd",
+    "cwd": "/home/user/worktrees/project-89d6ec8e"
+  },
+  "session_summary": "<session_summary:37>",
+  "created_at": "2026-08-20T01:43:41.813128774Z",
+  "updated_at": "2026-08-20T01:52:57.134471338Z",
+  "num_messages": 161,
+  "num_chat_messages": 62,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 1,
+  "chat_format_version": 1,
+  "git_root_dir": "/home/user/worktrees/project-89d6ec8e/",
+  "head_commit": "<head_commit:40>",
+  "request_id": "<request_id:36>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-20T01:52:57.134471338Z",
+  "generated_title": "<generated_title:37>",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

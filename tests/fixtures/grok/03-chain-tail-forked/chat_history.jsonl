@@ -1,0 +1,18 @@
+{"type": "system", "content": "<content:4574>"}
+{"type": "user", "content": [{"type": "text", "text": "<text:7825>"}], "synthetic_reason": "project_instructions"}
+{"type": "user", "content": [{"type": "text", "text": "<text:870>"}], "prompt_index": 0}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:118>"}], "encrypted_content": "<encrypted_content:1132>", "status": "completed"}
+{"type": "assistant", "content": "<content:136>", "tool_calls": [{"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:80>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:77>"}, {"id": "<id:43>", "name": "<name:20>", "arguments": "<arguments:341>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:8680>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:10>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:66>"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:283>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:343>"}], "encrypted_content": "<encrypted_content:3114>", "status": "completed"}
+{"type": "assistant", "content": "<content:44>", "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "user", "content": [{"type": "text", "text": "<text:870>"}], "prompt_index": 1}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:149>"}], "encrypted_content": "<encrypted_content:1163>", "status": "completed"}
+{"type": "assistant", "content": "<content:75>", "tool_calls": [{"id": "<id:43>", "name": "<name:20>", "arguments": "<arguments:341>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:3799>"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:283>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:475>"}], "encrypted_content": "<encrypted_content:5098>", "status": "completed"}
+{"type": "assistant", "content": "<content:147>", "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}

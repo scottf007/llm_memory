@@ -205,6 +205,58 @@ def test_explicit_min_user_turns_overrides_the_per_client_map(sandbox):
 
 
 # --------------------------------------------------------------------------
+# D7 (docs/design/grok-ingestion-2026-09-03.md): grok joins the per-client map
+#
+# Frozen RED on main: `_MIN_USER_TURNS_BY_CLIENT` and the hardcoded dict built
+# inside `compute_narrative_coverage` (server.py ~263, ~589) list only
+# "claude" and "codex" today. adapters.grok does not exist yet either, so
+# these do not import it -- they pin the *server* behaviour a grok-aware
+# server.py must have, independent of when the adapter itself lands.
+# --------------------------------------------------------------------------
+
+def test_one_turn_grok_session_included(sandbox):
+    """Non-trigger control mirroring the codex design-council case: grok's
+    board-driven seats are single-prompt by construction (D7), so a flat
+    default-5 threshold would drop every one of them."""
+    transcript = _write_session(sandbox, "grok-council", "demo", "grok",
+                                 [("user", DESIGN_COUNCIL_PROMPT),
+                                  ("assistant", SUBSTANTIVE_REPLY)])
+    result = _coverage()
+    assert str(transcript) in result["unprocessed"]
+    assert result["skipped_low_turn_count"] == 0
+
+
+def test_min_user_turns_by_client_carries_grok(sandbox):
+    _write_session(sandbox, "grok-anything", "demo", "grok",
+                    [("user", DESIGN_COUNCIL_PROMPT), ("assistant", SUBSTANTIVE_REPLY)])
+    result = _coverage()
+    assert result["min_user_turns_by_client"].get("grok") == 1
+
+
+def test_every_registered_adapter_has_an_explicit_threshold(sandbox):
+    """Guards the next client, not just grok: a name present in
+    `adapters.names()` with no entry here must not silently fall to the
+    Claude default of 5."""
+    import adapters
+    _write_session(sandbox, "probe", "demo", "claude",
+                    [("user", DESIGN_COUNCIL_PROMPT), ("assistant", SUBSTANTIVE_REPLY)])
+    result = _coverage()
+    for name in adapters.names():
+        assert name in result["min_user_turns_by_client"], (
+            f"{name!r} has no explicit min_user_turns entry — it would silently "
+            f"inherit the claude default")
+
+
+def test_explicit_override_still_applies_to_grok(sandbox):
+    _write_session(sandbox, "grok-council2", "demo", "grok",
+                    [("user", DESIGN_COUNCIL_PROMPT), ("assistant", SUBSTANTIVE_REPLY)])
+    result = _coverage(min_user_turns=5)
+    assert result["unprocessed"] == []
+    assert result["skipped_low_turn_count"] == 1
+    assert result["min_user_turns_by_client"].get("grok") == 5
+
+
+# --------------------------------------------------------------------------
 # Roadmap #4: _stale_session + narrative_liveness
 # --------------------------------------------------------------------------
 

@@ -1,0 +1,395 @@
+{"ts": "2026-08-13T02:09:15.451Z", "type": "mcp_config_resolved", "servers": [{"name": "<name:5>", "transport": "stdio", "source": "local"}, {"name": "<name:10>", "transport": "stdio", "source": "local"}], "disabled": []}
+{"ts": "2026-08-13T02:09:15.466Z", "type": "mcp_server_starting", "server_name": "fizzy", "transport": "stdio", "target": "<target:16>", "timeout_sec": 30}
+{"ts": "2026-08-13T02:09:15.467Z", "type": "mcp_server_starting", "server_name": "llm_memory", "transport": "stdio", "target": "<target:89>", "timeout_sec": 30}
+{"ts": "2026-08-13T02:09:15.829Z", "type": "mcp_server_failed", "server_name": "fizzy", "transport": "stdio", "target": "<target:16>", "error_type": "handshake_failed", "error_message": "<error_message:75>", "duration_ms": 276, "timeout_sec": 30}
+{"ts": "2026-08-13T02:09:15.829Z", "type": "mcp_server_connected", "server_name": "llm_memory", "transport": "stdio", "tool_count": 4, "duration_ms": 361, "tools": ["memory_search", "narrative_coverage", "resume", "project_lookup"]}
+{"ts": "2026-08-13T02:09:15.829Z", "type": "mcp_init_completed", "total_servers": 2, "succeeded": 1, "failed": 1, "auth_required": 0, "total_tools": 4, "duration_ms": 362, "is_reinit": false, "failed_servers": ["fizzy"]}
+{"ts": "2026-08-13T02:09:15.831Z", "type": "turn_started", "session_id": "01-interactive-primary", "turn_number": 0, "model_id": "grok-4.6", "yolo_mode": false, "conversation_message_count": 3, "session_relationship": "primary", "schema_version": "1.0"}
+{"ts": "2026-08-13T02:09:15.833Z", "type": "loop_started", "loop_index": 0}
+{"ts": "2026-08-13T02:09:15.833Z", "type": "phase_changed", "phase": "waiting_for_model"}
+{"ts": "2026-08-13T02:09:18.233Z", "type": "first_token"}
+{"ts": "2026-08-13T02:09:18.233Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.233Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.234Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.235Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:18.559Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.559Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.600Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.600Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.600Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.646Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.646Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.690Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.690Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.690Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.690Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.739Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.739Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.739Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.778Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.778Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.821Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.821Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.821Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.821Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:18.821Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:19.569Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:19.569Z", "type": "tool_started", "tool_name": "search_tool"}
+{"ts": "2026-08-13T02:09:19.569Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:09:19.569Z", "type": "permission_requested", "tool_name": "search_tool"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "permission_resolved", "tool_name": "search_tool", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "tool_started", "tool_name": "list_dir"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "permission_requested", "tool_name": "list_dir"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "permission_resolved", "tool_name": "list_dir", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:09:19.570Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:19.620Z", "type": "tool_completed", "tool_name": "search_tool", "duration_ms": 0, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:09:19.668Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 0, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:09:19.715Z", "type": "tool_completed", "tool_name": "list_dir", "duration_ms": 7, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:09:19.715Z", "type": "loop_started", "loop_index": 1}
+{"ts": "2026-08-13T02:09:19.715Z", "type": "phase_changed", "phase": "waiting_for_model"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "first_token"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.730Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:21.731Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:09:23.476Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.477Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.477Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.477Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.477Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.526Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.526Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.584Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.584Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.638Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.638Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.683Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.683Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.683Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.683Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.732Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.732Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.732Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.732Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.781Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.781Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.781Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.829Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.829Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.829Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.879Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.879Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:23.879Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "tool_started", "tool_name": "use_tool"}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "permission_requested", "tool_name": "use_tool"}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "permission_resolved", "tool_name": "use_tool", "decision": "cancelled", "wait_ms": 0}
+{"ts": "2026-08-13T02:09:25.560Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:09:25.564Z", "type": "turn_ended", "outcome": "cancelled", "cancellation_category": "permission_cancelled"}
+{"ts": "2026-08-13T02:11:46.704Z", "type": "mcp_config_resolved", "servers": [{"name": "<name:5>", "transport": "stdio", "source": "local"}, {"name": "<name:10>", "transport": "stdio", "source": "local"}], "disabled": []}
+{"ts": "2026-08-13T02:11:46.718Z", "type": "mcp_server_starting", "server_name": "fizzy", "transport": "stdio", "target": "<target:16>", "timeout_sec": 30}
+{"ts": "2026-08-13T02:11:46.718Z", "type": "mcp_server_starting", "server_name": "llm_memory", "transport": "stdio", "target": "<target:89>", "timeout_sec": 30}
+{"ts": "2026-08-13T02:11:46.724Z", "type": "turn_started", "session_id": "01-interactive-primary", "turn_number": 1, "model_id": "grok-4.6", "yolo_mode": false, "conversation_message_count": 16, "session_relationship": "primary", "schema_version": "1.0"}
+{"ts": "2026-08-13T02:11:47.061Z", "type": "mcp_server_failed", "server_name": "fizzy", "transport": "stdio", "target": "<target:16>", "error_type": "handshake_failed", "error_message": "<error_message:75>", "duration_ms": 268, "timeout_sec": 30}
+{"ts": "2026-08-13T02:11:47.061Z", "type": "mcp_server_connected", "server_name": "llm_memory", "transport": "stdio", "tool_count": 4, "duration_ms": 342, "tools": ["memory_search", "narrative_coverage", "resume", "project_lookup"]}
+{"ts": "2026-08-13T02:11:47.061Z", "type": "mcp_init_completed", "total_servers": 2, "succeeded": 1, "failed": 1, "auth_required": 0, "total_tools": 4, "duration_ms": 342, "is_reinit": false, "failed_servers": ["fizzy"]}
+{"ts": "2026-08-13T02:11:47.070Z", "type": "loop_started", "loop_index": 0}
+{"ts": "2026-08-13T02:11:47.070Z", "type": "phase_changed", "phase": "waiting_for_model"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "first_token"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.145Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.148Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.148Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.148Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.211Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.211Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.211Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.292Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.323Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.323Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.323Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.323Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.388Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.388Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.388Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.388Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.388Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.425Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.425Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.425Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:48.536Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.595Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.595Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.596Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.596Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.645Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.645Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.645Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.645Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.696Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.746Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.746Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.747Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.747Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.798Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.798Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:48.798Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.121Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "tool_started", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "permission_prompt"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_requested", "tool_name": "read_file"}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "permission_resolved", "tool_name": "read_file", "decision": "allow", "wait_ms": 0}
+{"ts": "2026-08-13T02:11:51.122Z", "type": "phase_changed", "phase": "tool_execution"}
+{"ts": "2026-08-13T02:11:51.173Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:11:51.221Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:11:51.270Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:43>"}
+{"ts": "2026-08-13T02:11:51.319Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:44>"}
+{"ts": "2026-08-13T02:11:51.368Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:44>"}
+{"ts": "2026-08-13T02:11:51.416Z", "type": "tool_completed", "tool_name": "read_file", "duration_ms": 1, "outcome": "success", "tool_call_id": "<tool_call_id:44>"}
+{"ts": "2026-08-13T02:11:51.417Z", "type": "loop_started", "loop_index": 1}
+{"ts": "2026-08-13T02:11:51.417Z", "type": "phase_changed", "phase": "waiting_for_model"}
+{"ts": "2026-08-13T02:11:52.575Z", "type": "first_token"}
+{"ts": "2026-08-13T02:11:52.575Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.575Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.576Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.619Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.619Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.619Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.619Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.619Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.687Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.687Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:52.718Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:58.371Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:11:58.468Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:00.189Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:00.389Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:00.438Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:00.966Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:01.301Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:04.149Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:04.296Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:04.393Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:07.353Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:07.498Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:07.547Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:08.087Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:10.733Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:10.863Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:10.952Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:10.992Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:11.125Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:11.214Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:14.519Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:14.672Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:14.672Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:14.721Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:14.770Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:15.021Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:15.171Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:18.841Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:18.991Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:19.066Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:19.091Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:19.189Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:19.239Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.101Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.247Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.471Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.472Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.517Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.745Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.928Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:21.974Z", "type": "phase_changed", "phase": "streaming_reasoning"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.648Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.660Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.660Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.660Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.660Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.705Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.752Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.752Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.752Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.752Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.752Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.801Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.801Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.801Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.851Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.852Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.899Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.946Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.946Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.946Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.993Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:22.993Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.042Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.042Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.042Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.042Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.042Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.043Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.090Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.141Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.198Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.198Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.198Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.198Z", "type": "phase_changed", "phase": "streaming_text"}
+{"ts": "2026-08-13T02:12:23.278Z", "type": "turn_ended", "outcome": "completed"}

@@ -1,0 +1,94 @@
+{"type": "system", "content": "<content:6057>"}
+{"type": "user", "content": [{"type": "text", "text": "<text:12783>"}]}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:8703>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:240>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:299>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<user_query>\n<inner:9184>\n</user_query>"}], "prompt_index": 0}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:122>"}], "encrypted_content": "<encrypted_content:502>", "status": "completed"}
+{"type": "assistant", "content": "<content:135>", "tool_calls": [{"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:81>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:77>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:128>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:64>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:10>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:3100>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:10748>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:146>"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:265>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:143>"}], "encrypted_content": "<encrypted_content:228>", "status": "completed"}
+{"type": "assistant", "content": "<content:116>", "tool_calls": [{"id": "<id:43>", "name": "<name:20>", "arguments": "<arguments:412>"}, {"id": "<id:43>", "name": "<name:8>", "arguments": "<arguments:56>"}, {"id": "<id:43>", "name": "<name:11>", "arguments": "<arguments:68>"}, {"id": "<id:43>", "name": "<name:11>", "arguments": "<arguments:27>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:6381>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:4720>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:577>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:884>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:307>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:43>", "name": "<name:30>", "arguments": "<arguments:79>"}, {"id": "<id:43>", "name": "<name:4>", "arguments": "<arguments:71>"}, {"id": "<id:44>", "name": "<name:8>", "arguments": "<arguments:146>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:85>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:2946>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:9574>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:2843>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:10502>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:260>"}], "encrypted_content": "<encrypted_content:2776>", "status": "completed"}
+{"type": "assistant", "content": "<content:139>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:619>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:64>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:82>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:82>"}, {"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:93>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:2336>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:2052>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:7992>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:164>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4025>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:764>"}], "encrypted_content": "<encrypted_content:5444>", "status": "completed"}
+{"type": "assistant", "content": "<content:115>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:1119>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:149>"}, {"id": "<id:44>", "name": "<name:8>", "arguments": "<arguments:148>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:11025>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:9091>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:20278>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:422>"}], "encrypted_content": "<encrypted_content:2442>", "status": "completed"}
+{"type": "assistant", "content": "<content:116>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:1251>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:68>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:97>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:3000>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:2383>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4404>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:520>"}], "encrypted_content": "<encrypted_content:4678>", "status": "completed"}
+{"type": "assistant", "content": "<content:134>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:837>"}, {"id": "<id:44>", "name": "<name:7>", "arguments": "<arguments:170>"}, {"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:586>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:270>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:1575>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4576>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:130>"}], "encrypted_content": "<encrypted_content:2463>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:1227>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:812>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:130>"}], "encrypted_content": "<encrypted_content:264>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:922>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:5817>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:154>"}], "encrypted_content": "<encrypted_content:519>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:2489>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:879>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:422>"}], "encrypted_content": "<encrypted_content:2770>", "status": "completed"}
+{"type": "assistant", "content": "<content:103>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:669>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:101>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:101>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:5415>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:6353>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:16221>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:1019>"}], "encrypted_content": "<encrypted_content:7439>", "status": "completed"}
+{"type": "assistant", "content": "<content:83>", "tool_calls": [{"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:164>"}, {"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:170>"}, {"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:221>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:177>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:175>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:11596>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:3667>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:7109>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:451>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:109>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:265>"}], "encrypted_content": "<encrypted_content:2498>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:160>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:173>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:175>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:176>"}, {"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:1846>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4375>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:3369>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4055>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:1894>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:8214>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:1871>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:176>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:176>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:176>"}, {"id": "<id:44>", "name": "<name:10>", "arguments": "<arguments:509>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:349>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:6906>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:10639>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4318>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:500>"}], "encrypted_content": "<encrypted_content:4836>", "status": "completed"}
+{"type": "assistant", "content": "<content:109>", "tool_calls": [{"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:175>"}, {"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:5247>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:4049>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:612>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:955>", "status": "completed"}
+{"type": "assistant", "content": "<content:101>", "tool_calls": [{"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:3721>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:284>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:878>"}], "encrypted_content": "<encrypted_content:9418>", "status": "completed"}
+{"type": "backend_tool_call", "kind": {"tool_type": "web_search", "action": {"type": "search", "query": "<query:46>", "sources": [{"type": "url", "url": "<url:102>"}, {"type": "url", "url": "<url:66>"}, {"type": "url", "url": "<url:103>"}, {"type": "url", "url": "<url:60>"}, {"type": "url", "url": "<url:27>"}]}, "id": "<id:84>", "status": "completed"}}
+{"type": "reasoning", "id": "<id:85>", "summary": [], "encrypted_content": "<encrypted_content:13134>", "status": "completed"}
+{"type": "assistant", "content": "", "tool_calls": [{"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:205>"}, {"id": "<id:44>", "name": "<name:4>", "arguments": "<arguments:201>"}, {"id": "<id:44>", "name": "<name:20>", "arguments": "<arguments:1463>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:109>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:44>", "content": "<content:109>"}
