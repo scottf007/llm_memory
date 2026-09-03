@@ -13,6 +13,40 @@ if [ "$1" = "--update" ] || [ "$1" = "--quiet" ]; then
     QUIET=true
 fi
 
+# An installed updater replaces $LIB_DIR/install.sh below. Bash reads shell
+# scripts lazily, so replacing the file currently being interpreted can make
+# the remainder of this process come from mismatched byte offsets. Re-exec a
+# temporary copy before doing any work; the copy remains stable while the
+# installed path is updated. The guard prevents the temporary copy from
+# recursively copying itself.
+if [ "$1" = "--update" ] && [ "${LLM_MEMORY_INSTALL_REEXEC:-}" != "1" ]; then
+    SCRIPT_PATH="$(cd -- "$(dirname -- "$0")" && pwd -P)/$(basename -- "$0")"
+    if [ "$SCRIPT_PATH" = "$LIB_DIR/install.sh" ]; then
+        REEXEC_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/llm-memory-install.XXXXXX") || {
+            echo "  ERROR: Could not create a safe temporary installer for update." >&2
+            exit 1
+        }
+        if ! cp "$SCRIPT_PATH" "$REEXEC_SCRIPT"; then
+            rm -f "$REEXEC_SCRIPT"
+            echo "  ERROR: Could not prepare a safe temporary installer for update." >&2
+            exit 1
+        fi
+        export LLM_MEMORY_INSTALL_REEXEC=1
+        export LLM_MEMORY_INSTALL_REEXEC_TMP="$REEXEC_SCRIPT"
+        if ! exec bash "$REEXEC_SCRIPT" "$@"; then
+            rm -f "$REEXEC_SCRIPT"
+            echo "  ERROR: Could not start the safe temporary installer for update." >&2
+            exit 1
+        fi
+    fi
+fi
+
+# The re-exec child may fail before it creates the download staging directory,
+# so install its cleanup trap now as well as in the later combined cleanup.
+if [ -n "${LLM_MEMORY_INSTALL_REEXEC_TMP:-}" ]; then
+    trap 'rm -f "${LLM_MEMORY_INSTALL_REEXEC_TMP:-}"' EXIT
+fi
+
 log() {
     if [ "$QUIET" = false ]; then
         echo "$@"
@@ -138,7 +172,12 @@ AUTH_HEADER=()
 [ -n "$TOKEN" ] && AUTH_HEADER=(-H "Authorization: token $TOKEN")
 
 TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+trap 'rm -rf "$TMPDIR"; rm -f "${LLM_MEMORY_INSTALL_REEXEC_TMP:-}"' EXIT
+
+# Only write VERSION after every install step succeeds. If a later required
+# step exits under `set -e`, the prior VERSION causes the next update to retry
+# instead of claiming the partially-applied source tree is current.
+UPDATED_VERSION=""
 
 # Get the latest commit hash
 REMOTE_SHA=$(curl -sf "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/commits/$BRANCH" | jq -r '.sha' 2>/dev/null)
@@ -163,7 +202,10 @@ else
         log "  Already up to date ($REMOTE_SHA)."
     else
         # Download and extract (api.github.com/tarball endpoint works for both public and private)
-        curl -sL "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/tarball/$BRANCH" | tar xz -C "$TMPDIR"
+        if ! curl -fsSL "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/tarball/$BRANCH" | tar xz -C "$TMPDIR"; then
+            echo "  ERROR: Download or extraction failed; installation was not marked current." >&2
+            exit 1
+        fi
         # The api/tarball endpoint names the top dir {user}-{repo}-{sha_short}, so
         # detect it dynamically rather than assuming the archive/refs/heads name.
         EXTRACTED=$(find "$TMPDIR" -mindepth 1 -maxdepth 1 -type d | head -1)
@@ -287,14 +329,7 @@ else
             write_marker "$LIB_DIR/agents/.llm_memory_owned" "$EXTRACTED/agents/*.md"
         fi
 
-        # Store version
-        echo "$REMOTE_SHA" > "$LIB_DIR/VERSION"
-
-        if [ -n "$LOCAL_SHA" ]; then
-            log "  Updated: ${LOCAL_SHA:0:8} → ${REMOTE_SHA:0:8}"
-        else
-            log "  Downloaded version ${REMOTE_SHA:0:8}"
-        fi
+        UPDATED_VERSION="$REMOTE_SHA"
     fi
 fi
 
@@ -502,6 +537,15 @@ fi
 mkdir -p "$HOME/.local/bin"
 ln -sf "$LIB_DIR/dashboard.sh" "$HOME/.local/bin/llm-memory-dashboard"
 log "  Dashboard available as: llm-memory-dashboard"
+
+if [ -n "$UPDATED_VERSION" ]; then
+    echo "$UPDATED_VERSION" > "$LIB_DIR/VERSION"
+    if [ -n "$LOCAL_SHA" ]; then
+        log "  Updated: ${LOCAL_SHA:0:8} → ${UPDATED_VERSION:0:8}"
+    else
+        log "  Downloaded version ${UPDATED_VERSION:0:8}"
+    fi
+fi
 
 log ""
 log "=== Install complete ==="
