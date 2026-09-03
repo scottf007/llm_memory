@@ -189,25 +189,35 @@ plain byte equality.
 
 ### Known pre-existing drift
 
-On **2026-09-03**, this command measured the live corpus after the
+On **2026-09-03**, from
+`/home/scott/projects/llm_memory/.agent-messages/jobs/llm-memory-pipeline/runtime/worktrees/followups-codex`, this command measured the live corpus after the
 per-client routing fix:
 
 ```bash
 /home/scott/projects/llm_memory/.venv/bin/python3 tools/adapter_oracle.py --all
 ```
 
-It reported **9,589 OK / 43 FAIL / 0 unavailable** across 9,632 stored
-conversations: **Claude 8,554 OK / 42 FAIL / 0 unavailable; Codex 472 OK /
-0 FAIL / 0 unavailable; Grok 563 OK / 1 FAIL / 0 unavailable.** The Codex
-and Grok files are now rendered through their owning adapter using each
-stored file's `raw_source:`, rather than through the Claude adapter reading
-the project's envelope.
+It reported **9,603 OK / 43 FAIL / 0 unavailable** across 9,646 stored
+conversations: **Claude 8,567 OK / 42 FAIL / 0 unavailable; Codex 473 OK /
+0 FAIL / 0 unavailable; Grok 563 OK / 1 FAIL / 0 unavailable.** The corpus
+grows daily, so the denominator moves. Codex and Grok files are rendered
+through their owning adapter using each stored file's `raw_source:`, rather
+than through the Claude adapter reading the project's envelope.
 
-The remaining Grok failure is a real stale-session mismatch, not an adapter
-compatibility gap: `grok-01a05f66-e1b1-76a0-a054-0ce056324519` was stored at
-386 turns, while its still-present raw source had advanced to 424 turns.
-The 42 Claude mismatches remain ordinary corpus drift to investigate by their
-individual diffs; they are not suppressed by the oracle.
+The Claude failures have three known classifications:
+
+- **Stale sources**: the stored `.md` was written while the transcript was
+  still growing, so regeneration has more turns and a later `ended` value.
+- **`7a8a83ff`** is timestamp-only drift: its `ended` value differs by 118 ms,
+  with the same turns and body bytes.
+- **`08d89c12`** is `[L:N]`-header-only provenance drift: 66 lines differ,
+  entirely assistant headers (53 shifted references and 13 missing
+  references), with no conversation text or timestamp difference.
+
+The remaining Grok failure,
+`grok-01a05f66-e1b1-76a0-a054-0ce056324519`, is likewise a still-growing raw
+source rather than an adapter compatibility gap. These mismatches are not
+suppressed by the oracle.
 
 They are not suppressed anywhere. The sample is drawn blind — by age, size and
 project, with no knowledge of which sessions pass. If a future draw does
