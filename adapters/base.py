@@ -141,8 +141,9 @@ def make_adapter_parser(
 
     Each adapter owns ``parse_impl`` because transcript record formats vary by
     client. The facade owns a one-entry cache. File-backed adapters use their
-    transcript stat by default; directory-backed adapters can supply a key
-    spanning the source files they depend on.
+    transcript stat by default; that ensures a still-growing transcript is
+    reread. Directory-backed adapters can supply a key spanning the source
+    files they depend on.
     """
     cache: tuple[CacheKey, ParseResult] | None = None
 
@@ -174,6 +175,9 @@ def make_adapter_parser(
         """Iterate over the turns half of the cached parse result."""
         return iter(parse(ref)[1])
 
+    # These functions are installed on an adapter module, not exported from
+    # this helper. Preserve that public identity for tracebacks and AST tools
+    # such as UAI, while retaining the shared closure/cache implementation.
     for fn, name in ((parse, "parse"), (session_meta, "session_meta"), (turns, "turns")):
         fn.__module__ = parse_impl.__module__
         fn.__qualname__ = name

@@ -13,6 +13,7 @@ unchanged and pinned byte-for-byte by tests/test_adapter_oracle.py.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
@@ -188,4 +189,22 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     return meta, turns
 
 
-parse, session_meta, turns = make_adapter_parser(_parse)
+# The shared facade's one-entry memo means session_meta() + turns() on the
+# same file costs one read. Its content stamp ensures a still-growing
+# transcript is reread rather than silently truncated.
+_parse_facade, _session_meta_facade, _turns_facade = make_adapter_parser(_parse)
+
+
+@functools.wraps(_parse_facade)
+def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
+    return _parse_facade(ref)
+
+
+@functools.wraps(_session_meta_facade)
+def session_meta(ref: SessionRef) -> SessionMeta:
+    return _session_meta_facade(ref)
+
+
+@functools.wraps(_turns_facade)
+def turns(ref: SessionRef) -> Iterator[Turn]:
+    return _turns_facade(ref)

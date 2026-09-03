@@ -20,9 +20,11 @@ summary's ``created_at`` and record that observation in ``meta.notes``.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
+from typing import Iterator
 from urllib.parse import unquote
 
 from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_parser, project_from_cwd
@@ -309,4 +311,19 @@ def cache_key(ref: SessionRef) -> tuple[object, ...] | None:
     return str(ref.path), (history_stat.st_mtime_ns, history_stat.st_size), *other_stats
 
 
-parse, session_meta, turns = make_adapter_parser(_parse, cache_key=cache_key)
+_parse_facade, _session_meta_facade, _turns_facade = make_adapter_parser(_parse, cache_key=cache_key)
+
+
+@functools.wraps(_parse_facade)
+def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
+    return _parse_facade(ref)
+
+
+@functools.wraps(_session_meta_facade)
+def session_meta(ref: SessionRef) -> SessionMeta:
+    return _session_meta_facade(ref)
+
+
+@functools.wraps(_turns_facade)
+def turns(ref: SessionRef) -> Iterator[Turn]:
+    return _turns_facade(ref)

@@ -54,10 +54,12 @@ to the source line, exactly as for Claude.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import sys
 from pathlib import Path
+from typing import Iterator
 
 from tools.memory_config import memory_root
 
@@ -287,4 +289,19 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     return meta, turns
 
 
-parse, session_meta, turns = make_adapter_parser(_parse)
+_parse_facade, _session_meta_facade, _turns_facade = make_adapter_parser(_parse)
+
+
+@functools.wraps(_parse_facade)
+def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
+    return _parse_facade(ref)
+
+
+@functools.wraps(_session_meta_facade)
+def session_meta(ref: SessionRef) -> SessionMeta:
+    return _session_meta_facade(ref)
+
+
+@functools.wraps(_turns_facade)
+def turns(ref: SessionRef) -> Iterator[Turn]:
+    return _turns_facade(ref)
