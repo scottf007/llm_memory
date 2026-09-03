@@ -147,10 +147,16 @@ def test_marking_rule_applies_test_live_prefix_and_explicit_list_not_others(pyte
     case doesn't depend on this repo's real file layout. Today this fails at
     collection: `tests/conftest.py` defines neither the hook nor the
     constant yet.
+
+    `pytester.runpytest()` runs the nested session in-process, so its item
+    node ids come out relative to *this* session's rootdir, not the temp
+    project's own directory (a pytester quirk, confirmed by printing
+    `item.nodeid` from inside the hook) -- the expected prefix is computed
+    from `pytester.path` rather than assumed as a bare filename.
     """
     import tests.conftest as target_conftest
 
-    pytester.makepyfile(marking_probe="""
+    pytester.makepyfile(test_marking_probe="""
 def test_live_x():
     pass
 
@@ -167,21 +173,22 @@ import sys
 sys.path.insert(0, {str(REPO_ROOT)!r})
 from tests.conftest import pytest_collection_modifyitems  # noqa: F401
 """)
+    probe_prefix = f"{os.path.relpath(pytester.path, start=REPO_ROOT)}/test_marking_probe.py"
     monkeypatch.setattr(
         target_conftest,
         "LIVE_CORPUS_NODE_IDS",
-        ("marking_probe.py::test_explicit_target",),
+        (f"{probe_prefix}::test_explicit_target",),
         raising=False,
     )
 
     result = pytester.runpytest("--collect-only", "-q", "-m", "live_corpus")
     collected = {
         line.strip() for line in result.stdout.lines
-        if line.strip().startswith("marking_probe.py::")
+        if line.strip().startswith(f"{probe_prefix}::")
     }
     assert collected == {
-        "marking_probe.py::test_live_x",
-        "marking_probe.py::test_explicit_target",
+        f"{probe_prefix}::test_live_x",
+        f"{probe_prefix}::test_explicit_target",
     }, f"stdout:\n{result.stdout.str()}"
 
 
