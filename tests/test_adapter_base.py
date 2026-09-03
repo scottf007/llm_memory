@@ -279,15 +279,42 @@ def test_grok_missing_chat_history_is_not_cached(tmp_path):
     assert first_meta is not second_meta
 
 
-def test_registered_adapter_facades_share_the_same_underlying_code_object():
-    """Proves consolidation happened for every registered adapter, grok
-    included, rather than a third hand-rolled cache/dispatch copy surviving
-    alongside the shared facade.
-    """
-    for name in ("parse", "session_meta", "turns"):
-        code_objects = {
-            client: getattr(adapters.get(client), name).__code__ for client in adapters.names()
-        }
-        first = next(iter(code_objects.values()))
-        for client, code in code_objects.items():
-            assert code is first, f"{client}.{name} does not share the facade's code object"
+# PM amendment 3 (3 Sep 2026, ruling on judge verdict fc3c9c53, Finding 1):
+# the original shared-__code__ assertion was mutually exclusive with UAI
+# visibility -- a closure returned from make_adapter_parser is never a
+# FunctionDef in the adapter module, so `uai callers adapters.<client>.parse`
+# stops resolving, which is the property 37e9bc9 exists to protect. The
+# contract is now: each adapter module carries top-level `def parse`,
+# `def session_meta`, `def turns` (what the AST reader extracts), and each
+# of those exposes `__wrapped__` pointing at the shared facade closure, so
+# consolidation is still proven -- the wrapped closures share one __code__
+# object across every registered adapter.
+import ast
+import inspect
+
+FACADE_NAMES = ("parse", "session_meta", "turns")
+
+
+@pytest.mark.parametrize("adapter", [claude, codex, grok])
+def test_adapter_facades_are_top_level_defs_visible_to_ast_tools(adapter):
+    """UAI (an AST reader) must see `def parse/session_meta/turns` in the adapter module."""
+    tree = ast.parse(inspect.getsource(adapter))
+    defs = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    missing = [name for name in FACADE_NAMES if name not in defs]
+    assert not missing, f"{adapter.__name__}: no top-level def for {missing}; uai callers cannot resolve them"
+
+
+def test_registered_adapter_facades_delegate_to_one_shared_implementation():
+    """Consolidation proof: every adapter's def wraps a facade closure from
+    make_adapter_parser, and those closures share one __code__ object across
+    clients -- no adapter may keep a third hand-rolled cache."""
+    modules = [adapters.get(name) for name in adapters.names()]
+    for name in FACADE_NAMES:
+        codes = set()
+        for module in modules:
+            fn = getattr(module, name)
+            inner = getattr(fn, "__wrapped__", None)
+            assert inner is not None, f"{module.__name__}.{name} does not wrap a shared facade closure"
+            assert inner is not fn
+            codes.add(inner.__code__)
+        assert len(codes) == 1, f"{name}: {len(codes)} distinct facade implementations across adapters"
