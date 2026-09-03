@@ -121,3 +121,13 @@ Files changed: `adapters/grok.py` (new), `adapters/__init__.py`, `server.py` (tw
 - **A3.3** No `session_kind`/`fork_of`/title-based exclusion: D4's choice to ingest real seat work in subagent tails stands, and titles are not a contract.
 
 **Acceptance.** `narrative_coverage(finance_nexus)` lists none of the 43 keep-alive forks the feedback named and still lists the ≥3-prompt seat sessions; the owner's load_balancer session (21 prompts) is unaffected.
+
+### A3.5 — keep-alive loops are a harness pattern, filtered like codex-auto (ruled 3 Sep 13:0x)
+
+**Why the threshold was not enough.** Measured on the candidate for A3.1–A3.4: `narrative_coverage(finance_nexus)` still listed 44 grok transcripts. Every one is a self-wake keep-alive fork carrying ten scheduled-task prompts that are plain `prompt_index` records (no `synthetic_reason`), with 70–140 assistant characters per turn ("Board quiet after drain … Keep-alive stays running"). A working grok seat's scheduled prompt is structurally identical (same `<system-reminder> Scheduled task …` header) but carries a brief with real work and substantive replies. No threshold and no `synthetic_reason` rule separates them.
+
+**What does.** The keep-alive prompt body is a fixed harness recipe: it opens `Self-wake keep-alive for seat <seat> on job <job>. Run ONLY:` followed by `am sync`/`am heartbeat` lines and "Do NOT am post". Store-wide census (564 stored grok sessions): 326 first kept prompts carry the phrase `keep-alive for seat` — all in finance_nexus — and 325 of those 326 also have a `Keep-alive …` title; 4 sessions are `self-wake tick` work prompts (real seat work: judges, implementers) and 209 are plain prompts.
+
+**Decision.** `compute_narrative_coverage` gains a grok-scoped marker check on the first kept user message of the envelope, exactly parallel to `_is_codex_auto_participant`: a grok session whose first kept prompt contains `keep-alive for seat` (case-insensitive) is skipped under a new `skipped_grok_keepalive_count` and named in the filter note. Claude/codex sessions quoting the phrase are not affected (client-scoped). The adapter is unchanged: those sessions stay archived (provenance), they are simply not narrative material. Upstream ask filed with agent-messaging: keep-alive loops should carry a structural marker so this filter need not depend on a PM's wording.
+
+**Acceptance.** `narrative_coverage(finance_nexus)` lists none of the keep-alive forks and still lists the ≥3-prompt work sessions; the four `self-wake tick` sessions store-wide remain listed or processed.
