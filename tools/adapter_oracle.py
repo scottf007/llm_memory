@@ -9,7 +9,7 @@ running, not to be a one-off.
 
 What it asserts, per sampled session:
 
-    render(adapters.claude.parse(transcript))  ==  the stored .md
+    render(adapters.get(owner).parse(source))  ==  the stored .md
 
 byte for byte, with two declared frontmatter migrations: the `client:` line
 that S1 added, and the relocation-safe `raw: transcripts/<sid>.jsonl` form.
@@ -86,8 +86,25 @@ def normalize_archive_path(text: str) -> tuple[str, list[str]]:
 
 
 def regenerate(session_id: str) -> str:
-    """Render a stored session through the adapter, as production would."""
-    return adapters.render(claude_adapter.ref_for_path(ARCHIVE_DIR / f"{session_id}.jsonl"))
+    """Render a stored session through the adapter that owns its id.
+
+    Claude's archive contains its original transcript. Foreign-client archive
+    entries are deliberately Claude-shaped envelopes, so their stored
+    ``raw_source`` instead names the original client file. Grok records that
+    source as ``<session-dir>/chat_history.jsonl`` while its adapter takes the
+    containing directory; all other current foreign adapters take the source
+    path itself.
+    """
+    owner = adapters.client_for_session_id(session_id)
+    adapter = adapters.get(owner)
+    if owner == adapters.DEFAULT:
+        return adapters.render(claude_adapter.ref_for_path(ARCHIVE_DIR / f"{session_id}.jsonl"))
+
+    stored_path = CONV_DIR / f"{session_id}.md"
+    raw_source = Path(_stored_field(stored_path, "raw_source"))
+    if owner == "grok" and raw_source.name == "chat_history.jsonl":
+        raw_source = raw_source.parent
+    return adapters.render(adapter.ref_for_path(raw_source, session_id=session_id))
 
 
 def compare(
@@ -168,17 +185,25 @@ def compare(
 def check(session_id: str) -> tuple[bool, str, list[str]]:
     """Return (ok, detail, diff_lines) for one stored session."""
     stored_path = CONV_DIR / f"{session_id}.md"
-    jsonl_path = ARCHIVE_DIR / f"{session_id}.jsonl"
     if not stored_path.exists():
         return False, "no stored conversation .md", []
-    if not jsonl_path.exists():
+
+    owner = adapters.client_for_session_id(session_id)
+    adapter = adapters.get(owner)
+    if owner != adapters.DEFAULT:
+        raw_source = _stored_field(stored_path, "raw_source")
+        if not raw_source:
+            return False, "unavailable: raw_source missing", []
+        if not Path(raw_source).exists():
+            return False, f"unavailable: raw_source missing ({raw_source})", []
+    elif not (ARCHIVE_DIR / f"{session_id}.jsonl").exists():
         return False, "no archived transcript", []
 
     return compare(
         stored_path.read_bytes(),
         regenerate(session_id),
         session_id,
-        expected_client=claude_adapter.client_name(),
+        expected_client=adapter.client_name(),
     )
 
 
@@ -317,7 +342,7 @@ def main() -> int:
         sessions = [
             md.stem
             for md in sorted(CONV_DIR.glob("*.md"))
-            if not md.stem.startswith(("agent-", "audit-")) and (ARCHIVE_DIR / f"{md.stem}.jsonl").exists()
+            if not md.stem.startswith(("agent-", "audit-"))
         ]
     elif args.select:
         sessions = select(args.select)
@@ -342,17 +367,38 @@ def main() -> int:
         print("Sample is empty; nothing to check.", file=sys.stderr)
         return 0
 
-    failures = 0
+    counts = {
+        client: {"ok": 0, "fail": 0, "unavailable": 0}
+        for client in adapters.names()
+    }
     for sid in sessions:
         ok, detail, diff = check(sid)
-        status = "OK  " if ok else "FAIL"
+        client = adapters.client_for_session_id(sid)
+        if ok:
+            status = "OK  "
+            counts[client]["ok"] += 1
+        elif detail.startswith("unavailable:"):
+            status = "UNAV"
+            counts[client]["unavailable"] += 1
+        else:
+            status = "FAIL"
+            counts[client]["fail"] += 1
         print(f"{status} {sid}  {detail}")
-        if not ok:
-            failures += 1
+        if not ok and not detail.startswith("unavailable:"):
             if args.verbose:
                 sys.stdout.writelines(diff)
 
-    print(f"\n{len(sessions) - failures}/{len(sessions)} sessions reproduce byte-for-byte.")
+    failures = sum(count["fail"] for count in counts.values())
+    reproduced = sum(count["ok"] for count in counts.values())
+    unavailable = sum(count["unavailable"] for count in counts.values())
+    per_client = "; ".join(
+        f"{client}: ok={count['ok']} fail={count['fail']} unavailable={count['unavailable']}"
+        for client, count in counts.items()
+    )
+    print(
+        f"\nSummary: {per_client}; total: ok={reproduced} fail={failures} "
+        f"unavailable={unavailable} sessions={len(sessions)}."
+    )
     return 1 if failures else 0
 
 
