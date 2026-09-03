@@ -189,28 +189,30 @@ plain byte equality.
 
 ### Known pre-existing drift
 
-`--all` reports 10 sessions that do not reproduce (out of ~5,540 — the corpus
-grows daily, so the denominator moves). All 10 fail on `main` too, and the two
-extractors produce byte-identical output for each of them, so the refactor
-changes nothing about them. Three kinds:
+On **2026-09-03**, this command measured the live corpus after the
+per-client routing fix:
 
-- **Eight are stale**: the stored `.md` was written while the transcript was
-  still growing, so regeneration produces *more* turns and a later `ended`
-  (`810372f1`: 15 → 116 turns). That is the stale-session problem, and it
-  belongs to whoever fixes staleness.
-- **`7a8a83ff`** differs only in `ended`, by 118 ms. Same turns, same bytes.
-- **`08d89c12`** is the odd one, and worth stating precisely because it is
-  easy to mis-file as data loss. Of 8,554 lines, 66 differ, and every one of
-  the 66 is an `=== assistant … [L:N] ===` header: 53 where the ref shifts by
-  1–6 lines, 13 where a ref disappears. No line of conversation text differs
-  and no timestamp differs. It is `[L:N]` provenance drift from an archived
-  transcript structurally offset from the one that produced the `.md` — an
-  archive-integrity question, not lost narrative.
+```bash
+/home/scott/projects/llm_memory/.venv/bin/python3 tools/adapter_oracle.py --all
+```
+
+It reported **9,589 OK / 43 FAIL / 0 unavailable** across 9,632 stored
+conversations: **Claude 8,554 OK / 42 FAIL / 0 unavailable; Codex 472 OK /
+0 FAIL / 0 unavailable; Grok 563 OK / 1 FAIL / 0 unavailable.** The Codex
+and Grok files are now rendered through their owning adapter using each
+stored file's `raw_source:`, rather than through the Claude adapter reading
+the project's envelope.
+
+The remaining Grok failure is a real stale-session mismatch, not an adapter
+compatibility gap: `grok-01a05f66-e1b1-76a0-a054-0ce056324519` was stored at
+386 turns, while its still-present raw source had advanced to 424 turns.
+The 42 Claude mismatches remain ordinary corpus drift to investigate by their
+individual diffs; they are not suppressed by the oracle.
 
 They are not suppressed anywhere. The sample is drawn blind — by age, size and
-project, with no knowledge of which sessions pass — and simply did not land on
-one of the ten. If a future draw does include one, the way to tell the two
-kinds of failure apart is to run the same session through `main`'s
+project, with no knowledge of which sessions pass. If a future draw does
+include one, the way to tell drift from a regression is to run the same
+session through `main`'s
 `extract_conversation.extract()`: if it mismatches there too, it is drift, not
 a regression. A suppression list would be easier and would be the end of the
 oracle.
