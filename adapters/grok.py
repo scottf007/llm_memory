@@ -184,11 +184,8 @@ def _is_superseded(ref: SessionRef) -> bool:
 
 
 def _relative_source(path: Path) -> str:
-    """Keep fixture provenance portable while retaining absolute live paths."""
-    try:
-        return str(path.relative_to(Path.cwd()))
-    except ValueError:
-        return str(path)
+    """Return the source location independently of the caller's cwd."""
+    return str(Path(path).resolve())
 
 
 def _event_timestamps(path: Path) -> list[str]:

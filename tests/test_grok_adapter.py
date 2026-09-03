@@ -113,6 +113,10 @@ def test_fixtures_are_present():
 def test_fixture_renders_to_its_pinned_conversation(path):
     meta, turns = _parse_fixture(path)
     expected = (FIXTURE_DIR / f"{path.name}.expected.md").read_text()
+    expected = expected.replace(
+        f"raw_source: tests/fixtures/grok/{path.name}/chat_history.jsonl",
+        f"raw_source: {path / 'chat_history.jsonl'}",
+    )
     assert adapters.render_conversation(meta, turns) == expected
 
 
@@ -125,13 +129,30 @@ def test_fixture_renders_to_its_pinned_envelope(path):
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.name)
 def test_fixture_frontmatter_carries_grok_provenance(path):
-    md = (FIXTURE_DIR / f"{path.name}.expected.md").read_text()
+    md = adapters.render_conversation(*_parse_fixture(path))
     head = md.split("\n---\n", 1)[0]
     assert "client: grok\n" in head
     assert "raw: transcripts/grok-" in head
     if "agent_session: true" not in head:
         # Only non-subagent fixtures carry raw_source and the D9 provenance.
-        assert f"raw_source: tests/fixtures/grok/{path.name}/chat_history.jsonl" in head
+        assert f"raw_source: {path / 'chat_history.jsonl'}" in head
+
+
+def test_rendered_fixture_is_independent_of_the_callers_working_directory(monkeypatch, tmp_path):
+    """T-F4: Grok provenance is an absolute source path, not cwd-relative."""
+    path = FIXTURE_DIR / "02-single-prompt-primary"
+    first_cwd = tmp_path / "one"
+    second_cwd = tmp_path / "two"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+
+    monkeypatch.chdir(first_cwd)
+    first = adapters.render_conversation(*_parse_fixture(path))
+    monkeypatch.chdir(second_cwd)
+    second = adapters.render_conversation(*_parse_fixture(path))
+
+    assert first == second
+    assert f"raw_source: {path / 'chat_history.jsonl'}" in first
 
 
 def test_chain_tail_fixture_carries_fork_of():
