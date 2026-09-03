@@ -17,6 +17,7 @@ import functools
 import json
 import re
 from pathlib import Path
+from typing import Iterator
 
 from tools.memory_config import memory_root
 
