@@ -63,6 +63,17 @@ _LIVE_CORPUS_NAME_EXCLUSIONS = {
 }
 
 
+def unclassified_live_name_node_ids(items) -> tuple[str, ...]:
+    """Return ``test_live_`` rows absent from both live-corpus classifications."""
+    return tuple(sorted({
+        item.nodeid.split("[", 1)[0]
+        for item in items
+        if getattr(item, "originalname", item.name).startswith("test_live_")
+        and item.nodeid.split("[", 1)[0] not in _LIVE_CORPUS_NODE_ID_BASES
+        and item.nodeid.split("[", 1)[0] not in _LIVE_CORPUS_NAME_EXCLUSIONS
+    }))
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items):
     """Mark the static live-store census without importing adapters or stores."""
@@ -71,7 +82,7 @@ def pytest_collection_modifyitems(items):
         node_id_base = item.nodeid.split("[", 1)[0]
         if item.nodeid in LIVE_CORPUS_NODE_IDS or node_id_base in _LIVE_CORPUS_NODE_ID_BASES or (
             function_name.startswith("test_live_")
-            and item.nodeid not in _LIVE_CORPUS_NAME_EXCLUSIONS
+            and node_id_base not in _LIVE_CORPUS_NAME_EXCLUSIONS
         ):
             item.add_marker(pytest.mark.live_corpus)
 
