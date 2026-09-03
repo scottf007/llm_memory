@@ -148,10 +148,12 @@ hooks_path = sys.argv[1]
 hooks_dir = sys.argv[2]
 try:
     raw = open(hooks_path).read()
-    hooks = json.loads(raw)
+    document = json.loads(raw)
 except (FileNotFoundError, json.JSONDecodeError):
     raw = ""
-    hooks = {}
+    document = {}
+if not isinstance(document, dict):
+    document = {}
 
 # Preserve the file's house style when making the first Codex addition.  JSON
 # cannot retain arbitrary trivia, but matching its indentation and final
@@ -161,8 +163,8 @@ indent = indent_match.group(1) if indent_match else 2
 indent_text = indent if isinstance(indent, str) else " " * indent
 trailing_newline = raw.endswith("\n")
 
-def raw_top_level_members(text):
-    """Return untouched top-level members, minus their leading indentation."""
+def raw_object_members(text):
+    """Return raw members of a JSON object, minus leading indentation."""
     if not text:
         return {}
     decoder = json.JSONDecoder()
@@ -192,15 +194,38 @@ def raw_top_level_members(text):
             index += 1
     return members
 
-raw_members = raw_top_level_members(raw)
-original_hooks = dict(hooks)
+raw_members = raw_object_members(raw)
 
 owned_suffixes = ("/codex_session_start.sh", "/codex_session_end.sh")
+event_names = (
+    "SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse",
+    "PostToolUse", "Stop", "SubagentStart", "SubagentStop",
+)
+
+# T-F13: Codex requires an outer ``hooks`` object.  Our earlier installer
+# wrote event names at top level.  Recognise and move only documented event
+# names, retaining descriptions and arbitrary owner metadata at top level.
+legacy_events = {event: document.pop(event) for event in event_names if event in document}
+existing_hooks = document.get("hooks", {})
+if not isinstance(existing_hooks, dict):
+    existing_hooks = {}
+for event, entries in legacy_events.items():
+    current = existing_hooks.get(event, [])
+    if isinstance(current, list) and isinstance(entries, list):
+        existing_hooks[event] = current + entries
+    elif event not in existing_hooks:
+        existing_hooks[event] = entries
+document["hooks"] = existing_hooks
+hooks = existing_hooks
+original_hooks = dict(hooks)
+raw_hooks_members = raw_object_members(raw_members.get("hooks", ""))
 
 def is_owned(entry):
+    if not isinstance(entry, dict):
+        return False
     return any(
-        any(suffix in str(hook.get("command", "")) for suffix in owned_suffixes)
-        for hook in entry.get("hooks", [])
+        isinstance(hook, dict) and any(suffix in str(hook.get("command", "")) for suffix in owned_suffixes)
+        for hook in entry.get("hooks", []) if isinstance(entry.get("hooks", []), list)
     )
 
 configs = {
@@ -209,8 +234,10 @@ configs = {
         "hooks": [{"type": "command", "command": f"{hooks_dir}/codex_session_start.sh", "timeout": 15}],
     }],
     "SessionEnd": [{
-        "matcher": "",
-        "hooks": [{"type": "command", "command": f"{hooks_dir}/codex_session_end.sh", "timeout": 30}],
+        # The Codex hook docs describe matcher as a filter string.  SessionEnd
+        # has no documented catch-all filter, so omit it instead of guessing
+        # that an empty string is catch-all.  Codex clamps this hook at 3 s.
+        "hooks": [{"type": "command", "command": f"{hooks_dir}/codex_session_end.sh", "timeout": 3}],
     }],
 }
 for event, additions in configs.items():
@@ -242,39 +269,63 @@ def raw_list_entries(member):
             index += 1
     return entries
 
-def render_owned_event(event, additions):
+def raw_member_for_event(event):
+    """Use the nested source, or the legacy source while migrating it."""
+    if event in raw_hooks_members and event not in legacy_events:
+        return raw_hooks_members[event]
+    if event in legacy_events and event not in raw_hooks_members:
+        return raw_members.get(event, "")
+    return ""
+
+def render_owned_event(event, additions, level):
     original_entries = original_hooks.get(event, [])
-    raw_entries = raw_list_entries(raw_members.get(event, ""))
+    raw_entries = raw_list_entries(raw_member_for_event(event))
     foreign = []
-    if len(original_entries) == len(raw_entries):
+    if isinstance(original_entries, list) and len(original_entries) == len(raw_entries):
         foreign = [raw_entry for entry, raw_entry in zip(original_entries, raw_entries) if not is_owned(entry)]
     else:
-        foreign = [json.dumps(entry, indent=indent, ensure_ascii=False) for entry in original_entries if not is_owned(entry)]
+        foreign = [json.dumps(entry, indent=indent, ensure_ascii=False) for entry in original_entries if not is_owned(entry)] if isinstance(original_entries, list) else []
     rendered_entries = foreign + [json.dumps(entry, indent=indent, ensure_ascii=False) for entry in additions]
     if not rendered_entries:
         return json.dumps(event, ensure_ascii=False) + ": []"
-    child_indent = indent_text + indent_text
+    closing_indent = indent_text * (level + 1)
+    child_indent = indent_text * (level + 2)
     return (json.dumps(event, ensure_ascii=False) + ": [\n" +
             ",\n".join(child_indent + entry for entry in rendered_entries) +
-            "\n" + indent_text + "]")
+            "\n" + closing_indent + "]")
 
-# Reuse foreign top-level members verbatim rather than reserializing them. This
-# retains their chosen line breaks/inline objects; our two owned event lists
-# are the only portions deliberately rewritten.
-members = []
+# Reuse foreign nested event members verbatim rather than reserializing them.
+# Our two owned event lists are the only portions deliberately rewritten.
+hook_members = []
 for event, value in hooks.items():
     if event in configs:
-        member = render_owned_event(event, configs[event])
-    elif event in raw_members:
-        member = raw_members[event]
+        member = render_owned_event(event, configs[event], level=1)
+    elif event in raw_hooks_members:
+        member = raw_hooks_members[event]
     else:
         member = json.dumps(event, ensure_ascii=False) + ": " + json.dumps(value, indent=indent, ensure_ascii=False)
+    hook_members.append((indent_text * 2) + member)
+rendered_hooks = "{\n" + ",\n".join(hook_members) + "\n" + indent_text + "}"
+
+# Preserve foreign top-level members (including description) verbatim.  The
+# top-level hooks envelope is deliberately rewritten because it owns the two
+# handlers and because legacy event keys must be relocated under that envelope.
+members = []
+for key, value in document.items():
+    if key == "hooks":
+        member = json.dumps(key, ensure_ascii=False) + ": " + rendered_hooks
+    elif key in raw_members:
+        member = raw_members[key]
+    else:
+        member = json.dumps(key, ensure_ascii=False) + ": " + json.dumps(value, indent=indent, ensure_ascii=False)
     members.append(indent_text + member)
 rendered = "{\n" + ",\n".join(members) + "\n}"
 with open(hooks_path, "w") as f:
     f.write(rendered)
     if trailing_newline:
         f.write("\n")
+if legacy_events:
+    print("LLM_MEMORY: migrated legacy top-level Codex hook events under hooks.")
 PYEOF
 
 echo "For Codex, run /hooks once and trust the two llm_memory hooks."

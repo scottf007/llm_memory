@@ -30,17 +30,17 @@ T1 (D1) -- hooks/install_codex_mcp.sh <python3-path> <server.py-path>
 
 T2 (D4) -- hooks/install_hooks.sh gains a codex branch: it now also merges
     $HOME/.codex/hooks.json, alongside its existing $HOME/.claude/settings.json
-    behaviour. Shape (top-level keyed by event name -- "codex's hook protocol
-    is the Claude Code protocol", design note SS1):
+    behaviour. Shape (the documented top-level `hooks` envelope):
         {
-          "SessionStart": [{"matcher": "startup|resume|compact",
-                             "hooks": [{"type": "command",
-                                        "command": "<hooks_dir>/codex_session_start.sh",
-                                        "timeout": 15}]}],
-          "SessionEnd":   [{"matcher": "",
-                             "hooks": [{"type": "command",
-                                        "command": "<hooks_dir>/codex_session_end.sh",
-                                        "timeout": 30}]}]
+          "hooks": {
+            "SessionStart": [{"matcher": "startup|resume",
+                               "hooks": [{"type": "command",
+                                          "command": "<hooks_dir>/codex_session_start.sh",
+                                          "timeout": 15}]}],
+            "SessionEnd":   [{"hooks": [{"type": "command",
+                                           "command": "<hooks_dir>/codex_session_end.sh",
+                                           "timeout": 3}]}]
+          }
         }
     <hooks_dir> is the same directory install_hooks.sh already derives for
     itself (BASH_SOURCE parent), exactly like the Claude branch's own
@@ -326,24 +326,26 @@ class TestT2CodexHooksJsonMerge:
         result = self._run(home, path=str(fake_bin) + os.pathsep + _inherited_path_with_interpreter_first())
         assert result.returncode == 0, result.stderr
         data = json.loads(self._codex_hooks_path(home).read_text())
-        assert set(data.keys()) == {"SessionStart", "SessionEnd"}, data.keys()
-        assert len(data["SessionStart"]) == 1, data["SessionStart"]
-        assert len(data["SessionEnd"]) == 1, data["SessionEnd"]
-        start_cmd = data["SessionStart"][0]["hooks"][0]["command"]
-        end_cmd = data["SessionEnd"][0]["hooks"][0]["command"]
+        assert set(data.keys()) == {"hooks"}, data.keys()
+        assert len(data["hooks"]["SessionStart"]) == 1, data["hooks"]["SessionStart"]
+        assert len(data["hooks"]["SessionEnd"]) == 1, data["hooks"]["SessionEnd"]
+        start_cmd = data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        end_cmd = data["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
         assert start_cmd.endswith("/codex_session_start.sh"), start_cmd
         assert end_cmd.endswith("/codex_session_end.sh"), end_cmd
-        assert data["SessionStart"][0]["matcher"] == "startup|resume"
+        assert data["hooks"]["SessionStart"][0]["matcher"] == "startup|resume"
+        assert "matcher" not in data["hooks"]["SessionEnd"][0]
+        assert data["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"] == 3
 
     def test_merge_preserves_foreign_entries(self, tmp_path):
         home = self._home(tmp_path)
         (home / ".codex").mkdir(parents=True)
         foreign_pretooluse = {"matcher": "Bash", "hooks": [{"type": "command", "command": "/opt/foo/bar.sh"}]}
         foreign_sessionstart = {"matcher": "", "hooks": [{"type": "command", "command": "/opt/other/baz.sh"}]}
-        original = {
+        original = {"hooks": {
             "PreToolUse": [foreign_pretooluse],
             "SessionStart": [foreign_sessionstart],
-        }
+        }}
         self._codex_hooks_path(home).write_text(json.dumps(original))
 
         fake_bin = tmp_path / "bin"
@@ -352,13 +354,13 @@ class TestT2CodexHooksJsonMerge:
         assert result.returncode == 0, result.stderr
         data = json.loads(self._codex_hooks_path(home).read_text())
 
-        assert data["PreToolUse"] == [foreign_pretooluse], "foreign PreToolUse entry must survive byte-for-byte"
-        assert foreign_sessionstart in data["SessionStart"], "foreign SessionStart entry must survive"
-        assert len(data["SessionStart"]) == 2, data["SessionStart"]
-        owned = [e for e in data["SessionStart"] if e != foreign_sessionstart]
+        assert data["hooks"]["PreToolUse"] == [foreign_pretooluse], "foreign PreToolUse entry must survive byte-for-byte"
+        assert foreign_sessionstart in data["hooks"]["SessionStart"], "foreign SessionStart entry must survive"
+        assert len(data["hooks"]["SessionStart"]) == 2, data["hooks"]["SessionStart"]
+        owned = [e for e in data["hooks"]["SessionStart"] if e != foreign_sessionstart]
         assert len(owned) == 1, owned
         assert owned[0]["hooks"][0]["command"].endswith("/codex_session_start.sh"), owned
-        assert len(data["SessionEnd"]) == 1, data["SessionEnd"]
+        assert len(data["hooks"]["SessionEnd"]) == 1, data["hooks"]["SessionEnd"]
 
     def test_idempotent_second_run(self, tmp_path):
         home = self._home(tmp_path)
