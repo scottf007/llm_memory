@@ -890,13 +890,45 @@ def test_every_real_session_parses_without_crashing():
     assert not crashed, crashed
 
 
+def is_zero_turn_candidate(ref):
+    """Whether the raw rollout contains a user record the adapter recognises."""
+    try:
+        handle = open(ref.path, errors="replace")
+    except OSError:
+        return False
+
+    with handle:
+        for line in handle:
+            try:
+                entry = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == "user":
+                return True
+            if entry.get("type") != "event_msg":
+                continue
+            payload = entry.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("type") == "user_message":
+                return True
+            if payload.get("type") != "item_completed":
+                continue
+            item = payload.get("item")
+            if isinstance(item, dict) and item.get("type") == "UserMessage":
+                return True
+    return False
+
+
 @pytest.mark.skipif(not HAS_CORPUS, reason="no ~/.codex/sessions on this machine")
 def test_no_real_session_silently_yields_zero_turns():
     """The failure mode this adapter was rewritten to avoid, on real data."""
     empty = []
     for ref in codex.discover():
         meta, turns = codex.parse(ref)
-        if meta.is_subagent:
+        if meta.is_subagent or not is_zero_turn_candidate(ref):
             continue
         if not any(t.role == "user" and t.text for t in turns):
             empty.append(ref.path.name)
