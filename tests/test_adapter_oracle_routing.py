@@ -23,6 +23,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -123,6 +124,30 @@ def test_grok_session_routed_through_its_own_adapter_is_ok(sandbox):
 
     ok, detail, diff = adapter_oracle.check(sid)
     assert ok, f"{detail}\n" + "".join(diff[:60])
+
+
+def test_foreign_source_ref_is_owned_by_the_adapter(sandbox, monkeypatch, tmp_path):
+    """T-F1: the oracle delegates source-path interpretation to its adapter."""
+    source = tmp_path / "foreign" / "source.dat"
+    source.parent.mkdir()
+    source.write_text("source")
+    session_id = "fake-source-routing"
+    (adapter_oracle.CONV_DIR / f"{session_id}.md").write_text(
+        f"---\nclient: fake\nraw_source: {source}\n---\n"
+    )
+    calls = []
+
+    def ref_for_source(path, session_id=None):
+        calls.append((path, session_id))
+        return object()
+
+    fake = SimpleNamespace(ref_for_source=ref_for_source)
+    monkeypatch.setattr(adapter_oracle.adapters, "client_for_session_id", lambda _: "fake")
+    monkeypatch.setattr(adapter_oracle.adapters, "get", lambda _: fake)
+    monkeypatch.setattr(adapter_oracle.adapters, "render", lambda _: "rendered")
+
+    assert adapter_oracle.regenerate(session_id) == "rendered"
+    assert calls == [(source, session_id)]
 
 
 # --------------------------------------------------------------------------

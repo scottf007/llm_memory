@@ -140,6 +140,11 @@ def ref_for_path(path: Path, session_id: str | None = None) -> SessionRef:
     return SessionRef(session_id=session_id, path=path, client=CLIENT)
 
 
+def ref_for_source(path: Path, session_id: str | None = None) -> SessionRef:
+    """Build a ref from the source path recorded by the oracle."""
+    return ref_for_path(path, session_id)
+
+
 def discover() -> list[SessionRef]:
     """Every codex session on disk, oldest path first.
 

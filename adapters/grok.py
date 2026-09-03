@@ -97,6 +97,12 @@ def ref_for_path(path: Path, session_id: str | None = None) -> SessionRef:
     )
 
 
+def ref_for_source(path: Path, session_id: str | None = None) -> SessionRef:
+    """Build a ref from the source path recorded by the oracle."""
+    path = Path(path)
+    return ref_for_path(path.parent if path.name == "chat_history.jsonl" else path, session_id)
+
+
 def source_path(ref: SessionRef) -> Path:
     """The mutable source file used by the incremental-sweep mtime check."""
     return ref.path / "chat_history.jsonl"

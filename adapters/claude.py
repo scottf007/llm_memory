@@ -95,10 +95,15 @@ def _assistant_entry_parts(entry: dict) -> tuple[str, bool]:
     return "", False
 
 
-def ref_for_path(path: Path) -> SessionRef:
+def ref_for_path(path: Path, session_id: str | None = None) -> SessionRef:
     """Build a ref from a transcript path. The session id is the file stem."""
     path = Path(path)
-    return SessionRef(session_id=path.stem, path=path, client=CLIENT)
+    return SessionRef(session_id=session_id or path.stem, path=path, client=CLIENT)
+
+
+def ref_for_source(path: Path, session_id: str | None = None) -> SessionRef:
+    """Build a ref from the source path recorded by the oracle."""
+    return ref_for_path(path, session_id)
 
 
 def discover() -> list[SessionRef]:

@@ -90,10 +90,8 @@ def regenerate(session_id: str) -> str:
 
     Claude's archive contains its original transcript. Foreign-client archive
     entries are deliberately Claude-shaped envelopes, so their stored
-    ``raw_source`` instead names the original client file. Grok records that
-    source as ``<session-dir>/chat_history.jsonl`` while its adapter takes the
-    containing directory; all other current foreign adapters take the source
-    path itself.
+    ``raw_source`` instead names the original client file. The owning adapter
+    translates that source path into its own ``SessionRef``.
     """
     owner = adapters.client_for_session_id(session_id)
     adapter = adapters.get(owner)
@@ -102,9 +100,7 @@ def regenerate(session_id: str) -> str:
 
     stored_path = CONV_DIR / f"{session_id}.md"
     raw_source = Path(_stored_field(stored_path, "raw_source"))
-    if owner == "grok" and raw_source.name == "chat_history.jsonl":
-        raw_source = raw_source.parent
-    return adapters.render(adapter.ref_for_path(raw_source, session_id=session_id))
+    return adapters.render(adapter.ref_for_source(raw_source, session_id=session_id))
 
 
 def compare(
