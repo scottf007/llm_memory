@@ -436,7 +436,7 @@ def test_no_turn_has_an_empty_timestamp_when_summary_exists():
     """The fixture set's own regression: assistant content that precedes the
     first kept user turn (a harness kickoff reply) must not render with an
     empty timestamp."""
-    meta, turns = _parse_fixture(FIXTURE_DIR / "09-subagent-completed-synthetic")
+    meta, turns = _parse_fixture(FIXTURE_DIR / "09-both-keys-retained")
     assert all(t.timestamp for t in turns)
 
 

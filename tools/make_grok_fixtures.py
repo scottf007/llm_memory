@@ -20,13 +20,10 @@ the real corpus was already censused by feature (see the design note's §1)
 before this tool was written, so the sessions below are named by hand rather
 than rediscovered by an algorithm every run. `--list` explains each choice.
 
-This tool writes the **inputs** of each fixture only (chat_history.jsonl,
-summary.json, events.jsonl). It does not compute `.expected.md` or
-`.expected.envelope.jsonl` — there is no `adapters.grok` yet for it to call,
-and the point of a frozen-test gate is that the implementer cannot import the
-test author's reference parser. Those two files are generated once, by hand
-or by a throwaway script that is never committed, and are then committed
-themselves as plain data, like any other pinned fixture output.
+This tool writes the **inputs** of each fixture (chat_history.jsonl,
+summary.json, events.jsonl). `--refresh-expected` is deliberately narrower:
+it refreshes the two checked-in expected files for one already-sanitised
+fixture after a mechanical fixture rename.
 
 Usage:
     python3 tools/make_grok_fixtures.py            # rebuild the fixture dirs
@@ -42,6 +39,10 @@ import re
 import sys
 from pathlib import Path
 from typing import Callable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from adapters import grok, render_conversation, render_envelope
 
 SESSIONS_DIR = Path.home() / ".grok" / "sessions"
 FIXTURE_DIR = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "grok"
@@ -238,9 +239,9 @@ MANIFEST: list[FixtureSpec] = [
         drop_events=True,
     ),
     FixtureSpec(
-        "09-subagent-completed-synthetic", "%2Fhome%2Fscott%2Fprojects%2Fagent-messaging",
+        "09-both-keys-retained", "%2Fhome%2Fscott%2Fprojects%2Fagent-messaging",
         "019ffb15-473c-7ad3-ad8b-fa36acf41dd5",
-        ["synthetic_reason:subagent_completed"],
+        ["both-keys-retained"],
         chat_stop=lambda rec: rec.get("synthetic_reason") == "subagent_completed",
         chat_after=4,
     ),
@@ -343,11 +344,37 @@ def build(specs: list[FixtureSpec] = MANIFEST) -> list[str]:
     return [build_one(spec) for spec in specs]
 
 
+def refresh_expected(name: str) -> None:
+    """Regenerate portable expected outputs for one checked-in fixture."""
+    fixture = FIXTURE_DIR / name
+    if not fixture.is_dir():
+        raise ValueError(f"unknown Grok fixture: {name}")
+    ref = grok.ref_for_path(fixture, session_id=f"grok-{name}")
+    meta, turns = grok.parse(ref)
+    md = render_conversation(meta, turns).replace(
+        f"raw_source: {fixture / 'chat_history.jsonl'}",
+        f"raw_source: tests/fixtures/grok/{name}/chat_history.jsonl",
+    )
+    (FIXTURE_DIR / f"{name}.expected.md").write_text(md)
+    (FIXTURE_DIR / f"{name}.expected.envelope.jsonl").write_text(
+        render_envelope(meta, turns)
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--list", action="store_true", help="Show the selection without writing")
+    parser.add_argument(
+        "--refresh-expected", metavar="FIXTURE",
+        help="Regenerate the portable expected files for one checked-in fixture",
+    )
     args = parser.parse_args()
+
+    if args.refresh_expected:
+        refresh_expected(args.refresh_expected)
+        print(f"Refreshed expected outputs for {args.refresh_expected}")
+        return 0
 
     if not SESSIONS_DIR.exists():
         print(f"No grok sessions at {SESSIONS_DIR}; nothing to build.", file=sys.stderr)
