@@ -296,6 +296,101 @@ def test_system_reminder_shaped_prompt_with_prompt_index_is_kept(tmp_path):
     assert user_texts == ["scheduled loop fired"]
 
 
+# --------------------------------------------------------------------------
+# A3.1 (docs/design/grok-ingestion-2026-09-03.md §7) -- telemetry-shaped
+# prompt_index records are dropped even though "prompt_index wins" (D5,
+# amended after judge finding F1 / feedback 01788396626574918910: 527
+# ingested user turns were pure harness telemetry, not dialogue).
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("synthetic_reason", ["subagent_completed", "task_completed"])
+def test_a3_telemetry_reason_with_prompt_index_is_dropped(tmp_path, synthetic_reason):
+    """Trigger: unlike every other synthetic_reason, these two are dropped
+    even when prompt_index is present -- D5's "prompt_index wins" rule no
+    longer applies to them specifically."""
+    sdir = _write_session(tmp_path / "s", [
+        {"type": "user", "content": [{"type": "text", "text": "<user_query>\nreal work\n</user_query>"}],
+         "prompt_index": 0},
+        {"type": "assistant", "content": "did it"},
+        {"type": "user", "content": [{"type": "text",
+         "text": "<system-reminder>\nshould never appear\n</system-reminder>"}],
+         "synthetic_reason": synthetic_reason, "prompt_index": 1},
+        {"type": "assistant", "content": "ack"},
+    ])
+    _, turns = grok.parse(_ref(sdir))
+    user_texts = [t.text for t in turns if t.role == "user"]
+    assert user_texts == ["real work"]
+    assert not any("should never appear" in t for t in user_texts)
+
+
+@pytest.mark.parametrize("synthetic_reason", ["scheduler_fired", "notification_drain"])
+def test_a3_control_other_synthetic_reasons_with_prompt_index_still_kept(tmp_path, synthetic_reason):
+    """Control: A3.1 names exactly two reasons. scheduler_fired (the seat's
+    own task) and notification_drain (peer board prose) are unaffected --
+    D5's "prompt_index wins" still applies to them."""
+    sdir = _write_session(tmp_path / "s", [
+        {"type": "user", "content": [{"type": "text", "text": "<system-reminder>\nkept text\n</system-reminder>"}],
+         "synthetic_reason": synthetic_reason, "prompt_index": 0},
+        {"type": "assistant", "content": "ok"},
+    ])
+    _, turns = grok.parse(_ref(sdir))
+    user_texts = [t.text for t in turns if t.role == "user"]
+    assert user_texts == ["kept text"]
+
+
+def test_a3_control_non_synthetic_prompt_index_still_kept(tmp_path):
+    """Control: a plain interactive prompt (no synthetic_reason at all) is
+    untouched by A3.1."""
+    sdir = _write_session(tmp_path / "s", [
+        {"type": "user", "content": [{"type": "text", "text": "<user_query>\nplain prompt\n</user_query>"}],
+         "prompt_index": 0},
+        {"type": "assistant", "content": "ok"},
+    ])
+    _, turns = grok.parse(_ref(sdir))
+    user_texts = [t.text for t in turns if t.role == "user"]
+    assert user_texts == ["plain prompt"]
+
+
+def test_a3_dropped_record_still_consumes_its_event_timestamp_slot(tmp_path):
+    """Design decision pinned here because §7 does not spell it out: on this
+    machine every prompt_index record -- kept or A3.1-dropped -- has its own
+    turn_started/turn_ended pair in events.jsonl (verified 1:1 on the real
+    fixture 09-both-keys-retained source: 32 prompt_index records, 32
+    turn_started entries). So a dropped record must still consume one
+    events.jsonl slot, or every later kept turn's timestamp shifts earlier
+    by the number of drops before it. Three user prompts, three event pairs,
+    the middle one task_completed and dropped: the third (kept) user turn
+    must take the *third* timestamp, not the second."""
+    sdir = _write_session(
+        tmp_path / "s",
+        [
+            {"type": "user", "content": [{"type": "text", "text": "<user_query>\none\n</user_query>"}],
+             "prompt_index": 0},
+            {"type": "assistant", "content": "a1"},
+            {"type": "user", "content": [{"type": "text",
+             "text": "<system-reminder>\ndropped\n</system-reminder>"}],
+             "synthetic_reason": "task_completed", "prompt_index": 1},
+            {"type": "assistant", "content": "a2"},
+            {"type": "user", "content": [{"type": "text", "text": "<user_query>\nthree\n</user_query>"}],
+             "prompt_index": 2},
+            {"type": "assistant", "content": "a3"},
+        ],
+        events=[
+            {"ts": "2026-02-01T00:00:00.000Z", "type": "turn_started", "turn_number": 0},
+            {"ts": "2026-02-01T00:00:10.000Z", "type": "turn_ended", "outcome": "completed"},
+            {"ts": "2026-02-01T00:01:00.000Z", "type": "turn_started", "turn_number": 1},
+            {"ts": "2026-02-01T00:01:10.000Z", "type": "turn_ended", "outcome": "completed"},
+            {"ts": "2026-02-01T00:02:00.000Z", "type": "turn_started", "turn_number": 2},
+            {"ts": "2026-02-01T00:02:10.000Z", "type": "turn_ended", "outcome": "completed"},
+        ],
+    )
+    _, turns = grok.parse(_ref(sdir))
+    user_turns = [t for t in turns if t.role == "user"]
+    assert [t.text for t in user_turns] == ["one", "three"]
+    assert user_turns[0].timestamp == "2026-02-01T00:00:00.000Z"
+    assert user_turns[1].timestamp == "2026-02-01T00:02:00.000Z"
+
+
 def test_user_query_wrapper_is_stripped_exactly_once(tmp_path):
     sdir = _write_session(tmp_path / "s", [
         {"type": "user",

@@ -142,14 +142,20 @@ sibling names it as `parent_session_id`. On the 3 September implementation
 census that left 535 chain tails from 1,006 sessions (471 superseded parents), preventing repeated
 extraction of the same work while retaining each tail's `fork_of` provenance.
 
-The client also records many harness messages. The one reliable shipped rule
-is **keep iff a user record carries `prompt_index`**. A synthetic reason does
-not override that key: the frozen corpus includes records carrying both, and
-the pinned expectations retain them. Current implementation-census figures
-(while the live store was growing) were 9,756 user records, 4,413 carrying
-`prompt_index`, and 1,131 carrying both `prompt_index` and
-`synthetic_reason`; records without `prompt_index` are intentionally absent
-from the archive.
+The client also records many harness messages. As amended on **3 September**,
+the rule is **keep a user record carrying `prompt_index`, except when its
+`synthetic_reason` is `subagent_completed` or `task_completed`**. Those are
+completion telemetry; `scheduler_fired`, `notification_drain`, and other
+reasons still follow the ordinary `prompt_index` rule. The Section 7 census
+found 625 chain tails after this drop: 516 had one kept user turn, 14 had two,
+34 had 3--9, 60 had at least 10, and one had none. Its fixture-09 census found
+26 `notification_drain`, five `task_completed`, and one
+`subagent_completed` prompt-index record (32 records, 26 retained).
+
+`narrative_coverage` therefore uses a three-turn minimum for Grok (Claude
+remains five and Codex one): it excludes one- and two-prompt keep-alive forks
+while retaining genuine seat work. Records without `prompt_index` are
+intentionally absent from the archive.
 
 ## The oracle
 

@@ -92,7 +92,7 @@ async def list_tools() -> list[types.Tool]:
             "codex-auto board-polling harness's own sessions, low-content sessions "
             "(assistant reply under ~50 chars, e.g. PONG/exit), and short one-shot "
             "sessions (fewer than min_user_turns substantive user turns — per-client "
-            "default: 5 for claude, 1 for codex, read from each session's "
+            "default: 5 for claude, 1 for codex, and 3 for grok, read from each session's "
             "conversation frontmatter) are excluded so the narrative pipeline "
             "doesn't burn cycles on noise like single-prompt SDK calls or "
             "automation traffic.",
@@ -106,7 +106,7 @@ async def list_tools() -> list[types.Tool]:
                     "min_user_turns": {
                         "type": "integer",
                         "description": "Override the per-client turn threshold "
-                        "(claude: 5, codex: 1) uniformly for every session. Pass 0 "
+                        "(claude: 5, codex: 1, grok: 3) uniformly for every session. Pass 0 "
                         "to disable turn filtering entirely. Omit to use the "
                         "per-client defaults.",
                     },
@@ -260,7 +260,7 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
 # threshold either buries codex or lets Claude noise through. Read per
 # session from the `client:` frontmatter S1 added; anything without a
 # recorded client (nothing did, before that) is treated as claude.
-_MIN_USER_TURNS_BY_CLIENT = {"codex": 1, "grok": 1}
+_MIN_USER_TURNS_BY_CLIENT = {"codex": 1, "grok": 3}
 _DEFAULT_MIN_USER_TURNS = 5
 
 # Below this many characters of assistant prose, a session is structurally
