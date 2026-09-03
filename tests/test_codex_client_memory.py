@@ -308,10 +308,12 @@ class TestT2CodexHooksJsonMerge:
         (home / ".claude").mkdir(parents=True)
         return home
 
-    def _run(self, home: Path):
+    def _run(self, home: Path, *, path: str | None = None):
         env = os.environ.copy()
         env["HOME"] = str(home)
         env["LLM_MEMORY_INSTALLING"] = "1"
+        if path is not None:
+            env["PATH"] = path
         return subprocess.run(
             [BASH, str(HOOKS_DIR / "install_hooks.sh")],
             capture_output=True, text=True, env=env, timeout=30,
@@ -319,7 +321,9 @@ class TestT2CodexHooksJsonMerge:
 
     def test_created_when_absent(self, tmp_path):
         home = self._home(tmp_path)
-        result = self._run(home)
+        fake_bin = tmp_path / "bin"
+        _write_fake_codex(fake_bin)
+        result = self._run(home, path=str(fake_bin) + os.pathsep + _inherited_path_with_interpreter_first())
         assert result.returncode == 0, result.stderr
         data = json.loads(self._codex_hooks_path(home).read_text())
         assert set(data.keys()) == {"SessionStart", "SessionEnd"}, data.keys()
@@ -329,6 +333,7 @@ class TestT2CodexHooksJsonMerge:
         end_cmd = data["SessionEnd"][0]["hooks"][0]["command"]
         assert start_cmd.endswith("/codex_session_start.sh"), start_cmd
         assert end_cmd.endswith("/codex_session_end.sh"), end_cmd
+        assert data["SessionStart"][0]["matcher"] == "startup|resume"
 
     def test_merge_preserves_foreign_entries(self, tmp_path):
         home = self._home(tmp_path)
@@ -341,7 +346,9 @@ class TestT2CodexHooksJsonMerge:
         }
         self._codex_hooks_path(home).write_text(json.dumps(original))
 
-        result = self._run(home)
+        fake_bin = tmp_path / "bin"
+        _write_fake_codex(fake_bin)
+        result = self._run(home, path=str(fake_bin) + os.pathsep + _inherited_path_with_interpreter_first())
         assert result.returncode == 0, result.stderr
         data = json.loads(self._codex_hooks_path(home).read_text())
 
@@ -355,13 +362,23 @@ class TestT2CodexHooksJsonMerge:
 
     def test_idempotent_second_run(self, tmp_path):
         home = self._home(tmp_path)
-        r1 = self._run(home)
+        fake_bin = tmp_path / "bin"
+        _write_fake_codex(fake_bin)
+        path = str(fake_bin) + os.pathsep + _inherited_path_with_interpreter_first()
+        r1 = self._run(home, path=path)
         assert r1.returncode == 0, r1.stderr
         first = json.loads(self._codex_hooks_path(home).read_text())
-        r2 = self._run(home)
+        r2 = self._run(home, path=path)
         assert r2.returncode == 0, r2.stderr
         second = json.loads(self._codex_hooks_path(home).read_text())
         assert first == second, "re-running must not duplicate or reorder entries"
+
+    def test_control_no_codex_does_not_create_hooks_json(self, tmp_path):
+        home = self._home(tmp_path)
+        no_codex_path = str(Path(sys.executable).parent) + os.pathsep + "/usr/bin:/bin"
+        result = self._run(home, path=no_codex_path)
+        assert result.returncode == 0, result.stderr
+        assert not self._codex_hooks_path(home).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -556,8 +573,9 @@ class TestT6ProbeDryRun:
         assert lines[0] == "hook\trules-line\twrapper", lines[0]
 
         hook_line, rules_line, wrapper_line = lines[1], lines[2], lines[3]
-        for line in (hook_line, rules_line, wrapper_line):
+        for line in (hook_line, rules_line):
             assert line.startswith("codex exec "), line
+        assert wrapper_line.startswith("tools/memory_wrap codex "), wrapper_line
         assert "--dangerously-bypass-hook-trust" in hook_line, hook_line
         assert "--dangerously-bypass-hook-trust" not in rules_line, rules_line
         assert "--dangerously-bypass-hook-trust" not in wrapper_line, wrapper_line
