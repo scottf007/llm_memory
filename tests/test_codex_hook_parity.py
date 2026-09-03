@@ -98,17 +98,19 @@ def test_codex_installer_preserves_four_space_format_and_final_newline(tmp_path)
     codex_dir = home / ".codex"
     codex_dir.mkdir()
     foreign = '''{
-    "PreToolUse": [
-        {
-            "matcher": "Bash",
-            "hooks": [
-                {"type": "command", "command": "/opt/foreign.sh"}
-            ]
-        }
-    ],
-    "SessionStart": [
-        {"matcher": "foreign", "hooks": [{"type": "command", "command": "/opt/foreign-start.sh"}]}
-    ]
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {"type": "command", "command": "/opt/foreign.sh"}
+                ]
+            }
+        ],
+        "SessionStart": [
+            {"matcher": "foreign", "hooks": [{"type": "command", "command": "/opt/foreign-start.sh"}]}
+        ]
+    }
 }
 '''
     hooks_file = codex_dir / "hooks.json"
@@ -130,10 +132,10 @@ def test_codex_installer_preserves_four_space_format_and_final_newline(tmp_path)
     rendered = hooks_file.read_text()
     assert result.returncode == 0, result.stderr
     assert rendered.endswith("\n")
-    assert '    "PreToolUse": [' in rendered
-    assert '                {"type": "command", "command": "/opt/foreign.sh"}' in rendered
-    assert '        {"matcher": "foreign", "hooks": [{"type": "command", "command": "/opt/foreign-start.sh"}]}' in rendered
-    assert json.loads(rendered)["SessionStart"][-1]["matcher"] == "startup|resume"
+    assert '        "PreToolUse": [' in rendered
+    assert '                    {"type": "command", "command": "/opt/foreign.sh"}' in rendered
+    assert '            {"matcher": "foreign", "hooks": [{"type": "command", "command": "/opt/foreign-start.sh"}]}' in rendered
+    assert json.loads(rendered)["hooks"]["SessionStart"][-1]["matcher"] == "startup|resume"
 
 
 def test_probe_dry_run_has_isolated_rows_mcp_setup_and_real_wrapper_command(tmp_path):
