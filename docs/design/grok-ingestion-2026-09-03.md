@@ -61,7 +61,7 @@ Counting only chain tails (sessions no other session names as parent): **510** �
 
 **D5 — turns().** One streaming pass over `chat_history.jsonl`, `raw_line` = line number.
 - `user` with `prompt_index` → user turn. Text = joined `text` blocks; strip exactly one outer `<user_query>` wrapper if present; whitespace-normalise like codex (`\n{3,}` → `\n\n`, strip). No other tag stripping — the angle brackets that survive are prose or harness prompts that *are* the seat's task.
-- `user` with `synthetic_reason` or with neither key → dropped.
+- `user` with `synthetic_reason` and no `prompt_index`, or with neither key → dropped. **Amended after round 2 (verdict 01788393451001602134): a record carrying both keys is kept — `prompt_index` wins, as fixture 09 pins. Residual telemetry-only turns (`subagent_completed`, `task_completed`) are an open follow-up, not this arc's scope.**
 - `assistant` → assistant turn; `had_tool_use = bool(tool_calls)`; empty text with tool calls is a tool-only marker, as in codex.
 - `backend_tool_call` → tool-only marker (model-side web search; mirrors codex `web_search_call`).
 - `system`, `reasoning` (encrypted, summaries only), `tool_result` → dropped.
