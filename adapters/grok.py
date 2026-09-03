@@ -8,6 +8,7 @@ dropping the remaining record kinds:
 | --- | --- |
 | ``system`` / ``reasoning`` / ``tool_result`` | Preamble, encrypted thought, or tool output; none is dialogue. |
 | user records without ``prompt_index`` | Startup context and harness records not selected as prompts. |
+| user records with a completion telemetry ``synthetic_reason`` | ``subagent_completed`` and ``task_completed`` are harness completion markers, even when they carry ``prompt_index``. |
 | ``backend_tool_call`` content | It is represented as a tool-use line marker, not prose. |
 
 Forked ``subagent_resume`` sessions duplicate their parent's complete history.
@@ -32,6 +33,11 @@ from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_pars
 CLIENT = "grok"
 ID_PREFIX = "grok-"
 SESSIONS_DIR = Path.home() / ".grok" / "sessions"
+
+# Completion telemetry can carry a prompt_index, but it is not dialogue.  Keep
+# this allowlist-shaped exception in one place so a newly identified telemetry
+# reason has an explicit, reviewable addition rather than another parser rule.
+_DROPPED_SYNTHETIC_REASONS = frozenset({"subagent_completed", "task_completed"})
 
 
 def client_name() -> str:
@@ -274,6 +280,11 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
                     used_fallback = True
                 next_user_index += 1
                 current_timestamp = timestamp
+                # Every prompt_index record consumes an events slot, including
+                # dropped telemetry: later dialogue must keep its original
+                # turn_started timestamp.
+                if entry.get("synthetic_reason") in _DROPPED_SYNTHETIC_REASONS:
+                    continue
                 text = _clean_text(_content_text(entry.get("content")))
                 if text:
                     turns.append(Turn("user", timestamp, text, raw_line=line_num))
