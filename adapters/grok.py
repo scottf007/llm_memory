@@ -155,6 +155,8 @@ def discover() -> list[SessionRef]:
     return refs
 
 
+# Safe only because the sole caller is the short-lived sweep: an in-place
+# sibling summary.json rewrite would not change this parent directory mtime.
 _SUPERSEDED_CACHE: dict[Path, tuple[int, set[str]]] = {}
 
 
