@@ -85,14 +85,14 @@ def _base_env(fake_home):
     return env
 
 
-def _run(project, fake_home, clients_json, extra_args=()):
+def _run(project, fake_home, clients_json, extra_args=(), *, cwd=None):
     env = _base_env(fake_home)
     env["MEMORY_WRAP_CLIENTS"] = str(clients_json)
     if project is not None:
         env["MEMORY_WRAP_PROJECT"] = project
     result = subprocess.run(
         [str(WRAP), "fake", "what should I do next?", *extra_args],
-        cwd=str(fake_home),  # not a git repo -> project falls back to cwd basename
+        cwd=str(cwd or fake_home),  # not a git repo -> project falls back to cwd basename
         env=env,
         capture_output=True,
         text=True,
@@ -168,12 +168,20 @@ class TestProjectResolution:
         # still runs the client, and still carries the original prompt
         assert "what should I do next?" in final_prompt
 
-    def test_default_project_is_cwd_basename(self, tmp_path, fake_home, fake_client):
-        # cwd for the subprocess is fake_home itself (see _run) -> basename "home"
-        _write_project(fake_home, "home", journal="inferred from cwd")
+    def test_default_project_is_cwd_basename(self, tmp_path, fake_home, fake_client, monkeypatch):
+        cwd = tmp_path / "portable-project"
+        cwd.mkdir()
+        git = tmp_path / "git"
+        git.write_text("#!/bin/sh\nexit 1\n")
+        git.chmod(git.stat().st_mode | stat.S_IEXEC)
+        # A --basetemp inside a worktree has a Git ancestor. Simulate the
+        # documented non-repository path so the fallback is cwd's basename.
+        monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+        monkeypatch.setenv("LLM_MEMORY_HOME", str(fake_home / ".claude" / "memory"))
+        _write_project(fake_home, "portable-project", journal="inferred from cwd")
         clients_json = _client_config(tmp_path, fake_client, prompt_mode="append")
 
-        result = _run(None, fake_home, clients_json)
+        result = _run(None, fake_home, clients_json, cwd=cwd)
 
         assert result.returncode == 0, result.stderr
         args = result.stdout.split("\x1f")[:-1]
