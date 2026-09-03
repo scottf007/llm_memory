@@ -197,6 +197,53 @@ fi
 
 # Auto-process all unprocessed transcripts (including synced ones)
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Count session envelopes that have not made it into the project state.  A
+# failed count is unknown, not zero: stdout is the only hook channel the model
+# receives, so preserve the failure there instead of silently suppressing an
+# overdue /narrative prompt.
+count_new_sessions() {
+    local project="$1"
+    local count_file err_file status count first_error
+    count_file=$(mktemp "${TMPDIR:-/tmp}/llm-memory-count.XXXXXX") || {
+        NEW_SESSION_COUNT=""
+        NEW_SESSION_COUNT_ERROR="could not create temporary count file"
+        return 1
+    }
+    err_file=$(mktemp "${TMPDIR:-/tmp}/llm-memory-count.XXXXXX") || {
+        rm -f "$count_file"
+        NEW_SESSION_COUNT=""
+        NEW_SESSION_COUNT_ERROR="could not create temporary error file"
+        return 1
+    }
+    python3 -c "
+import sys, json, pathlib
+sys.path.insert(0, '$SCRIPT_DIR')
+from conversations import list_sessions
+proj='$project'
+logged=set(list_sessions(proj))
+try:
+    from tools.memory_config import memory_root
+    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
+    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
+except FileNotFoundError:
+    merged=set()
+print(len(logged - merged))
+" >"$count_file" 2>"$err_file"
+    status=$?
+    count=$(<"$count_file")
+    first_error=$(sed -n '1p' "$err_file")
+    rm -f "$count_file" "$err_file"
+    if [ "$status" -ne 0 ] || [ -z "$count" ] || ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        NEW_SESSION_COUNT=""
+        NEW_SESSION_COUNT_ERROR="${first_error:-no count output}"
+        return 1
+    fi
+    NEW_SESSION_COUNT="$count"
+    NEW_SESSION_COUNT_ERROR=""
+    return 0
+}
+
 if [ "$SOURCE" != "compact" ]; then
     "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/process_transcripts.py" --quiet 2>/dev/null
 fi
@@ -211,21 +258,12 @@ if [ "$SOURCE" = "compact" ]; then
             NARRATIVE=""
         fi
         # Staleness: session_logs for this project minus sessions already merged into {project}.json
-        COMPACT_NEW_SESSIONS=$(python3 -c "
-import sys, json, pathlib
-sys.path.insert(0, '$SCRIPT_DIR')
-from conversations import list_sessions
-proj='$PROJECT'
-logged=set(list_sessions(proj))
-try:
-    from tools.memory_config import memory_root
-    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
-    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
-except FileNotFoundError:
-    merged=set()
-print(len(logged - merged))
-" 2>/dev/null)
-        COMPACT_NEW_SESSIONS=${COMPACT_NEW_SESSIONS:-0}
+        if count_new_sessions "$PROJECT"; then
+            COMPACT_NEW_SESSIONS="$NEW_SESSION_COUNT"
+        else
+            COMPACT_NEW_SESSIONS=""
+            echo "LLM_MEMORY_WARN: new-session count unavailable ($NEW_SESSION_COUNT_ERROR)"
+        fi
     else
         NARRATIVE=""
         COMPACT_NEW_SESSIONS="0"
@@ -255,21 +293,12 @@ else
             NARRATIVE=""
         fi
         # Staleness: count sessions that haven't been merged into {project}.json.sessions[]
-        NEW_SESSIONS=$(python3 -c "
-import sys, json, pathlib
-sys.path.insert(0, '$SCRIPT_DIR')
-from conversations import list_sessions
-proj='$PROJECT'
-logged=set(list_sessions(proj))
-try:
-    from tools.memory_config import memory_root
-    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
-    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
-except FileNotFoundError:
-    merged=set()
-print(len(logged - merged))
-" 2>/dev/null)
-        NEW_SESSIONS=${NEW_SESSIONS:-0}
+        if count_new_sessions "$PROJECT"; then
+            NEW_SESSIONS="$NEW_SESSION_COUNT"
+        else
+            NEW_SESSIONS=""
+            echo "LLM_MEMORY_WARN: new-session count unavailable ($NEW_SESSION_COUNT_ERROR)"
+        fi
     else
         NARRATIVE=""
         NEW_SESSIONS="0"

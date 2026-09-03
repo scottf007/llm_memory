@@ -22,6 +22,7 @@ the same sandbox to keep them in sync.
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -425,6 +426,14 @@ def test_coverage_payload_exposes_skipped_id_lists(sandbox):
         assert isinstance(result[key], int)
 
 
+def test_narrative_coverage_tool_description_names_grok_keepalive_loops():
+    """The public tool contract must expose its largest exclusion class."""
+    tools = asyncio.run(server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "narrative_coverage")
+    assert "Grok self-wake keep-alive loops" in tool.description
+    assert "skipped_grok_keepalive" in tool.description
+
+
 # --------------------------------------------------------------------------
 # A3.2 acceptance -- real live store, read-only, skipped when the store is
 # absent. Property assertions, not fixed counts: the store grows under us
@@ -463,8 +472,8 @@ def test_live_finance_nexus_grok_unprocessed_all_clear_a3_threshold():
     positive case (real seat work) is silently gone too."""
     result = server.compute_narrative_coverage("finance_nexus")
     grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
-    if not grok_paths:
-        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    if not grok_paths and not result["skipped_grok_keepalive"]:
+        pytest.skip("finance_nexus has no grok transcripts")
     counts = {p: _kept_user_turn_count(p) for p in grok_paths}
     under_threshold = {p: c for p, c in counts.items() if c < 3}
     assert under_threshold == {}, (
@@ -525,8 +534,8 @@ def test_live_finance_nexus_excludes_grok_keepalive_forks():
     self-wake keep-alive recipe as its first kept user message."""
     result = server.compute_narrative_coverage("finance_nexus")
     grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
-    if not grok_paths:
-        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    if not grok_paths and not result["skipped_grok_keepalive"]:
+        pytest.skip("finance_nexus has no grok transcripts")
     texts = {p: _first_user_text_independent(p) for p in grok_paths}
     marked = {p: t for p, t in texts.items() if "keep-alive for seat" in t.lower()}
     assert marked == {}, (

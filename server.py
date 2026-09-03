@@ -89,14 +89,15 @@ async def list_tools() -> list[types.Tool]:
             description="Return merged vs unprocessed session transcripts for a project. "
             "Compares on-disk session files against {project}.json.sessions[]. "
             "Sub-agent transcripts (session_id starting with 'agent-'), the "
-            "codex-auto board-polling harness's own sessions, low-content sessions "
+            "codex-auto board-polling harness's own sessions, Grok self-wake keep-alive loops, low-content sessions "
             "(assistant reply under ~50 chars, e.g. PONG/exit), and short one-shot "
             "sessions (fewer than min_user_turns substantive user turns — per-client "
             "default: 5 for claude, 1 for codex, and 3 for grok, read from each session's "
             "conversation frontmatter) are excluded so the narrative pipeline "
             "doesn't burn cycles on noise like single-prompt SDK calls or "
             "automation traffic. The response includes skipped_low_turn and "
-            "skipped_grok_keepalive path lists alongside their count keys.",
+            "skipped_grok_keepalive path lists alongside their count keys, including "
+            "skipped_grok_keepalive_count for Grok keep-alive loops.",
             inputSchema={
                 "type": "object",
                 "properties": {
