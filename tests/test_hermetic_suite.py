@@ -107,6 +107,12 @@ def test_default_collection_excludes_the_live_corpus_census(tmp_path):
     reason is exactly "no marker exists yet", not a subprocess/env problem.
     """
     ids, result = _run_pytest_collect([], tmp_path / "home")
+    assert len(ids) > 0, (
+        "collected 0 node ids -- the subprocess's rootdir doesn't match the "
+        "expected 'tests/...' prefix, so an empty overlap below would pass "
+        "vacuously rather than proving anything\n"
+        f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}"
+    )
     overlap = ids & set(LIVE_CORPUS_NODE_IDS)
     assert not overlap, (
         f"default collection still includes {len(overlap)} live_corpus row(s): "
@@ -122,6 +128,11 @@ def test_live_corpus_marker_collects_exactly_the_pinned_census(tmp_path):
     differ -- RED for the same reason as the test above.
     """
     ids, result = _run_pytest_collect(["-m", "live_corpus"], tmp_path / "home")
+    assert len(ids) > 0, (
+        "collected 0 node ids -- the subprocess's rootdir doesn't match the "
+        "expected 'tests/...' prefix\n"
+        f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}"
+    )
     assert ids == set(LIVE_CORPUS_NODE_IDS), (
         f"missing: {sorted(set(LIVE_CORPUS_NODE_IDS) - ids)}\n"
         f"unexpected: {sorted(ids - set(LIVE_CORPUS_NODE_IDS))}\n"
@@ -148,14 +159,19 @@ def test_marking_rule_applies_test_live_prefix_and_explicit_list_not_others(pyte
     collection: `tests/conftest.py` defines neither the hook nor the
     constant yet.
 
-    `pytester.runpytest()` runs the nested session in-process, so its item
-    node ids come out relative to *this* session's rootdir, not the temp
-    project's own directory (a pytester quirk, confirmed by printing
-    `item.nodeid` from inside the hook) -- the expected prefix is computed
-    from `pytester.path` rather than assumed as a bare filename.
+    `pytester.makeini(...)` gives the temp project its own `pytest.ini`, so
+    it is always its own rootdir regardless of where pytest's basetemp
+    happens to land (amendment 2: under the default `/tmp/pytest-of-<user>`
+    basetemp the project sits outside this repo and gets bare node ids;
+    under an in-repo basetemp, walking upward from it used to reach this
+    repo's own `pyproject.toml` once it carried `[tool.pytest.ini_options]`
+    and silently rooted the nested run at the repo instead -- environment-
+    dependent, and every seat that built/judged this arc happened to run
+    with an in-repo basetemp, which hid it). Node ids are asserted bare.
     """
     import tests.conftest as target_conftest
 
+    pytester.makeini("[pytest]\n")
     pytester.makepyfile(test_marking_probe="""
 def test_live_x():
     pass
@@ -173,22 +189,21 @@ import sys
 sys.path.insert(0, {str(REPO_ROOT)!r})
 from tests.conftest import pytest_collection_modifyitems  # noqa: F401
 """)
-    probe_prefix = f"{os.path.relpath(pytester.path, start=REPO_ROOT)}/test_marking_probe.py"
     monkeypatch.setattr(
         target_conftest,
         "LIVE_CORPUS_NODE_IDS",
-        (f"{probe_prefix}::test_explicit_target",),
+        ("test_marking_probe.py::test_explicit_target",),
         raising=False,
     )
 
     result = pytester.runpytest("--collect-only", "-q", "-m", "live_corpus")
     collected = {
         line.strip() for line in result.stdout.lines
-        if line.strip().startswith(f"{probe_prefix}::")
+        if line.strip().startswith("test_marking_probe.py::")
     }
     assert collected == {
-        f"{probe_prefix}::test_live_x",
-        f"{probe_prefix}::test_explicit_target",
+        "test_marking_probe.py::test_live_x",
+        "test_marking_probe.py::test_explicit_target",
     }, f"stdout:\n{result.stdout.str()}"
 
 
