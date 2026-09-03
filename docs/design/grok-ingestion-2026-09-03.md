@@ -121,7 +121,7 @@ Files changed: `adapters/grok.py` (new), `adapters/__init__.py`, `server.py` (tw
 - **A3.3** No `session_kind`/`fork_of`/title-based exclusion: D4's choice to ingest real seat work in subagent tails stands, and titles are not a contract.
 - **A3.4** (ruled 3 Sep on the test author's finding) A dropped telemetry record still consumes its `events.jsonl` `turn_started` slot: the k-th `prompt_index` record takes the k-th event whether or not it is kept, because the store shows a 1:1 correspondence including harness-completion prompts. Fixture 09's measured census is 26 `notification_drain` / 5 `task_completed` / 1 `subagent_completed` (32 → 26 retained), correcting the 25/7 figure above.
 
-**Acceptance.** `narrative_coverage(finance_nexus)` lists none of the 43 keep-alive forks the feedback named and still lists the ≥3-prompt seat sessions; the owner's load_balancer session (21 prompts) is unaffected.
+**Acceptance (corrected 3 Sep after judge finding F1).** Amendment 3 alone removes only the 1–2-prompt forks (3 of 47 listed for finance_nexus); the 44 ten-prompt keep-alive forks are A3.5's job. Judged bar for A3.1–A3.4: every listed grok transcript has ≥3 kept user turns, `min_user_turns_by_client.grok == 3`, and the owner's load_balancer session (21 prompts) is unaffected. Judge F5 (recorded): the 2-prompt exclusion is safe today because every 1–2-prompt grok tail is harness traffic, not by construction; A3.5 surfaces the excluded ids in the payload so the drop is observable.
 
 ### A3.5 — keep-alive loops are a harness pattern, filtered like codex-auto (ruled 3 Sep 13:0x)
 
