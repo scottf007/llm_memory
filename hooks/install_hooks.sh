@@ -134,5 +134,49 @@ print('  - SubagentStart  (inject narrative into agents)')
 print('  - SubagentStop   (notify parent of narrative updates)')
 PYEOF
 
+# Codex keeps its hook registry separate from Claude's settings.json.  Keep
+# entries we do not own exactly as supplied; only our two commands are removed
+# and re-added so rerunning the installer is idempotent after an install move.
+CODEX_HOOKS_FILE="$HOME/.codex/hooks.json"
+mkdir -p "$(dirname "$CODEX_HOOKS_FILE")"
+python3 - "$CODEX_HOOKS_FILE" "$HOOKS_DIR" <<'PYEOF'
+import json
+import sys
+
+hooks_path = sys.argv[1]
+hooks_dir = sys.argv[2]
+try:
+    with open(hooks_path) as f:
+        hooks = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    hooks = {}
+
+owned_suffixes = ("/codex_session_start.sh", "/codex_session_end.sh")
+
+def is_owned(entry):
+    return any(
+        any(suffix in str(hook.get("command", "")) for suffix in owned_suffixes)
+        for hook in entry.get("hooks", [])
+    )
+
+configs = {
+    "SessionStart": [{
+        "matcher": "startup|resume|compact",
+        "hooks": [{"type": "command", "command": f"{hooks_dir}/codex_session_start.sh", "timeout": 15}],
+    }],
+    "SessionEnd": [{
+        "matcher": "",
+        "hooks": [{"type": "command", "command": f"{hooks_dir}/codex_session_end.sh", "timeout": 30}],
+    }],
+}
+for event, additions in configs.items():
+    existing = hooks.get(event, [])
+    hooks[event] = [entry for entry in existing if not is_owned(entry)] + additions
+
+with open(hooks_path, "w") as f:
+    json.dump(hooks, f, indent=2)
+PYEOF
+
 echo ""
 echo "Restart Claude Code to activate hooks."
+echo "For Codex, run /hooks once and trust the two llm_memory hooks."
