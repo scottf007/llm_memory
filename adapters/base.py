@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Protocol, runtime_checkable
+from typing import Callable, Iterable, Iterator, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -121,6 +121,73 @@ REQUIRED = ("discover", "session_meta", "turns", "client_name")
 def conforms(module) -> bool:
     """True if `module` exposes the four adapter functions."""
     return all(callable(getattr(module, name, None)) for name in REQUIRED)
+
+
+ParseResult = tuple[SessionMeta, list[Turn]]
+ParseImplementation = Callable[[SessionRef], ParseResult]
+CacheKey = tuple[object, ...]
+CacheKeyImplementation = Callable[[SessionRef], CacheKey | None]
+
+
+def make_adapter_parser(
+    parse_impl: ParseImplementation,
+    cache_key: CacheKeyImplementation | None = None,
+) -> tuple[
+    Callable[[SessionRef], ParseResult],
+    Callable[[SessionRef], SessionMeta],
+    Callable[[SessionRef], Iterator[Turn]],
+]:
+    """Build a shared parse/session_meta/turns facade for an adapter.
+
+    Each adapter owns ``parse_impl`` because transcript record formats vary by
+    client. The facade owns a one-entry cache. File-backed adapters use their
+    transcript stat by default; that ensures a still-growing transcript is
+    reread. Directory-backed adapters can supply a key spanning the source
+    files they depend on.
+    """
+    cache: tuple[CacheKey, ParseResult] | None = None
+
+    if cache_key is None:
+        def cache_key(ref: SessionRef) -> CacheKey | None:
+            try:
+                stat = ref.path.stat()
+            except OSError:
+                return None
+            return str(ref.path), stat.st_mtime_ns, stat.st_size
+
+    def parse(ref: SessionRef) -> ParseResult:
+        """Meta and turns together — one read when a caller wants both."""
+        nonlocal cache
+        key = cache_key(ref)
+        if key is not None and cache is not None and cache[0] == key:
+            return cache[1]
+
+        result = parse_impl(ref)
+        if key is not None:
+            cache = (key, result)
+        return result
+
+    def session_meta(ref: SessionRef) -> SessionMeta:
+        """Return the metadata half of the cached parse result."""
+        return parse(ref)[0]
+
+    def turns(ref: SessionRef) -> Iterator[Turn]:
+        """Iterate over the turns half of the cached parse result."""
+        return iter(parse(ref)[1])
+
+    # These functions are installed on an adapter module, not exported from
+    # this helper. Preserve that public identity for tracebacks and AST tools
+    # such as UAI, while retaining the shared closure/cache implementation.
+    for fn, name in ((parse, "parse"), (session_meta, "session_meta"), (turns, "turns")):
+        fn.__module__ = parse_impl.__module__
+        fn.__qualname__ = name
+
+    return parse, session_meta, turns
+
+
+def archive_path(session_id: str) -> str:
+    """Portable archive provenance for a transcript stored in memory root."""
+    return f"transcripts/{session_id}.jsonl"
 
 
 def project_from_cwd(cwd: str) -> str:

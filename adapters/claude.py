@@ -13,14 +13,14 @@ unchanged and pinned byte-for-byte by tests/test_adapter_oracle.py.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from pathlib import Path
-from typing import Iterator
 
 from tools.memory_config import memory_root
 
-from .base import SessionMeta, SessionRef, Turn, project_from_cwd
+from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_parser, project_from_cwd
 
 CLIENT = "claude"
 
@@ -100,11 +100,6 @@ def ref_for_path(path: Path) -> SessionRef:
     return SessionRef(session_id=path.stem, path=path, client=CLIENT)
 
 
-def _archive_path(session_id: str) -> str:
-    # Keep persisted provenance portable when the configured store moves.
-    return f"transcripts/{session_id}.jsonl"
-
-
 def discover() -> list[SessionRef]:
     """Every Claude session on disk, live projects first then the archive.
 
@@ -143,7 +138,7 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     meta = SessionMeta(
         session_id=session_id,
         client=CLIENT,
-        raw=_archive_path(session_id),
+        raw=archive_path(session_id),
     )
 
     # Subagent transcripts are captured inside the parent session; nothing is
@@ -194,35 +189,22 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     return meta, turns
 
 
-# One-entry memo so session_meta() + turns() on the same file costs one read.
-# Keyed on identity *and* content stamp: transcripts grow while a session is
-# live, and a stale cache there would silently truncate a conversation.
-_CACHE: tuple[tuple, tuple[SessionMeta, list[Turn]]] | None = None
+# The shared facade's one-entry memo means session_meta() + turns() on the
+# same file costs one read. Its content stamp ensures a still-growing
+# transcript is reread rather than silently truncated.
+_parse_facade, _session_meta_facade, _turns_facade = make_adapter_parser(_parse)
 
 
-def _cache_key(ref: SessionRef) -> tuple | None:
-    try:
-        st = ref.path.stat()
-    except OSError:
-        return None
-    return (str(ref.path), st.st_mtime_ns, st.st_size)
-
-
+@functools.wraps(_parse_facade)
 def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
-    """Meta and turns together — the efficient path when you want both."""
-    global _CACHE
-    key = _cache_key(ref)
-    if key is not None and _CACHE is not None and _CACHE[0] == key:
-        return _CACHE[1]
-    result = _parse(ref)
-    if key is not None:
-        _CACHE = (key, result)
-    return result
+    return _parse_facade(ref)
 
 
+@functools.wraps(_session_meta_facade)
 def session_meta(ref: SessionRef) -> SessionMeta:
-    return parse(ref)[0]
+    return _session_meta_facade(ref)
 
 
+@functools.wraps(_turns_facade)
 def turns(ref: SessionRef) -> Iterator[Turn]:
-    return iter(parse(ref)[1])
+    return _turns_facade(ref)

@@ -54,6 +54,7 @@ to the source line, exactly as for Claude.
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 import sys
@@ -62,7 +63,7 @@ from typing import Iterator
 
 from tools.memory_config import memory_root
 
-from .base import SessionMeta, SessionRef, Turn, project_from_cwd
+from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_parser, project_from_cwd
 
 CLIENT = "codex"
 
@@ -169,16 +170,12 @@ def discover() -> list[SessionRef]:
     return refs
 
 
-def _archive_path(session_id: str) -> str:
-    return f"transcripts/{session_id}.jsonl"
-
-
 def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     """One streaming pass. Never slurps: codex sessions reach 36 MB."""
     meta = SessionMeta(
         session_id=ref.session_id,
         client=CLIENT,
-        raw=_archive_path(ref.session_id),
+        raw=archive_path(ref.session_id),
         raw_source=str(ref.path),
     )
 
@@ -292,32 +289,19 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     return meta, turns
 
 
-_CACHE: tuple[tuple, tuple[SessionMeta, list[Turn]]] | None = None
+_parse_facade, _session_meta_facade, _turns_facade = make_adapter_parser(_parse)
 
 
-def _cache_key(ref: SessionRef) -> tuple | None:
-    try:
-        st = ref.path.stat()
-    except OSError:
-        return None
-    return (str(ref.path), st.st_mtime_ns, st.st_size)
-
-
+@functools.wraps(_parse_facade)
 def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
-    """Meta and turns together — one read when a caller wants both."""
-    global _CACHE
-    key = _cache_key(ref)
-    if key is not None and _CACHE is not None and _CACHE[0] == key:
-        return _CACHE[1]
-    result = _parse(ref)
-    if key is not None:
-        _CACHE = (key, result)
-    return result
+    return _parse_facade(ref)
 
 
+@functools.wraps(_session_meta_facade)
 def session_meta(ref: SessionRef) -> SessionMeta:
-    return parse(ref)[0]
+    return _session_meta_facade(ref)
 
 
+@functools.wraps(_turns_facade)
 def turns(ref: SessionRef) -> Iterator[Turn]:
-    return iter(parse(ref)[1])
+    return _turns_facade(ref)
