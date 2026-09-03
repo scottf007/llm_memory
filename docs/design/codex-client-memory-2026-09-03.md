@@ -64,3 +64,12 @@ Production callables touched: `install.sh` (step 5 and step 6, shell), `hooks/in
 
 - **Trust model:** one-time `/hooks` trust by the owner (default) vs managed hooks via `requirements.toml`. Default: interactive trust; the installer prints the instruction.
 - **AGENTS.md rules line:** ship it in this repo only (default) or also in `~/.codex/rules/default.rules` for every project. Default: repo only, until the probe says it works.
+
+## 7. Amendment 1 (3 Sep 18:55, after the first subject run)
+
+The first subject run (ccm-subject-codex on candidate 514f2ff, event 01788425513336727727) was inconclusive: the subject supplied a fresh scratch `HOME` with no `~/.codex/auth.json`, so every `codex exec` subject failed with `401 Unauthorized` before a model turn, and the harness exited after the second row. The SessionEnd capture path passed (conversation written in 0 s, no Claude session). Harness requirements added to D3:
+
+- **H1 — the harness owns HOME isolation.** It creates a scratch `HOME`, copies exactly `~/.codex/auth.json` from the real home into it (credentials only; never `config.toml`, `hooks.json`, `memories/`, `sessions/`), and runs every subject under that `HOME`. It must refuse to run if the real auth file is absent, with a clear message, rather than producing three 401 rows.
+- **H2 — every row runs.** A failing or crashing subject never stops the harness; the table always has three rows.
+- **H3 — stderr is evidence.** Each row prints the subject's exit status and the last 3 lines of stderr next to the sentinel result; the table is the acceptance record.
+- `--dry-run` additionally prints the scratch HOME layout it would create (which real file is copied, and that nothing else is).
