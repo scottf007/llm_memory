@@ -14,6 +14,7 @@ Usage:
     python process_transcripts.py --dry-run
     python process_transcripts.py --quiet
     python process_transcripts.py --client codex
+    python process_transcripts.py --client codex --session <session-id>
 """
 
 import argparse
@@ -181,7 +182,7 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
     return envelope, md
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Ensure each JSONL transcript has an archived copy and a conversation.md sibling."
     )
@@ -191,18 +192,41 @@ def main() -> None:
                         help="Minimal output (for use from hooks)")
     parser.add_argument("--client", action="append", choices=adapters.names(),
                         help="Only process this client (repeatable). Default: all registered.")
+    parser.add_argument("--session", action="append", metavar="SID",
+                        help="Only process this session (repeatable; requires one --client).")
     args = parser.parse_args()
 
-    dotted_found, dotted_repaired = reattribute_dotted_conversations(
-        dry_run=args.dry_run,
-    )
+    if args.session and len(args.client or []) != 1:
+        parser.error("--session requires exactly one --client")
+
+    # A session-targeted hook must not repair unrelated conversations as a
+    # side effect.  The normal catch-all sweep retains that maintenance pass.
+    if args.session:
+        dotted_found = dotted_repaired = 0
+    else:
+        dotted_found, dotted_repaired = reattribute_dotted_conversations(
+            dry_run=args.dry_run,
+        )
 
     clients = args.client or adapters.names()
     total = archived = extracted = 0
 
     for client in clients:
+        adapter = adapters.get(client)
+        requested: set[str] | None = None
+        if args.session:
+            normalise = getattr(adapter, "session_id_for", lambda sid: sid)
+            requested = {normalise(sid) for sid in args.session}
+
         if client == adapters.DEFAULT:
             transcripts = find_transcripts(client)
+            if requested is not None:
+                transcripts = [(path, sid) for path, sid in transcripts if sid in requested]
+                found = {sid for _path, sid in transcripts}
+                missing = requested - found
+                if missing:
+                    print(f"ERROR: unknown or no matching session: {', '.join(sorted(missing))}")
+                    return 1
             total += len(transcripts)
             for path, sid in transcripts:
                 if args.dry_run:
@@ -213,11 +237,21 @@ def main() -> None:
                         extracted += 1
                     archived += 1
                 except Exception as e:
+                    if args.session:
+                        print(f"ERROR: session {sid}: {e}")
+                        return 1
                     if not args.quiet:
                         print(f"  WARN: {sid}: {e}")
             continue
 
-        refs = adapters.get(client).discover()
+        refs = adapter.discover()
+        if requested is not None:
+            refs = [ref for ref in refs if ref.session_id in requested]
+            found = {ref.session_id for ref in refs}
+            missing = requested - found
+            if missing:
+                print(f"ERROR: unknown or no matching session: {', '.join(sorted(missing))}")
+                return 1
         total += len(refs)
         for ref in refs:
             if args.dry_run:
@@ -227,6 +261,9 @@ def main() -> None:
                     extracted += 1
                 archived += 1
             except Exception as e:
+                if args.session:
+                    print(f"ERROR: session {ref.session_id}: {e}")
+                    return 1
                 if not args.quiet:
                     print(f"  WARN: {ref.session_id}: {e}")
 
@@ -237,7 +274,8 @@ def main() -> None:
         print(f"Scanned {total} transcripts across {len(clients)} client(s) "
               f"({', '.join(clients)}); archived {archived}, produced "
               f"{extracted} conversation.md.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

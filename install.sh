@@ -260,13 +260,15 @@ else
         mkdir -p "$LIB_DIR/tests/fixtures"
         cp -r "$EXTRACTED/tests/fixtures/." "$LIB_DIR/tests/fixtures/" 2>/dev/null || true
         mkdir -p "$LIB_DIR/tools"
-        rm -f "$LIB_DIR/tools/"*.py "$LIB_DIR/tools/memory_wrap" "$LIB_DIR/tools/memory_wrap_clients.json"
+        rm -f "$LIB_DIR/tools/"*.py "$LIB_DIR/tools/memory_wrap" "$LIB_DIR/tools/memory_wrap_clients.json" "$LIB_DIR/tools/codex_injection_probe.sh"
         cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/" 2>/dev/null || true
         # memory_wrap (the S3 generic client wrapper) and its per-client
         # config aren't .py files, so the glob above skips them.
         cp "$EXTRACTED/tools/memory_wrap" "$LIB_DIR/tools/memory_wrap" 2>/dev/null || true
         cp "$EXTRACTED/tools/memory_wrap_clients.json" "$LIB_DIR/tools/memory_wrap_clients.json" 2>/dev/null || true
+        cp "$EXTRACTED/tools/codex_injection_probe.sh" "$LIB_DIR/tools/codex_injection_probe.sh" 2>/dev/null || true
         chmod +x "$LIB_DIR/tools/memory_wrap" 2>/dev/null || true
+        chmod +x "$LIB_DIR/tools/codex_injection_probe.sh" 2>/dev/null || true
 
         # Copy skills — $LIB_DIR/skills is fully llm_memory-owned, so we
         # wipe the tree first (cheaper than a marker) then copy fresh.
@@ -337,8 +339,8 @@ lib/.venv
 STIGNORE
 log "  Directories ready."
 
-# --- Step 5: Register MCP server ---
-log "[5/8] Registering MCP server with Claude Code..."
+# --- Step 5: Register MCP servers ---
+log "[5/8] Registering MCP servers..."
 SERVER_CONFIG="{\"type\":\"stdio\",\"command\":\"$VENV_DIR/bin/python3\",\"args\":[\"$LIB_DIR/server.py\"]}"
 if command -v claude &> /dev/null; then
     # Registration failing usually just means "already configured", which is
@@ -356,6 +358,11 @@ if command -v claude &> /dev/null; then
 else
     log "  WARNING: 'claude' CLI not found. Add manually:"
     log "    claude mcp add-json llm_memory '$SERVER_CONFIG' --scope user"
+fi
+
+if [ -f "$LIB_DIR/hooks/install_codex_mcp.sh" ]; then
+    CODEX_MCP_OUTPUT=$(bash "$LIB_DIR/hooks/install_codex_mcp.sh" "$VENV_DIR/bin/python3" "$LIB_DIR/server.py")
+    [ -n "$CODEX_MCP_OUTPUT" ] && log "  $CODEX_MCP_OUTPUT"
 fi
 
 # --- Step 6: Install hooks, skills, and agents ---

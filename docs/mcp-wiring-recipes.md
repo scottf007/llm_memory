@@ -20,13 +20,16 @@ client needs the extra step this file documents.
 
 ## Codex
 
-Not wired today — `~/.codex/config.toml` has no `mcp_servers` section.
+The installer now registers `llm_memory` with Codex when the `codex` CLI is
+available. It first checks `codex mcp get llm_memory`, then adds the server
+only when absent; rerunning `install.sh --update` is therefore safe. Codex
+writes the user-level configuration in `~/.codex/config.toml` (there is no
+scope flag). If the CLI is unavailable or registration fails, the installer
+prints the equivalent manual command:
 
 ```bash
 codex mcp add llm_memory -- ~/.claude/memory/lib/.venv/bin/python3 ~/.claude/memory/lib/server.py
 ```
-
-Verified against this machine's `codex mcp add --help`: `codex mcp add <NAME> -- <COMMAND>...` is exactly this shape, and it writes to `~/.codex/config.toml` globally (no scope flag — there is only one scope).
 
 Rules-file line: put the text from **"The rules line (all clients)"** below
 into this repo's `AGENTS.md` (preferred — per-project, so it can name the
