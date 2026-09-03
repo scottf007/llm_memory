@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -161,7 +162,7 @@ def test_one_turn_claude_session_still_excluded(sandbox):
     result = _coverage()
     assert result["unprocessed"] == []
     assert result["skipped_low_turn_count"] == 1
-    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 1, "grok": 1}
+    assert result["min_user_turns_by_client"] == {"claude": 5, "codex": 1, "grok": 3}
 
 
 def test_five_turn_claude_session_included(sandbox):
@@ -212,15 +213,39 @@ def test_explicit_min_user_turns_overrides_the_per_client_map(sandbox):
 # "claude" and "codex" today. adapters.grok does not exist yet either, so
 # these do not import it -- they pin the *server* behaviour a grok-aware
 # server.py must have, independent of when the adapter itself lands.
+#
+# Amendment 3 (design note §7, A3.2): the flat D7 threshold of 1 (mirroring
+# codex) let 52 keep-alive forks -- chain tails whose only real prompt is the
+# seat's own scheduled-loop prompt -- reach narrative_coverage as unprocessed
+# (feedback 01788396626574918910). grok:1 becomes grok:3; a two-turn tail is
+# exactly the keep-alive-fork shape (D8 census, design note §7) and must be
+# excluded, a three-turn one is real work and must still be included.
 # --------------------------------------------------------------------------
 
-def test_one_turn_grok_session_included(sandbox):
-    """Non-trigger control mirroring the codex design-council case: grok's
-    board-driven seats are single-prompt by construction (D7), so a flat
-    default-5 threshold would drop every one of them."""
-    transcript = _write_session(sandbox, "grok-council", "demo", "grok",
-                                 [("user", DESIGN_COUNCIL_PROMPT),
-                                  ("assistant", SUBSTANTIVE_REPLY)])
+def test_two_turn_grok_session_excluded_under_a3_threshold(sandbox):
+    """A3.2 trigger: a keep-alive fork's shape is 1-2 real prompts (design
+    note §7 census). At grok's amended threshold of 3, two turns must no
+    longer reach narrative_coverage -- this is exactly the class of session
+    feedback 01788396626574918910 reported as unprocessed noise."""
+    turns = []
+    for i in range(2):
+        turns.append(("user", f"turn {i}: {DESIGN_COUNCIL_PROMPT}"))
+        turns.append(("assistant", SUBSTANTIVE_REPLY))
+    _write_session(sandbox, "grok-twoturn", "demo", "grok", turns)
+    result = _coverage()
+    assert result["unprocessed"] == []
+    assert result["skipped_low_turn_count"] == 1
+
+
+def test_three_turn_grok_session_included_under_a3_threshold(sandbox):
+    """Non-trigger control: real seat work (design note §7 puts seat runs at
+    5-10 prompts; three is the amended threshold's own boundary) must still
+    clear the bar -- the amendment tightens keep-alive noise, not signal."""
+    turns = []
+    for i in range(3):
+        turns.append(("user", f"turn {i}: {DESIGN_COUNCIL_PROMPT}"))
+        turns.append(("assistant", SUBSTANTIVE_REPLY))
+    transcript = _write_session(sandbox, "grok-threeturn", "demo", "grok", turns)
     result = _coverage()
     assert str(transcript) in result["unprocessed"]
     assert result["skipped_low_turn_count"] == 0
@@ -230,7 +255,7 @@ def test_min_user_turns_by_client_carries_grok(sandbox):
     _write_session(sandbox, "grok-anything", "demo", "grok",
                     [("user", DESIGN_COUNCIL_PROMPT), ("assistant", SUBSTANTIVE_REPLY)])
     result = _coverage()
-    assert result["min_user_turns_by_client"].get("grok") == 1
+    assert result["min_user_turns_by_client"].get("grok") == 3
 
 
 def test_every_registered_adapter_has_an_explicit_threshold(sandbox):
@@ -254,6 +279,69 @@ def test_explicit_override_still_applies_to_grok(sandbox):
     assert result["unprocessed"] == []
     assert result["skipped_low_turn_count"] == 1
     assert result["min_user_turns_by_client"].get("grok") == 5
+
+
+# --------------------------------------------------------------------------
+# A3.2 acceptance -- real live store, read-only, skipped when the store is
+# absent. Property assertions, not fixed counts: the store grows under us
+# (other seats/board activity write to it concurrently), so pinning an exact
+# unprocessed count would be flaky by construction.
+# --------------------------------------------------------------------------
+
+_LIVE_MEMORY_DIR = Path.home() / ".claude" / "memory"
+
+
+def _kept_user_turn_count(transcript_path: str) -> int:
+    """Count `type: user` records directly in the archived envelope .jsonl --
+    independent of compute_narrative_coverage's own internals, since this is
+    the property that's supposed to gate what compute_narrative_coverage
+    lists, not a restatement of its implementation."""
+    count = 0
+    for line in Path(transcript_path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") == "user":
+            count += 1
+    return count
+
+
+@pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
+def test_live_finance_nexus_grok_unprocessed_all_clear_a3_threshold():
+    """A3.2 acceptance (design note §7): finance_nexus is where the 52
+    keep-alive-fork feedback (01788396626574918910) was reported. Every grok
+    transcript compute_narrative_coverage still lists as unprocessed must
+    have at least 3 kept user turns, and at least one must -- otherwise the
+    positive case (real seat work) is silently gone too."""
+    result = server.compute_narrative_coverage("finance_nexus")
+    grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
+    if not grok_paths:
+        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    counts = {p: _kept_user_turn_count(p) for p in grok_paths}
+    under_threshold = {p: c for p, c in counts.items() if c < 3}
+    assert under_threshold == {}, (
+        f"grok transcript(s) listed as unprocessed below the A3.2 threshold of 3: {under_threshold}")
+    assert any(c >= 3 for c in counts.values())
+
+
+@pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
+def test_live_load_balancer_acceptance_session_not_regressed():
+    """The owner's own load_balancer session (21 real prompts, far above any
+    plausible threshold) must not be collateral damage from A3.2: it is
+    either still correctly unprocessed, or was already merged into
+    load_balancer.json by an earlier /narrative run -- either is fine, both
+    absent would mean the amendment regressed real signal."""
+    sid = "grok-01a05f66-e2bc-7332-8728-546c1a71e8cf"
+    result = server.compute_narrative_coverage("load_balancer")
+    in_unprocessed = any(Path(p).stem == sid for p in result["unprocessed"])
+    state = server.load_active("load_balancer", server.DB_DIR / "projects")
+    processed_ids = {s.get("session_id") for s in state.get("sessions", []) or []}
+    assert in_unprocessed or sid in processed_ids, (
+        f"{sid} is neither unprocessed nor merged for load_balancer")
 
 
 # --------------------------------------------------------------------------

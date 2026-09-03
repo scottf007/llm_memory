@@ -3,7 +3,7 @@ session_id: grok-09-both-keys-retained
 project: project-67ba102a
 client: grok
 raw: transcripts/grok-09-both-keys-retained.jsonl
-turns: 32
+turns: 26
 started: 2026-08-13T12:25:03.555805933Z
 ended: 2026-08-15T13:34:58.728925873Z
 raw_source: tests/fixtures/grok/09-both-keys-retained/chat_history.jsonl
@@ -219,18 +219,10 @@ agent_name: grok-build-plan
 
 <content:366>
 
-=== user 2026-08-13T13:11:03.371Z ===
-<inner:373>
-
-=== assistant 2026-08-13T13:11:03.371Z [L:476] ===
 <content:102>
 
 <content:422>
 
-=== user 2026-08-13T13:19:55.367Z ===
-<inner:394>
-
-=== assistant 2026-08-13T13:19:55.367Z [L:499] ===
 <content:449>
 
 === user 2026-08-13T13:21:09.172Z ===
@@ -239,32 +231,16 @@ agent_name: grok-build-plan
 === assistant 2026-08-13T13:21:09.172Z [L:512] ===
 <content:63>
 
-=== user 2026-08-13T13:22:44.822Z ===
-<inner:353>
-
-=== assistant 2026-08-13T13:22:44.822Z [L:518] ===
 <content:82>
 
 <content:112>
 
-=== user 2026-08-13T13:23:12.145Z ===
-<inner:414>
-
-=== assistant 2026-08-13T13:23:12.145Z [L:525] ===
 <content:75>
 
 <content:126>
 
-=== user 2026-08-13T13:23:31.283Z ===
-<inner:350>
-
-=== assistant 2026-08-13T13:23:31.283Z [L:532] ===
 <content:96>
 
 <content:242>
 
-=== user 2026-08-13T13:25:54.319Z ===
-<inner:316>
-
-=== assistant 2026-08-13T13:25:54.319Z [L:548] ===
 <content:116>
