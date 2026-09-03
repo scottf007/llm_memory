@@ -29,3 +29,9 @@ classifiers = [
 Homepage = "https://github.com/scottvr/llm_memory"
 Repository = "https://github.com/scottvr/llm_memory"
 Documentation = "https://github.com/scottvr/llm_memory#readme"
+
+[tool.pytest.ini_options]
+markers = [
+    "live_corpus: reads the owner's live stores (~/.claude/memory, ~/.codex, ~/.grok); opt in with -m live_corpus",
+]
+addopts = "-m 'not live_corpus'"
