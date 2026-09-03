@@ -9,6 +9,9 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
 MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=hooks/lib_session_common.sh
+source "$SCRIPT_DIR/hooks/lib_session_common.sh"
 
 # Sync CLAUDE.md from shared config if newer
 SHARED_CLAUDE_MD="$MEMORY_DIR/config/CLAUDE.md"
@@ -159,11 +162,8 @@ if [ ! -f "$DB" ]; then
     exit 0
 fi
 
-# Derive project name from cwd
-PROJECT=""
-if [ -n "$CWD" ]; then
-    PROJECT=$(echo "$CWD" | sed -n 's|.*/projects/\([^/]*\).*|\1|p')
-fi
+# Derive project name from cwd using the shared Codex/Claude rule.
+PROJECT=$(resolve_project_from_cwd "$CWD")
 
 # Seed per-project auto-memory dir so the harness template's "this directory
 # already exists" claim is true — stops Claude from running mkdir -p on first
@@ -196,53 +196,7 @@ if [ -n "$CLAUDE_ENV_FILE" ] && [ -n "$SESSION_ID" ]; then
 fi
 
 # Auto-process all unprocessed transcripts (including synced ones)
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-
-# Count session envelopes that have not made it into the project state.  A
-# failed count is unknown, not zero: stdout is the only hook channel the model
-# receives, so preserve the failure there instead of silently suppressing an
-# overdue /narrative prompt.
-count_new_sessions() {
-    local project="$1"
-    local count_file err_file status count first_error
-    count_file=$(mktemp "${TMPDIR:-/tmp}/llm-memory-count.XXXXXX") || {
-        NEW_SESSION_COUNT=""
-        NEW_SESSION_COUNT_ERROR="could not create temporary count file"
-        return 1
-    }
-    err_file=$(mktemp "${TMPDIR:-/tmp}/llm-memory-count.XXXXXX") || {
-        rm -f "$count_file"
-        NEW_SESSION_COUNT=""
-        NEW_SESSION_COUNT_ERROR="could not create temporary error file"
-        return 1
-    }
-    python3 -c "
-import sys, json, pathlib
-sys.path.insert(0, '$SCRIPT_DIR')
-from conversations import list_sessions
-proj='$project'
-logged=set(list_sessions(proj))
-try:
-    from tools.memory_config import memory_root
-    with open(memory_root() / 'projects' / (proj+'.json')) as f: d=json.load(f)
-    merged={s.get('session_id') for s in d.get('sessions',[]) if not str(s.get('session_id','')).startswith(('audit-','agent-'))}
-except FileNotFoundError:
-    merged=set()
-print(len(logged - merged))
-" >"$count_file" 2>"$err_file"
-    status=$?
-    count=$(<"$count_file")
-    first_error=$(sed -n '1p' "$err_file")
-    rm -f "$count_file" "$err_file"
-    if [ "$status" -ne 0 ] || [ -z "$count" ] || ! [[ "$count" =~ ^[0-9]+$ ]]; then
-        NEW_SESSION_COUNT=""
-        NEW_SESSION_COUNT_ERROR="${first_error:-no count output}"
-        return 1
-    fi
-    NEW_SESSION_COUNT="$count"
-    NEW_SESSION_COUNT_ERROR=""
-    return 0
-}
+COUNT_PYTHON=$(resolve_hook_python "$SCRIPT_DIR" 2>/dev/null || true)
 
 if [ "$SOURCE" != "compact" ]; then
     "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/process_transcripts.py" --quiet 2>/dev/null
@@ -258,7 +212,7 @@ if [ "$SOURCE" = "compact" ]; then
             NARRATIVE=""
         fi
         # Staleness: session_logs for this project minus sessions already merged into {project}.json
-        if count_new_sessions "$PROJECT"; then
+        if [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
             COMPACT_NEW_SESSIONS="$NEW_SESSION_COUNT"
         else
             COMPACT_NEW_SESSIONS=""
@@ -293,7 +247,7 @@ else
             NARRATIVE=""
         fi
         # Staleness: count sessions that haven't been merged into {project}.json.sessions[]
-        if count_new_sessions "$PROJECT"; then
+        if [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
             NEW_SESSIONS="$NEW_SESSION_COUNT"
         else
             NEW_SESSIONS=""
