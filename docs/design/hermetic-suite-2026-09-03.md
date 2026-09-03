@@ -49,7 +49,7 @@ The population of live-conditional rows is **35**, derived mechanically: every t
 ## 5. Acceptance protocol (PM-run, mechanical, before merge)
 
 1. `sha256sum` of the six frozen modules before and after: identical.
-2. `pytest tests/` with the real `$HOME`: 0 failed; deselected count = 35; pass/skip node sets identical to the same command under `HOME=<empty dir>` (the fake-HOME control), and no skip reason mentions a live store under either.
+2. `pytest tests/` with the real `$HOME`: 0 failed; the selected node set (pass + skip node ids) is identical to the same command under `HOME=<empty dir>` (the fake-HOME control), and no skip reason mentions a live store under either. The deselected count is 35 under the fake HOME and larger under the real HOME (54 today) because one live oracle row parametrizes over real sessions and expands into concrete nodes only when the store is present; compare selected node sets, not deselected counts. **Amendment 2 (3 Sep 16:45):** the first version said "deselected count = 35" for both runs; hermetic-impl-codex measured the expansion (event 01788415788278184456).
 3. `pytest -m live_corpus tests/` with the real `$HOME`: collects exactly 35; the 17 ledger-pinned rows still fail with the drift message (the drift is still visible, on purpose); the codex guard passes; nothing else changes.
 4. `pytest -m "" tests/test_archive_class.py::test_unclassified_trio_exact` runs (does not deselect).
 5. Live store untouched: sha256 of `~/.claude/memory/projects/llm_memory.json` and `memory.db` identical before and after every seat.
