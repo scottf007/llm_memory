@@ -95,7 +95,8 @@ async def list_tools() -> list[types.Tool]:
             "default: 5 for claude, 1 for codex, and 3 for grok, read from each session's "
             "conversation frontmatter) are excluded so the narrative pipeline "
             "doesn't burn cycles on noise like single-prompt SDK calls or "
-            "automation traffic.",
+            "automation traffic. The response includes skipped_low_turn and "
+            "skipped_grok_keepalive path lists alongside their count keys.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -275,6 +276,10 @@ _MIN_ASSISTANT_CHARS = 50
 # nothing it produces is otherwise-unrecorded narrative material either way.
 _CODEX_AUTO_MARKER = "You are the managed `codex-auto` participant"
 
+# Grok's self-wake keep-alive harness has a fixed first-prompt recipe. This
+# remains a content marker until agent-messaging can emit a structural one.
+_GROK_KEEPALIVE_MARKER = "keep-alive for seat"
+
 
 def _first_user_message_text(jsonl_path: str) -> str:
     """Text of the first substantive user turn, or "" if none is found."""
@@ -307,6 +312,11 @@ def _first_user_message_text(jsonl_path: str) -> str:
 
 def _is_codex_auto_participant(jsonl_path: str) -> bool:
     return _CODEX_AUTO_MARKER in _first_user_message_text(jsonl_path)
+
+
+def _is_grok_keepalive_loop(jsonl_path: str) -> bool:
+    """Whether a Grok envelope begins with the self-wake keep-alive recipe."""
+    return _GROK_KEEPALIVE_MARKER in _first_user_message_text(jsonl_path).lower()
 
 
 def _has_substantive_assistant_content(jsonl_path: str, min_chars: int) -> bool:
@@ -626,16 +636,19 @@ def compute_narrative_coverage(
     client_by_sid = _client_by_session(DB_DIR / "conversations")
 
     # Filter: drop sub-agent transcripts (agent-*), the codex-auto board
-    # harness's own sessions, short one-shot sessions (per-client turn
-    # threshold), and sessions whose only assistant output is a health-check
-    # reply — so the narrative pipeline doesn't extract from noise like
-    # single-prompt SDK calls, board-polling automation, or a bare PONG.
+    # harness's own sessions, Grok's self-wake keep-alive loops, short one-shot
+    # sessions (per-client turn threshold), and sessions whose only assistant
+    # output is a health-check reply — so the narrative pipeline doesn't
+    # extract from noise like single-prompt SDK calls, board-polling
+    # automation, or a bare PONG.
     # Counts only need to reach the threshold, so each scan short-circuits
     # cheaply for sessions that already qualify.
     unprocessed: list[str] = []
     skipped_subagent = 0
     skipped_codex_auto = 0
+    skipped_grok_keepalive: list[str] = []
     skipped_low_turn = 0
+    skipped_low_turn_paths: list[str] = []
     skipped_low_content = 0
     for sid, p in raw_unprocessed:
         if sid.startswith("agent-"):
@@ -645,12 +658,16 @@ def compute_narrative_coverage(
         if client == "codex" and _is_codex_auto_participant(p):
             skipped_codex_auto += 1
             continue
+        if client == "grok" and _is_grok_keepalive_loop(p):
+            skipped_grok_keepalive.append(p)
+            continue
         threshold = (min_user_turns_override if min_user_turns_override is not None
                      else _MIN_USER_TURNS_BY_CLIENT.get(client, _DEFAULT_MIN_USER_TURNS))
         if threshold > 0:
             turns = _count_substantive_user_turns(p, cap=threshold)
             if turns < threshold:
                 skipped_low_turn += 1
+                skipped_low_turn_paths.append(p)
                 continue
         if not _has_substantive_assistant_content(p, min_chars=_MIN_ASSISTANT_CHARS):
             skipped_low_content += 1
@@ -688,10 +705,14 @@ def compute_narrative_coverage(
         except OSError:
             pass
 
-    skipped_total = skipped_subagent + skipped_codex_auto + skipped_low_turn + skipped_low_content
+    skipped_total = (
+        skipped_subagent + skipped_codex_auto + len(skipped_grok_keepalive)
+        + skipped_low_turn + skipped_low_content
+    )
     filter_note = (
         f" (excluded {skipped_total}: {skipped_subagent} sub-agent, "
-        f"{skipped_codex_auto} codex-auto harness, {skipped_low_turn} low-turn, "
+        f"{skipped_codex_auto} codex-auto harness, {len(skipped_grok_keepalive)} grok-keepalive, "
+        f"{skipped_low_turn} low-turn, "
         f"{skipped_low_content} low-content)"
         if skipped_total else ""
     )
@@ -707,7 +728,10 @@ def compute_narrative_coverage(
             "unprocessed_sorted": unprocessed_sorted,
             "skipped_subagent_count": skipped_subagent,
             "skipped_codex_auto_count": skipped_codex_auto,
+            "skipped_grok_keepalive_count": len(skipped_grok_keepalive),
+            "skipped_grok_keepalive": skipped_grok_keepalive,
             "skipped_low_turn_count": skipped_low_turn,
+            "skipped_low_turn": skipped_low_turn_paths,
             "skipped_low_content_count": skipped_low_content,
             "min_user_turns": min_user_turns_override,
             "min_user_turns_by_client": min_user_turns_by_client,
@@ -729,7 +753,10 @@ def compute_narrative_coverage(
         "unprocessed_sorted": unprocessed_sorted,
         "skipped_subagent_count": skipped_subagent,
         "skipped_codex_auto_count": skipped_codex_auto,
+        "skipped_grok_keepalive_count": len(skipped_grok_keepalive),
+        "skipped_grok_keepalive": skipped_grok_keepalive,
         "skipped_low_turn_count": skipped_low_turn,
+        "skipped_low_turn": skipped_low_turn_paths,
         "skipped_low_content_count": skipped_low_content,
         "min_user_turns": min_user_turns_override,
         "min_user_turns_by_client": min_user_turns_by_client,

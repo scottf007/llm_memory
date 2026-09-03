@@ -282,6 +282,150 @@ def test_explicit_override_still_applies_to_grok(sandbox):
 
 
 # --------------------------------------------------------------------------
+# A3.5 (docs/design/grok-ingestion-2026-09-03.md §7, subsection A3.5): the
+# multi-agent board's own self-wake keep-alive loop is a harness pattern for
+# grok exactly the way codex-auto is for codex -- a fixed recipe phrase in
+# the first kept user message, structural rather than content- or
+# threshold-based. Measured on the A3.1-A3.4 candidate: narrative_coverage
+# still listed 44 finance_nexus grok transcripts that are all 10-prompt
+# keep-alive forks the A3.2 threshold cannot see, because each turn is a
+# real prompt_index record with no synthetic_reason -- the same shape as a
+# working seat's own scheduled-task prompt.
+# --------------------------------------------------------------------------
+
+GROK_KEEPALIVE_TRIGGER = (
+    "Self-wake keep-alive for seat demo-seat on job demo-job. Run ONLY:\n"
+    "am sync --job demo-job --seat demo-seat --monitor\n"
+    "am sync --job demo-job --seat demo-seat\n"
+)
+
+GROK_KEEPALIVE_TRIGGER_CASE = (
+    "Self-wake KEEP-ALIVE FOR SEAT demo-seat on job demo-job. Run ONLY:\n"
+    "am sync --job demo-job --seat demo-seat --monitor\n"
+    "am sync --job demo-job --seat demo-seat\n"
+)
+
+GROK_WORK_LOOP_PROMPT = (
+    "You are seat demo-seat on job demo-job. This is a Grok self-wake tick.\n\n"
+    "Brief: three review comments are still open on the migration guide; "
+    "read them and reply with concrete fixes for each before the next tick."
+)
+
+
+def _grok_session(sandbox, sid, first_turn_text, extra_turns=2):
+    """A grok session whose first user turn is `first_turn_text`, with enough
+    total substantive turns (1 + extra_turns == grok's threshold of 3) that
+    the A3.2 turn threshold alone would not exclude it -- isolating whatever
+    the A3.5 structural filter does from the threshold's own effect."""
+    turns = [("user", first_turn_text), ("assistant", SUBSTANTIVE_REPLY)]
+    for i in range(extra_turns):
+        turns.append(("user", f"tick {i}: {DESIGN_COUNCIL_PROMPT}"))
+        turns.append(("assistant", SUBSTANTIVE_REPLY))
+    return _write_session(sandbox, sid, "demo", "grok", turns)
+
+
+def test_grok_keepalive_session_excluded(sandbox):
+    """A3.5 trigger: the fixed self-wake keep-alive recipe as the first user
+    turn excludes the session even though it clears grok's turn threshold of
+    3 on its own (1 trigger turn + 2 extra = 3 user turns), and the summary
+    filter note names the exclusion."""
+    _grok_session(sandbox, "grok-keepalive", GROK_KEEPALIVE_TRIGGER)
+    result = _coverage()
+    assert result["unprocessed"] == []
+    assert result["skipped_grok_keepalive_count"] == 1
+    assert result["skipped_low_turn_count"] == 0
+    assert "1 grok-keepalive" in result["summary"]
+
+
+def test_grok_keepalive_session_excluded_case_insensitive(sandbox):
+    """A3.5 trigger, case: the plan requires case-insensitive matching on
+    `keep-alive for seat`."""
+    _grok_session(sandbox, "grok-keepalive-upper", GROK_KEEPALIVE_TRIGGER_CASE)
+    result = _coverage()
+    assert result["unprocessed"] == []
+    assert result["skipped_grok_keepalive_count"] == 1
+
+
+def test_grok_work_loop_session_included(sandbox):
+    """Non-trigger control: a real seat's scheduled self-wake tick shares the
+    board-harness scheduling shape but is not the keep-alive recipe -- it
+    must still reach the narrative. GREEN on a5077b3 already (nothing yet
+    excludes it); stays green once A3.5 lands."""
+    transcript = _grok_session(sandbox, "grok-workloop", GROK_WORK_LOOP_PROMPT)
+    result = _coverage()
+    assert str(transcript) in result["unprocessed"]
+
+
+def test_claude_session_quoting_keepalive_phrase_is_not_excluded(sandbox):
+    """Non-trigger control, client scope: the marker check is grok-scoped,
+    mirroring the codex-auto preamble's client scope -- a claude session
+    that merely quotes the phrase is real material, not harness noise.
+    GREEN on a5077b3 already; stays green once A3.5 lands."""
+    turns = [("user", GROK_KEEPALIVE_TRIGGER), ("assistant", SUBSTANTIVE_REPLY)]
+    for i in range(4):
+        turns.extend([
+            ("user", f"follow-up {i}: {DESIGN_COUNCIL_PROMPT}"),
+            ("assistant", SUBSTANTIVE_REPLY),
+        ])
+    transcript = _write_session(sandbox, "claude-quotes-keepalive", "demo", "claude", turns)
+    result = _coverage()
+    assert str(transcript) in result["unprocessed"]
+
+
+def test_codex_session_quoting_keepalive_phrase_is_not_excluded(sandbox):
+    """Non-trigger control, client scope: same as above for codex, at
+    codex's own threshold of 1. GREEN on a5077b3 already; stays green once
+    A3.5 lands."""
+    transcript = _write_session(sandbox, "codex-quotes-keepalive", "demo", "codex",
+                                 [("user", GROK_KEEPALIVE_TRIGGER), ("assistant", SUBSTANTIVE_REPLY)])
+    result = _coverage()
+    assert str(transcript) in result["unprocessed"]
+
+
+def test_skipped_grok_keepalive_count_present_and_zero_with_no_grok_sessions(sandbox):
+    """Payload shape: the new key must exist at 0 even when nothing grok is
+    present, and the pre-existing codex-auto behaviour must be untouched."""
+    _write_session(sandbox, "codex-auto-noreply2", "demo", "codex",
+                    [("user", CODEX_AUTO_PREAMBLE), ("assistant", "NO_REPLY")])
+    result = _coverage()
+    assert result["skipped_grok_keepalive_count"] == 0
+    assert result["skipped_codex_auto_count"] == 1
+
+
+def test_coverage_payload_exposes_skipped_id_lists(sandbox):
+    """Judge finding F5 on amendment 3: the two count-only filters hardest to
+    audit from outside (low-turn, and now grok-keepalive) must also expose
+    the actual excluded paths, parallel to the existing count keys, so a
+    human or PM can name what got dropped without re-deriving it. RED on
+    a5077b3: neither `skipped_low_turn` nor `skipped_grok_keepalive` exists
+    in the payload yet."""
+    low_turn_transcript = _write_session(sandbox, "claude-onlyturn2", "demo", "claude",
+                                          [("user", DESIGN_COUNCIL_PROMPT),
+                                           ("assistant", SUBSTANTIVE_REPLY)])
+    keepalive_transcript = _grok_session(sandbox, "grok-keepalive2", GROK_KEEPALIVE_TRIGGER)
+    result = _coverage()
+
+    assert "skipped_low_turn" in result
+    assert isinstance(result["skipped_low_turn"], list)
+    assert len(result["skipped_low_turn"]) == result["skipped_low_turn_count"]
+    assert str(low_turn_transcript) in result["skipped_low_turn"]
+
+    assert "skipped_grok_keepalive" in result
+    assert isinstance(result["skipped_grok_keepalive"], list)
+    assert len(result["skipped_grok_keepalive"]) == result["skipped_grok_keepalive_count"]
+    assert str(keepalive_transcript) in result["skipped_grok_keepalive"]
+
+    # Existing shape is unchanged: unprocessed and the other count keys are
+    # still exactly what they were before this key was added.
+    assert result["unprocessed"] == []
+    assert isinstance(result["unprocessed"], list)
+    assert all(isinstance(p, str) for p in result["unprocessed"])
+    for key in ("skipped_subagent_count", "skipped_codex_auto_count",
+                "skipped_low_turn_count", "skipped_low_content_count"):
+        assert isinstance(result[key], int)
+
+
+# --------------------------------------------------------------------------
 # A3.2 acceptance -- real live store, read-only, skipped when the store is
 # absent. Property assertions, not fixed counts: the store grows under us
 # (other seats/board activity write to it concurrently), so pinning an exact
@@ -342,6 +486,74 @@ def test_live_load_balancer_acceptance_session_not_regressed():
     processed_ids = {s.get("session_id") for s in state.get("sessions", []) or []}
     assert in_unprocessed or sid in processed_ids, (
         f"{sid} is neither unprocessed nor merged for load_balancer")
+
+
+# --------------------------------------------------------------------------
+# A3.5 acceptance -- real live store, read-only, skipped when the store is
+# absent. The marker check is on the first KEPT user message of the archived
+# envelope, read independently of server._first_user_message_text here so
+# the test isn't just restating the implementation it's meant to gate.
+# --------------------------------------------------------------------------
+
+def _first_user_text_independent(transcript_path: str) -> str:
+    for line in Path(transcript_path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") != "user":
+            continue
+        msg = record.get("message") or {}
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(c.get("text", "") for c in content
+                            if isinstance(c, dict) and c.get("type") == "text")
+        return ""
+    return ""
+
+
+@pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
+def test_live_finance_nexus_excludes_grok_keepalive_forks():
+    """A3.5 acceptance (design note §7): finance_nexus is where the 44
+    ten-prompt keep-alive forks were measured. None of the grok transcripts
+    compute_narrative_coverage still lists as unprocessed may carry the
+    self-wake keep-alive recipe as its first kept user message."""
+    result = server.compute_narrative_coverage("finance_nexus")
+    grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
+    if not grok_paths:
+        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    texts = {p: _first_user_text_independent(p) for p in grok_paths}
+    marked = {p: t for p, t in texts.items() if "keep-alive for seat" in t.lower()}
+    assert marked == {}, (
+        f"grok transcript(s) listed as unprocessed carry the keep-alive marker: {list(marked)}")
+
+
+@pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
+def test_live_no_project_lists_a_grok_keepalive_transcript():
+    """A3.5 acceptance, store-wide: across every registered project, no grok
+    transcript compute_narrative_coverage lists as unprocessed carries the
+    keep-alive marker -- the filter is not finance_nexus-specific."""
+    projects_dir = _LIVE_MEMORY_DIR / "projects"
+    names = sorted({
+        p.name[: -len(".json")]
+        for p in projects_dir.glob("*.json")
+        if not p.name.endswith((".archived.json", ".certificate.json", ".contested.json"))
+    })
+    if not names:
+        pytest.skip("no registered projects in the live store")
+    marked: dict[str, list[str]] = {}
+    for name in names:
+        result = server.compute_narrative_coverage(name)
+        grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
+        hits = [p for p in grok_paths if "keep-alive for seat" in _first_user_text_independent(p).lower()]
+        if hits:
+            marked[name] = hits
+    assert marked == {}, f"project(s) list a grok keep-alive transcript as unprocessed: {marked}"
 
 
 # --------------------------------------------------------------------------
