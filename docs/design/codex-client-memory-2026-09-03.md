@@ -77,3 +77,15 @@ The first subject run (ccm-subject-codex on candidate 514f2ff, event 01788425513
 ## 8. Amendment 2 (3 Sep 20:0x, after the judge's verdict)
 
 Merged: candidate d4e79f6 → main 8247b02 on ccm-judge-opus PASS (01788427819251055431). Acceptance §5: items 1, 2, 4, 5 met by execution; **item 3 is NOT met** — the probe's rules-line row wrote the sentinel into `AGENTS.md` itself and llm_memory's MCP server was not registered inside the subject's scratch HOME, so the row measured nothing about llm_memory (judge finding F1; the judge's control with the narrative deleted still passed). **F-19 stays open.** The SessionStart hook row is a clean PASS: it ran before any `AGENTS.md` existed with the sentinel only in the narrative (rollout 01a06682-4a28-79d3-82a3-d91e34903616). The wrapper row was never measured (exit 127 in seat worktrees; T-F10). Findings F2–F7 (row independence, a forked new-session counter in `codex_session_start.sh`, hooks.json reformat on first install, matcher width, unconditional hooks.json creation, T6's dry-run contract) are project ticket T-F11, which absorbs T-F10 and is the vehicle to measure F-19 honestly: fresh scratch project per row, the canonical F-19 line, llm_memory MCP registered in the scratch HOME.
+
+## 9. Amendment 3 (3 Sep 20:4x) — honest three-row measurement after T-F11
+
+T-F11 merged as a4debdf (rows isolated, canonical F-19 line, llm_memory MCP registered in the scratch HOME, wrapper interpreter resolved, pipefail repair). Subject ccm-subject2-codex, one real run, no supplied HOME, real `~/.codex` and ledger unchanged (event 01788432188984249846):
+
+| row | result | rollout | evidence |
+|---|---|---|---|
+| hook (SessionStart, `additionalContext`) | PASS | 01a066da-6c6a-7da2-8e4e-c8f451b691be | sentinel quoted |
+| rules-line (F-19 canonical line, MCP registered) | FAIL | 01a066db-75a4-7303-b825-1adde26faad0 | model attempted the memory lookups; codex `exec` default approval policy blocked the MCP calls; no `resume` tool call |
+| wrapper (`tools/memory_wrap codex`) | PASS | 01a066db-dbe6-75b2-86ba-584fec597c8a | sentinel quoted |
+
+**F-19 stays open, now with a measured blocker:** the rules-line mechanism depends on the client's approval policy permitting an MCP tool call at turn 1; under `codex exec` defaults it is blocked. Whether it works under a permissive policy (the flags am seats use) is a future one-row experiment, not assumed. The shipped injection path is the SessionStart hook (D3); the wrapper is a proven fallback.
