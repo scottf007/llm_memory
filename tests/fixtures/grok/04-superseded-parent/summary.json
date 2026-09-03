@@ -1,0 +1,27 @@
+{
+  "info": {
+    "id": "04-superseded-parent",
+    "cwd": "/home/user/projects/project-67ba102a"
+  },
+  "session_summary": "<session_summary:43>",
+  "created_at": "2026-08-26T09:37:27.107846465Z",
+  "updated_at": "2026-08-26T09:37:44.178917414Z",
+  "num_messages": 20,
+  "num_chat_messages": 11,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 0,
+  "chat_format_version": 1,
+  "session_kind": "subagent",
+  "git_root_dir": "/home/user/projects/project-67ba102a/",
+  "git_remotes": [
+    "<git_remotes:55>"
+  ],
+  "head_commit": "<head_commit:40>",
+  "head_branch": "<head_branch:6>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-26T09:37:44.178917414Z",
+  "generated_title": "<generated_title:43>",
+  "agent_name": "general-purpose",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}

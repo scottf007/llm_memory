@@ -1,0 +1,25 @@
+{"type": "system", "content": "<content:5773>"}
+{"type": "user", "content": [{"type": "text", "text": "<text:6466>"}]}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:8703>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:368>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<user_query>\n<inner:459>\n</user_query>"}], "prompt_index": 0}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:712>", "status": "completed"}
+{"type": "assistant", "content": "<content:130>", "tool_calls": [{"id": "<id:43>", "name": "<name:11>", "arguments": "<arguments:69>"}, {"id": "<id:43>", "name": "<name:8>", "arguments": "<arguments:59>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:63>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_f95ce4c3856c43c4", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:4948>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:10637>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:200>"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:1124>", "status": "completed"}
+{"type": "assistant", "content": "<content:149>", "tool_calls": [{"id": "<id:43>", "name": "<name:8>", "arguments": "<arguments:148>"}, {"id": "<id:43>", "name": "<name:8>", "arguments": "<arguments:137>"}, {"id": "<id:43>", "name": "<name:8>", "arguments": "<arguments:72>"}, {"id": "<id:43>", "name": "<name:4>", "arguments": "<arguments:54>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_f95ce4c3856c43c4", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:48>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:77>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:77>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:73>"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:235>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:299>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<user_query>\n<inner:1033>\n</user_query>"}], "prompt_index": 1}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:368>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:203>"}], "encrypted_content": "<encrypted_content:351>", "status": "completed"}
+{"type": "assistant", "content": "<content:120>", "tool_calls": [{"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:68>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:126>"}, {"id": "<id:43>", "name": "<name:9>", "arguments": "<arguments:135>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:133>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:134>"}, {"id": "<id:44>", "name": "<name:9>", "arguments": "<arguments:126>"}], "model_id": "grok-4.6-build", "model_fingerprint": "fp_f95ce4c3856c43c4", "reasoning_effort": "high"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:353>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:5406>"}
+{"type": "tool_result", "tool_call_id": "<tool_call_id:43>", "content": "<content:3349>"}

@@ -1,0 +1,7 @@
+{"type": "system", "content": "<content:5773>"}
+{"type": "user", "content": [{"type": "text", "text": "<text:6441>"}]}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:8703>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<system-reminder>\n<inner:265>\n</system-reminder>"}], "synthetic_reason": "system_reminder"}
+{"type": "user", "content": [{"type": "text", "text": "<user_query>\n<inner:24>\n</user_query>"}], "prompt_index": 0}
+{"type": "reasoning", "id": "<id:39>", "summary": [{"type": "summary_text", "text": "<text:121>"}], "encrypted_content": "<encrypted_content:199>", "status": "completed"}
+{"type": "assistant", "content": "PONG", "model_id": "grok-4.6-build", "model_fingerprint": "fp_08d0bc26c22b024e", "reasoning_effort": "high"}

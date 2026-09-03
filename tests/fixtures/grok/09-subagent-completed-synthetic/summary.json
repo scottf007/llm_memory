@@ -1,0 +1,26 @@
+{
+  "info": {
+    "id": "09-subagent-completed-synthetic",
+    "cwd": "/home/user/projects/project-67ba102a"
+  },
+  "session_summary": "<session_summary:39>",
+  "created_at": "2026-08-13T12:25:03.555805933Z",
+  "updated_at": "2026-08-15T13:35:01.674776960Z",
+  "num_messages": 6799,
+  "num_chat_messages": 1298,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 55,
+  "chat_format_version": 1,
+  "git_root_dir": "/home/user/projects/project-67ba102a/",
+  "head_commit": "<head_commit:40>",
+  "head_branch": "<head_branch:6>",
+  "request_id": "<request_id:36>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-15T13:34:58.728925873Z",
+  "generated_title": "<generated_title:39>",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high",
+  "last_turn_summary": "<last_turn_summary:69>",
+  "last_turn_summary_prompt_id": "<last_turn_summary_prompt_id:36>"
+}

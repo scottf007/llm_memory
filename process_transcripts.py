@@ -140,8 +140,30 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
     captured inside their parent, same rule as Claude's `agent-` transcripts.
     """
     adapter = adapters.get(ref.client)
+    source_path = getattr(adapter, "source_path", lambda item: item.path)(ref)
+    envelope_path = ARCHIVE_DIR / f"{ref.session_id}.jsonl"
+    md_path = CONVERSATIONS_DIR / f"{ref.session_id}.md"
+    if getattr(adapter, "is_superseded", lambda item: False)(ref):
+        # A previously ingested chain tail can become a fork prefix without
+        # its source file changing.  D4 must outrank D8's mtime fast path or
+        # the old envelope and .md duplicate the later tail forever.
+        envelope_path.unlink(missing_ok=True)
+        md_path.unlink(missing_ok=True)
+        return None
+    try:
+        if envelope_path.exists() and envelope_path.stat().st_mtime >= source_path.stat().st_mtime:
+            return envelope_path, md_path
+    except OSError:
+        # Parsing below provides the existing tolerant behaviour for a source
+        # that disappears or cannot be read during a sweep.
+        pass
+
     meta, turns = adapter.parse(ref)
     if meta.is_subagent:
+        # Preserve the same D4 invariant for adapters that report it only
+        # after parsing, and clean an artifact written before a later fork.
+        envelope_path.unlink(missing_ok=True)
+        md_path.unlink(missing_ok=True)
         return None
 
     envelope = adapters.write_envelope(meta, turns, ARCHIVE_DIR)
@@ -154,7 +176,7 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
         print(f"  WARN: {detail}")
 
     CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
-    md = CONVERSATIONS_DIR / f"{meta.session_id}.md"
+    md = md_path
     md.write_text(adapters.render_conversation(meta, turns))
     return envelope, md
 

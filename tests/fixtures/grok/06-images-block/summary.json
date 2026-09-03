@@ -1,0 +1,26 @@
+{
+  "info": {
+    "id": "06-images-block",
+    "cwd": "/home/user/projects/project-4f1b9b1a"
+  },
+  "session_summary": "<session_summary:33>",
+  "created_at": "2026-08-18T13:58:49.217333139Z",
+  "updated_at": "2026-08-19T06:26:49.010220176Z",
+  "num_messages": 263,
+  "num_chat_messages": 122,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 1,
+  "chat_format_version": 1,
+  "git_root_dir": "/home/user/projects/project-4f1b9b1a/",
+  "head_commit": "<head_commit:40>",
+  "head_branch": "<head_branch:4>",
+  "request_id": "<request_id:36>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-19T06:26:49.010220176Z",
+  "generated_title": "<generated_title:33>",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high",
+  "last_turn_summary": "<last_turn_summary:53>",
+  "last_turn_summary_prompt_id": "<last_turn_summary_prompt_id:59>"
+}

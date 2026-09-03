@@ -1,0 +1,21 @@
+{
+  "info": {
+    "id": "01-interactive-primary",
+    "cwd": "/home/user/projects/project-67ba102a"
+  },
+  "session_summary": "<session_summary:47>",
+  "created_at": "2026-08-13T02:09:15.387964692Z",
+  "updated_at": "2026-08-13T02:12:23.312000038Z",
+  "num_messages": 53,
+  "num_chat_messages": 30,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 2,
+  "chat_format_version": 1,
+  "request_id": "<request_id:36>",
+  "grok_home": "<grok_home:17>",
+  "last_active_at": "2026-08-13T02:12:23.312000038Z",
+  "generated_title": "<generated_title:47>",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "read-only",
+  "reasoning_effort": "high"
+}

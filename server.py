@@ -260,7 +260,7 @@ def _handle_search(args: dict[str, Any]) -> list[types.TextContent]:
 # threshold either buries codex or lets Claude noise through. Read per
 # session from the `client:` frontmatter S1 added; anything without a
 # recorded client (nothing did, before that) is treated as claude.
-_MIN_USER_TURNS_BY_CLIENT = {"codex": 1}
+_MIN_USER_TURNS_BY_CLIENT = {"codex": 1, "grok": 1}
 _DEFAULT_MIN_USER_TURNS = 5
 
 # Below this many characters of assistant prose, a session is structurally
@@ -589,6 +589,7 @@ def compute_narrative_coverage(
     min_user_turns_by_client = {
         "claude": _DEFAULT_MIN_USER_TURNS,
         "codex": _MIN_USER_TURNS_BY_CLIENT["codex"],
+        "grok": _MIN_USER_TURNS_BY_CLIENT["grok"],
     }
     if min_user_turns_override is not None:
         min_user_turns_by_client = {c: min_user_turns_override for c in min_user_turns_by_client}
