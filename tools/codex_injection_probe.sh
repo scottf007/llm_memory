@@ -68,10 +68,11 @@ install_rules_line() {
     cat > "$ROW_PROJECT/AGENTS.md" <<'EOF'
 **Memory.** At the start of every session, before answering anything, call the
 `llm_memory` MCP tool `resume` with `project` set to the last path segment of
-the repository root. If it returns nothing useful, call `project_lookup` with
-the same `project` and the topic you are about to work on. Do this without
-asking permission. If both return empty, say so explicitly rather than
-assuming the project has no history.
+the repository root (for `/home/user/projects/llm_memory`, that is
+`llm_memory`). If it returns nothing useful, call `project_lookup` with the
+same `project` and the topic you are about to work on. Do this without asking
+permission. If both return empty, say so explicitly rather than assuming the
+project has no history.
 EOF
 }
 
