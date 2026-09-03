@@ -128,11 +128,6 @@ def test_live_corpus_marker_collects_exactly_the_pinned_census(tmp_path):
     differ -- RED for the same reason as the test above.
     """
     ids, result = _run_pytest_collect(["-m", "live_corpus"], tmp_path / "home")
-    assert len(ids) > 0, (
-        "collected 0 node ids -- the subprocess's rootdir doesn't match the "
-        "expected 'tests/...' prefix\n"
-        f"{result.stdout[-2000:]}\n{result.stderr[-2000:]}"
-    )
     assert ids == set(LIVE_CORPUS_NODE_IDS), (
         f"missing: {sorted(set(LIVE_CORPUS_NODE_IDS) - ids)}\n"
         f"unexpected: {sorted(ids - set(LIVE_CORPUS_NODE_IDS))}\n"
