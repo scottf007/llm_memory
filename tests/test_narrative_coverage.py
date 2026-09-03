@@ -22,6 +22,7 @@ the same sandbox to keep them in sync.
 from __future__ import annotations
 
 import json
+import asyncio
 import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -425,6 +426,14 @@ def test_coverage_payload_exposes_skipped_id_lists(sandbox):
         assert isinstance(result[key], int)
 
 
+def test_narrative_coverage_tool_description_names_grok_keepalive_loops():
+    """The public tool contract must expose its largest exclusion class."""
+    tools = asyncio.run(server.list_tools())
+    tool = next(tool for tool in tools if tool.name == "narrative_coverage")
+    assert "Grok self-wake keep-alive loops" in tool.description
+    assert "skipped_grok_keepalive" in tool.description
+
+
 # --------------------------------------------------------------------------
 # A3.2 acceptance -- real live store, read-only, skipped when the store is
 # absent. Property assertions, not fixed counts: the store grows under us
@@ -454,22 +463,54 @@ def _kept_user_turn_count(transcript_path: str) -> int:
     return count
 
 
+def _assert_only_keepalive_recipes_are_skipped(result: dict) -> None:
+    """The structural filter may exclude only its documented recipe shape."""
+    unexpected = {
+        path: _first_user_text_independent(path)
+        for path in result["skipped_grok_keepalive"]
+        if "keep-alive for seat" not in _first_user_text_independent(path).lower()
+    }
+    assert unexpected == {}, (
+        "grok transcript(s) without the keep-alive recipe were filtered: "
+        f"{unexpected}"
+    )
+
+
+def test_grok_keepalive_recipe_oracle_allows_structural_control(sandbox):
+    """Non-trigger: the documented keep-alive recipe remains excludable."""
+    _grok_session(sandbox, "grok-recipe-control", GROK_KEEPALIVE_TRIGGER)
+    result = _coverage()
+
+    _assert_only_keepalive_recipes_are_skipped(result)
+
+
+def test_grok_keepalive_recipe_oracle_fires_on_overmatch(sandbox, monkeypatch):
+    """Trigger: an over-broad marker predicate must expose real work."""
+    _grok_session(sandbox, "grok-overmatch", GROK_WORK_LOOP_PROMPT)
+    monkeypatch.setattr(server, "_is_grok_keepalive_loop", lambda _: True)
+    result = _coverage()
+
+    with pytest.raises(AssertionError, match="without the keep-alive recipe"):
+        _assert_only_keepalive_recipes_are_skipped(result)
+
+
 @pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
 def test_live_finance_nexus_grok_unprocessed_all_clear_a3_threshold():
     """A3.2 acceptance (design note §7): finance_nexus is where the 52
     keep-alive-fork feedback (01788396626574918910) was reported. Every grok
     transcript compute_narrative_coverage still lists as unprocessed must
-    have at least 3 kept user turns, and at least one must -- otherwise the
-    positive case (real seat work) is silently gone too."""
+    have at least 3 kept user turns. The positive case is separately guarded
+    by the filter-recipe trigger/control below, so an all-processed project is
+    a valid live state rather than a test failure."""
     result = server.compute_narrative_coverage("finance_nexus")
     grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
-    if not grok_paths:
-        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    if not grok_paths and not result["skipped_grok_keepalive"]:
+        pytest.skip("finance_nexus has no grok transcripts")
     counts = {p: _kept_user_turn_count(p) for p in grok_paths}
     under_threshold = {p: c for p, c in counts.items() if c < 3}
     assert under_threshold == {}, (
         f"grok transcript(s) listed as unprocessed below the A3.2 threshold of 3: {under_threshold}")
-    assert any(c >= 3 for c in counts.values())
+    _assert_only_keepalive_recipes_are_skipped(result)
 
 
 @pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")
@@ -525,12 +566,13 @@ def test_live_finance_nexus_excludes_grok_keepalive_forks():
     self-wake keep-alive recipe as its first kept user message."""
     result = server.compute_narrative_coverage("finance_nexus")
     grok_paths = [p for p in result["unprocessed"] if Path(p).stem.startswith("grok-")]
-    if not grok_paths:
-        pytest.skip("no grok transcripts currently unprocessed for finance_nexus")
+    if not grok_paths and not result["skipped_grok_keepalive"]:
+        pytest.skip("finance_nexus has no grok transcripts")
     texts = {p: _first_user_text_independent(p) for p in grok_paths}
     marked = {p: t for p, t in texts.items() if "keep-alive for seat" in t.lower()}
     assert marked == {}, (
         f"grok transcript(s) listed as unprocessed carry the keep-alive marker: {list(marked)}")
+    _assert_only_keepalive_recipes_are_skipped(result)
 
 
 @pytest.mark.skipif(not _LIVE_MEMORY_DIR.exists(), reason="no live llm_memory store on this machine")

@@ -95,7 +95,7 @@ def _register_session(home, session_id, project):
     return path
 
 
-def _run_hook(hook_name, home, input_json, timeout=30):
+def _run_hook(hook_name, home, input_json, timeout=30, extra_env=None):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
@@ -105,6 +105,8 @@ def _run_hook(hook_name, home, input_json, timeout=30):
     env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get(
         "PATH", "/usr/bin:/bin"
     )
+    if extra_env:
+        env.update(extra_env)
     # Prevent auto-update check and process_transcripts from running
     (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
 
@@ -136,7 +138,7 @@ def test_session_monitor_has_no_dead_memory_store_timestamp_matcher():
     assert "/narrative" in monitor
 
 
-def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj"):
+def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj", extra_env=None):
     """Run session_start.sh with a fake HOME and return its stdout."""
     input_json = json.dumps({
         "source": source,
@@ -144,7 +146,7 @@ def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj
         "cwd": cwd,
         "session_id": "test-session-123",
     })
-    stdout, stderr, rc = _run_hook("session_start.sh", home, input_json)
+    stdout, stderr, rc = _run_hook("session_start.sh", home, input_json, extra_env=extra_env)
     return stdout, stderr, rc
 
 
@@ -532,10 +534,33 @@ class TestNarrativeLivenessAgeSignal:
                                            cwd="/home/user/projects/testproj")
         assert rc == 0
         assert "AUTOMATIC TASK" in stdout
-        assert "new session(s) since last narrative" in stdout
+        assert "AUTOMATIC TASK: 1 new session(s) since last narrative" in stdout
         assert "AGE:" not in stdout, (
             f"fresh backlog must not get the age line. Output:\n{stdout}"
         )
+
+    @pytest.mark.parametrize("source", ["startup", "compact"])
+    def test_new_session_count_failure_warns_without_fake_zero(self, tmp_path, source):
+        """A failed count must remain visible to the model, never become zero."""
+        home, conn, _ = _setup_test_home(tmp_path)
+        _write_narrative(home, "testproj", "# fresh narrative")
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        _register_session(home, "today-1", "testproj")
+        conn.close()
+        poison = tmp_path / "poison"
+        poison.mkdir()
+        (poison / "json.py").write_text("raise ImportError('poisoned PYTHONPATH')\n")
+
+        stdout, _, rc = _run_session_start(
+            home,
+            source=source,
+            extra_env={"PYTHONPATH": str(poison)},
+        )
+
+        assert rc == 0
+        assert "LLM_MEMORY_WARN: new-session count unavailable" in stdout
+        assert "(Traceback (most recent call last):)" in stdout
+        assert "AUTOMATIC TASK: 0 new session(s)" not in stdout
 
     def test_fresh_tail_after_old_merge_no_age(self, tmp_path):
         """Adversarial #1 at the hook: merge 20d ago, tail written now.
