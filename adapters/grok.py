@@ -23,10 +23,9 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Iterator
 from urllib.parse import unquote
 
-from .base import SessionMeta, SessionRef, Turn, project_from_cwd
+from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_parser, project_from_cwd
 
 CLIENT = "grok"
 ID_PREFIX = "grok-"
@@ -204,10 +203,6 @@ def _event_timestamps(path: Path) -> list[str]:
     return values
 
 
-def _archive_path(session_id: str) -> str:
-    return f"transcripts/{session_id}.jsonl"
-
-
 def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     summary = _summary(ref.path)
     info = summary.get("info") if isinstance(summary.get("info"), dict) else {}
@@ -237,7 +232,7 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
         ended=ended,
         is_subagent=_is_superseded(ref),
         parent_session_id=parent_id,
-        raw=_archive_path(ref.session_id),
+        raw=archive_path(ref.session_id),
         raw_source=_relative_source(ref.path / "chat_history.jsonl"),
         extra=extra,
     )
@@ -291,33 +286,27 @@ def _parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
     return meta, turns
 
 
-_CACHE: tuple[tuple, tuple[SessionMeta, list[Turn]]] | None = None
+def cache_key(ref: SessionRef) -> tuple[object, ...] | None:
+    """Stats for all Grok inputs that can alter a parsed session.
 
-
-def _cache_key(ref: SessionRef) -> tuple | None:
+    The session directory itself is deliberately not the cache key: Grok
+    appends to ``chat_history.jsonl`` in place, which need not touch the
+    directory mtime. A missing history file returns no key so it is retried.
+    """
     paths = (ref.path / "chat_history.jsonl", ref.path / "summary.json", ref.path / "events.jsonl")
     try:
-        return (str(ref.path), *[(p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else None
-                                 for p in paths])
+        history_stat = paths[0].stat()
     except OSError:
         return None
+    other_stats = []
+    for path in paths[1:]:
+        try:
+            stat = path.stat()
+        except OSError:
+            other_stats.append(None)
+        else:
+            other_stats.append((stat.st_mtime_ns, stat.st_size))
+    return str(ref.path), (history_stat.st_mtime_ns, history_stat.st_size), *other_stats
 
 
-def parse(ref: SessionRef) -> tuple[SessionMeta, list[Turn]]:
-    """Parse meta and turns once, caching by the three source files' stats."""
-    global _CACHE
-    key = _cache_key(ref)
-    if key is not None and _CACHE is not None and _CACHE[0] == key:
-        return _CACHE[1]
-    result = _parse(ref)
-    if key is not None:
-        _CACHE = (key, result)
-    return result
-
-
-def session_meta(ref: SessionRef) -> SessionMeta:
-    return parse(ref)[0]
-
-
-def turns(ref: SessionRef) -> Iterator[Turn]:
-    return iter(parse(ref)[1])
+parse, session_meta, turns = make_adapter_parser(_parse, cache_key=cache_key)
