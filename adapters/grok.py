@@ -97,6 +97,12 @@ def ref_for_path(path: Path, session_id: str | None = None) -> SessionRef:
     )
 
 
+def ref_for_source(path: Path, session_id: str | None = None) -> SessionRef:
+    """Build a ref from the source path recorded by the oracle."""
+    path = Path(path)
+    return ref_for_path(path.parent if path.name == "chat_history.jsonl" else path, session_id)
+
+
 def source_path(ref: SessionRef) -> Path:
     """The mutable source file used by the incremental-sweep mtime check."""
     return ref.path / "chat_history.jsonl"
@@ -149,6 +155,8 @@ def discover() -> list[SessionRef]:
     return refs
 
 
+# Safe only because the sole caller is the short-lived sweep: an in-place
+# sibling summary.json rewrite would not change this parent directory mtime.
 _SUPERSEDED_CACHE: dict[Path, tuple[int, set[str]]] = {}
 
 
@@ -178,11 +186,8 @@ def _is_superseded(ref: SessionRef) -> bool:
 
 
 def _relative_source(path: Path) -> str:
-    """Keep fixture provenance portable while retaining absolute live paths."""
-    try:
-        return str(path.relative_to(Path.cwd()))
-    except ValueError:
-        return str(path)
+    """Return the source location independently of the caller's cwd."""
+    return str(Path(path).resolve())
 
 
 def _event_timestamps(path: Path) -> list[str]:

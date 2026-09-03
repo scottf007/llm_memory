@@ -23,6 +23,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,6 +37,7 @@ from adapters import grok as grok_adapter  # noqa: E402
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CODEX_FIXTURE = FIXTURES / "codex" / "10-depth_3-user-turns-u3.jsonl"
 GROK_FIXTURE = FIXTURES / "grok" / "02-single-prompt-primary"
+GROK_SUPERSEDED_FIXTURE = FIXTURES / "grok" / "04-superseded-parent"
 
 
 @pytest.fixture
@@ -123,6 +125,30 @@ def test_grok_session_routed_through_its_own_adapter_is_ok(sandbox):
 
     ok, detail, diff = adapter_oracle.check(sid)
     assert ok, f"{detail}\n" + "".join(diff[:60])
+
+
+def test_foreign_source_ref_is_owned_by_the_adapter(sandbox, monkeypatch, tmp_path):
+    """T-F1: the oracle delegates source-path interpretation to its adapter."""
+    source = tmp_path / "foreign" / "source.dat"
+    source.parent.mkdir()
+    source.write_text("source")
+    session_id = "fake-source-routing"
+    (adapter_oracle.CONV_DIR / f"{session_id}.md").write_text(
+        f"---\nclient: fake\nraw_source: {source}\n---\n"
+    )
+    calls = []
+
+    def ref_for_source(path, session_id=None):
+        calls.append((path, session_id))
+        return object()
+
+    fake = SimpleNamespace(ref_for_source=ref_for_source)
+    monkeypatch.setattr(adapter_oracle.adapters, "client_for_session_id", lambda _: "fake")
+    monkeypatch.setattr(adapter_oracle.adapters, "get", lambda _: fake)
+    monkeypatch.setattr(adapter_oracle.adapters, "render", lambda _: "rendered")
+
+    assert adapter_oracle.regenerate(session_id) == "rendered"
+    assert calls == [(source, session_id)]
 
 
 # --------------------------------------------------------------------------
@@ -215,6 +241,17 @@ def test_unavailable_when_raw_source_line_is_absent(sandbox):
     assert diff == []
 
 
+def test_foreign_subagent_stub_without_raw_source_replays_its_envelope(sandbox):
+    """T-F3: a superseded Grok stub has no raw_source, but is still replayable."""
+    sid = _store_foreign_session(GROK_SUPERSEDED_FIXTURE, grok_adapter)
+    stored = (adapter_oracle.CONV_DIR / f"{sid}.md").read_text()
+    assert "agent_session: true" in stored
+    assert "raw_source:" not in stored
+
+    ok, detail, diff = adapter_oracle.check(sid)
+    assert ok, f"{detail}\n" + "".join(diff[:60])
+
+
 def test_main_exit_code_is_zero_when_unavailable_is_the_only_problem(sandbox, tmp_path, monkeypatch, capsys):
     """D3's exit-code half: `unavailable` alone must not fail the run --
     only a genuine mismatch does."""
@@ -269,3 +306,20 @@ def test_all_reports_per_client_counts_and_exit_code(sandbox, monkeypatch, capsy
     out2 = capsys.readouterr().out
     assert exit_code2 == 1, out2
     assert grok_sid  # sanity: grok session id was produced and stored
+
+
+def test_all_reports_unknown_client_prefix_as_unregistered(sandbox, monkeypatch, capsys):
+    """T-F3: a stored foreign prefix without an adapter is not counted as Claude."""
+    sid = _store_claude_session("opencode-synthetic", [
+        {"type": "user", "timestamp": "2026-01-01T00:00:00.000Z",
+         "message": {"content": "hello"}},
+    ])
+    stored = adapter_oracle.CONV_DIR / f"{sid}.md"
+    stored.write_text(stored.read_text().replace("client: claude", "client: opencode"))
+
+    monkeypatch.setattr(sys, "argv", ["adapter_oracle.py", "--all"])
+    assert adapter_oracle.main() == 1
+    out = capsys.readouterr().out
+
+    assert f"FAIL {sid}" in out
+    assert "unregistered: ok=0 fail=1 unavailable=0" in out

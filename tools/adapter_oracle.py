@@ -90,10 +90,8 @@ def regenerate(session_id: str) -> str:
 
     Claude's archive contains its original transcript. Foreign-client archive
     entries are deliberately Claude-shaped envelopes, so their stored
-    ``raw_source`` instead names the original client file. Grok records that
-    source as ``<session-dir>/chat_history.jsonl`` while its adapter takes the
-    containing directory; all other current foreign adapters take the source
-    path itself.
+    ``raw_source`` instead names the original client file. The owning adapter
+    translates that source path into its own ``SessionRef``.
     """
     owner = adapters.client_for_session_id(session_id)
     adapter = adapters.get(owner)
@@ -101,10 +99,23 @@ def regenerate(session_id: str) -> str:
         return adapters.render(claude_adapter.ref_for_path(ARCHIVE_DIR / f"{session_id}.jsonl"))
 
     stored_path = CONV_DIR / f"{session_id}.md"
-    raw_source = Path(_stored_field(stored_path, "raw_source"))
-    if owner == "grok" and raw_source.name == "chat_history.jsonl":
-        raw_source = raw_source.parent
-    return adapters.render(adapter.ref_for_path(raw_source, session_id=session_id))
+    raw_source_value = _stored_field(stored_path, "raw_source")
+    if not raw_source_value:
+        # A foreign superseded/subagent stub deliberately has no raw_source:
+        # its original dialogue belongs to the parent. Its envelope remains
+        # the canonical archived input, though it is normally empty because a
+        # stub has no turns. Re-read that envelope, then restore the foreign
+        # identity which a Claude-shaped envelope cannot carry through the
+        # Claude parser.
+        envelope = ARCHIVE_DIR / f"{session_id}.jsonl"
+        meta = claude_adapter.session_meta(
+            claude_adapter.ref_for_path(envelope, session_id=session_id)
+        )
+        meta.client = adapter.client_name()
+        meta.is_subagent = True
+        return adapters.render_subagent(meta)
+    raw_source = Path(raw_source_value)
+    return adapters.render(adapter.ref_for_source(raw_source, session_id=session_id))
 
 
 def compare(
@@ -193,6 +204,15 @@ def check(session_id: str) -> tuple[bool, str, list[str]]:
     if owner != adapters.DEFAULT:
         raw_source = _stored_field(stored_path, "raw_source")
         if not raw_source:
+            if _stored_field(stored_path, "agent_session") == "true" and (
+                ARCHIVE_DIR / f"{session_id}.jsonl"
+            ).exists():
+                return compare(
+                    stored_path.read_bytes(),
+                    regenerate(session_id),
+                    session_id,
+                    expected_client=adapter.client_name(),
+                )
             return False, "unavailable: raw_source missing", []
         if not Path(raw_source).exists():
             return False, f"unavailable: raw_source missing ({raw_source})", []
@@ -219,6 +239,22 @@ def _stored_field(path: Path, field: str) -> str:
         if line.startswith(f"{field}: "):
             return line[len(field) + 2 :].strip()
     return ""
+
+
+def _summary_client(session_id: str) -> str:
+    """Return the summary bucket for a session, including unknown clients."""
+    owner = adapters.client_for_session_id(session_id)
+    if owner != adapters.DEFAULT:
+        return owner
+    stored_path = CONV_DIR / f"{session_id}.md"
+    declared = _stored_field(stored_path, "client")
+    if (
+        declared
+        and declared not in adapters.names()
+        and session_id.lower().startswith(f"{declared.lower()}-")
+    ):
+        return "unregistered"
+    return owner
 
 
 def select(count: int) -> list[str]:
@@ -371,9 +407,10 @@ def main() -> int:
         client: {"ok": 0, "fail": 0, "unavailable": 0}
         for client in adapters.names()
     }
+    counts["unregistered"] = {"ok": 0, "fail": 0, "unavailable": 0}
     for sid in sessions:
         ok, detail, diff = check(sid)
-        client = adapters.client_for_session_id(sid)
+        client = _summary_client(sid)
         if ok:
             status = "OK  "
             counts[client]["ok"] += 1

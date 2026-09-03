@@ -1,12 +1,12 @@
 ---
-session_id: grok-09-subagent-completed-synthetic
+session_id: grok-09-both-keys-retained
 project: project-67ba102a
 client: grok
-raw: transcripts/grok-09-subagent-completed-synthetic.jsonl
+raw: transcripts/grok-09-both-keys-retained.jsonl
 turns: 32
 started: 2026-08-13T12:25:03.555805933Z
 ended: 2026-08-15T13:34:58.728925873Z
-raw_source: tests/fixtures/grok/09-subagent-completed-synthetic/chat_history.jsonl
+raw_source: tests/fixtures/grok/09-both-keys-retained/chat_history.jsonl
 model: grok-4.6
 title: <generated_title:39>
 agent_name: grok-build-plan
