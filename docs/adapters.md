@@ -157,6 +157,14 @@ remains five and Codex one): it excludes one- and two-prompt keep-alive forks
 while retaining genuine seat work. Records without `prompt_index` are
 intentionally absent from the archive.
 
+As of **3 September**, `narrative_coverage` also filters Grok envelopes whose
+first kept prompt contains the keep-alive harness recipe marker, `keep-alive
+for seat` (case-insensitive). This is parallel to the Codex auto-participant
+filter: it removes harness traffic from narrative material without deleting
+the archived provenance. The Section 7 ruling census found 326 of 564 stored
+Grok sessions carrying the marker. T-F86 asks agent-messaging to provide a
+structural marker so this wording-based filter can eventually be retired.
+
 ## The oracle
 
 `tools/adapter_oracle.py` regenerates stored conversations through the
