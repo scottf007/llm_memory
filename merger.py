@@ -31,6 +31,7 @@ from tools.project_state import (
     load_full,
     write_full,
 )
+from narrative_lock import NarrativeLockBusy, project_lock
 
 
 ID_PREFIXES = {
@@ -700,13 +701,27 @@ def main(argv: list[str] | None = None) -> None:
     project_path, delta_path, items_root_override, rerun = _parse_args(
         list(sys.argv[1:] if argv is None else argv))
 
+    project = project_path.stem
+    try:
+        lock = project_lock(memory_root(), project)
+        lock.__enter__()
+    except NarrativeLockBusy:
+        print(f"LLM_MEMORY_WARN: narrative update already running for {project}; retry after it finishes")
+        sys.exit(3)
+    try:
+        _main_locked(project_path, delta_path, items_root_override, rerun, project)
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _main_locked(project_path: Path, delta_path: Path, items_root_override: Path | None,
+                 rerun: bool, project: str) -> None:
     items_root, db_path, sandboxed = resolve_paths(project_path, items_root_override)
     if sandboxed:
         print(f"merger.py: sandbox mode — {project_path} is outside "
               f"{memory_root() / 'projects'}; items → {items_root}, "
               f"index → {db_path} (real memory tree untouched)", file=sys.stderr)
 
-    project = project_path.stem
     state = load_full(project, project_path.parent) if project_path.exists() else {}
     delta = json.loads(delta_path.read_text())
 

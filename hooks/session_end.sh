@@ -66,4 +66,20 @@ else
     log "extract failed for $ARCHIVE_PATH -> $OUT_PATH"
 fi
 
+# Queue extraction only after archive + conversation stripping completes.  The
+# detached service owns model work; the hook remains bounded and model-free.
+if [ -f "$OUT_PATH" ] && [ -n "$CWD" ]; then
+    PROJECT=$(python3 -c "import sys; sys.path.insert(0, '$SCRIPT_DIR'); from hooks.lib_session_common import resolve_project_from_cwd; print(resolve_project_from_cwd('$CWD'))" 2>/dev/null || true)
+    # lib_session_common is shell, so retain the same portable cwd rule here.
+    if [ -z "$PROJECT" ]; then PROJECT=$(basename "$CWD" | tr '[:upper:]' '[:lower:]' | tr ' ' '-'); fi
+    "$PYTHON3" "$SCRIPT_DIR/extraction_worker.py" enqueue --project "$PROJECT" --session-id "$SESSION_ID" --transcript "$ARCHIVE_PATH" --source session_end >>"$LOG" 2>&1 || log "enqueue failed for $SESSION_ID"
+    if [ -n "${FAKE_SYSTEMCTL_LOG:-}" ] && [ -f "$SCRIPT_DIR/tests/fixtures/selfrun/fake_systemctl.sh" ]; then
+        bash "$SCRIPT_DIR/tests/fixtures/selfrun/fake_systemctl.sh" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+    elif [[ "${LLM_MEMORY_SYSTEMCTL:-systemctl}" == *.sh ]]; then
+        bash "${LLM_MEMORY_SYSTEMCTL}" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+    else
+        "${LLM_MEMORY_SYSTEMCTL:-systemctl}" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+    fi
+fi
+
 exit 0

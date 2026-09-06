@@ -13,6 +13,27 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=hooks/lib_session_common.sh
 source "$SCRIPT_DIR/hooks/lib_session_common.sh"
 
+# Failure visibility is an intentionally tiny early path.  A waiting/failed
+# worker must be visible without making a new session pay for the legacy
+# transcript sweep, liveness coverage, or any model-facing subprocess.
+FAST_PROJECT=$(resolve_project_from_cwd "$CWD")
+FAST_STATUS="$MEMORY_DIR/projects/$FAST_PROJECT.extraction-status.json"
+if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
+    FAST_WARN=$(python3 -c "
+import json
+try:
+ d=json.load(open('$FAST_STATUS'))
+ n=int(d.get('unprocessed',0))+int(d.get('stale',0))
+ state=d.get('state','idle'); since=d.get('oldest_waiting') or d.get('last_attempt') or ''
+ if state in ('waiting','failed') and n: print(f'LLM_MEMORY_WARN: extraction: {n} session(s) waiting for $FAST_PROJECT ({state} since {since})')
+except Exception: pass
+" 2>/dev/null)
+    if [ -n "$FAST_WARN" ]; then
+        echo "$FAST_WARN"
+        exit 0
+    fi
+fi
+
 # Sync CLAUDE.md from shared config if newer
 SHARED_CLAUDE_MD="$MEMORY_DIR/config/CLAUDE.md"
 LOCAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -163,7 +184,23 @@ if [ ! -f "$DB" ]; then
 fi
 
 # Derive project name from cwd using the shared Codex/Claude rule.
-PROJECT=$(resolve_project_from_cwd "$CWD")
+PROJECT="$FAST_PROJECT"
+
+# This is deliberately just a sidecar read: the worker does all coverage and
+# model work away from SessionStart's latency-sensitive hook budget.
+EXTRACTION_STATUS="$MEMORY_DIR/projects/$PROJECT.extraction-status.json"
+if [ -n "$PROJECT" ] && [ -f "$EXTRACTION_STATUS" ]; then
+    EXTRACTION_WARN=$(python3 -c "
+import json
+try:
+ d=json.load(open('$EXTRACTION_STATUS'))
+ n=int(d.get('unprocessed',0))+int(d.get('stale',0))
+ state=d.get('state','idle'); since=d.get('oldest_waiting') or d.get('last_attempt') or ''
+ if state in ('waiting','failed') and n: print(f'LLM_MEMORY_WARN: extraction: {n} session(s) waiting for $PROJECT ({state} since {since})')
+except Exception: pass
+" 2>/dev/null)
+    [ -n "$EXTRACTION_WARN" ] && echo "$EXTRACTION_WARN"
+fi
 
 # Seed per-project auto-memory dir so the harness template's "this directory
 # already exists" claim is true — stops Claude from running mkdir -p on first

@@ -29,6 +29,9 @@ assignment before expanding `$MEMORY_ROOT`. The `Agent(...)` prompt is not a
 shell, so interpolate the printed absolute value there before launching the
 extractor; do not hand the subagent a literal `$MEMORY_ROOT` token.
 
+Before a manual drain, acquire `narrative_lock.project_lock(MEMORY_ROOT, PROJECT)`;
+if it is busy, print the worker warning and exit rather than racing the automatic worker.
+
 ## Step 1: Discover work
 
 Call `narrative_coverage(project=PROJECT)` for the current project first, then

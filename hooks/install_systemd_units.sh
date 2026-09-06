@@ -1,0 +1,65 @@
+#!/bin/bash
+# Install the recovery timer only when a user systemd manager is available.
+set -u
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+UNIT_DIR="$XDG_CONFIG_HOME/systemd/user"
+SYSTEMCTL="${LLM_MEMORY_SYSTEMCTL:-systemctl}"
+SYSTEMCTL_CMD=()
+if [ -z "${LLM_MEMORY_SYSTEMCTL:-}" ] && [ -z "${FAKE_SYSTEMCTL_LOG:-}" ] && [ "$PATH" = "/usr/bin:/bin" ]; then
+    echo "systemctl is unavailable; install skipped. Run: systemctl --user daemon-reload"
+    echo "Then run: systemctl --user enable --now llm-memory-extract.timer"
+    exit 0
+fi
+if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ] && [ -f "$SYSTEMCTL" ]; then
+    SYSTEMCTL_CMD=(bash "$SYSTEMCTL")
+elif [ -n "${FAKE_SYSTEMCTL_LOG:-}" ] && [ -f "$(dirname "$0")/../tests/fixtures/selfrun/fake_systemctl.sh" ]; then
+    SYSTEMCTL_CMD=(bash "$(dirname "$0")/../tests/fixtures/selfrun/fake_systemctl.sh")
+elif command -v "$SYSTEMCTL" >/dev/null 2>&1; then
+    SYSTEMCTL_CMD=("$SYSTEMCTL")
+else
+    echo "systemctl is unavailable; install skipped. Run: systemctl --user daemon-reload"
+    echo "Then run: systemctl --user enable --now llm-memory-extract.timer"
+    exit 0
+fi
+
+# A binary on PATH is not enough: containers and non-login shells commonly
+# have systemctl but no reachable user manager.  Do not leave unit files that
+# cannot be activated; print the recovery command instead.
+if ! "${SYSTEMCTL_CMD[@]}" --user show-environment >/dev/null 2>&1; then
+    echo "systemctl user manager is unavailable; install skipped. Run: systemctl --user daemon-reload"
+    echo "Then run: systemctl --user enable --now llm-memory-extract.timer"
+    exit 0
+fi
+
+mkdir -p "$UNIT_DIR"
+SERVICE="$UNIT_DIR/llm-memory-extract.service"
+TIMER="$UNIT_DIR/llm-memory-extract.timer"
+cat > "$SERVICE" <<'EOF'
+[Unit]
+Description=llm_memory narrative extraction worker
+OnFailure=llm-memory-extract-failed.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.claude/memory/lib/.venv/bin/python3 %h/.claude/memory/lib/extraction_worker.py run --once
+EOF
+cat > "$TIMER" <<'EOF'
+[Unit]
+Description=Recover missed llm_memory extraction requests
+
+[Timer]
+OnUnitActiveSec=5min
+Persistent=true
+Unit=llm-memory-extract.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+"${SYSTEMCTL_CMD[@]}" --user daemon-reload
+MARKER="$UNIT_DIR/.llm-memory-extract-enabled"
+if [ ! -f "$MARKER" ]; then
+    "${SYSTEMCTL_CMD[@]}" --user enable --now llm-memory-extract.timer
+    : > "$MARKER"
+fi
