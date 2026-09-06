@@ -111,15 +111,17 @@ container_proof() {
         return 1
     fi
 
-    local repo_root work archive tree_sha
+    local repo_root work archive tree_sha mutation="${1:-}"
     repo_root=$(cd "$(dirname "$0")/.." && pwd -P)
     work=$(mktemp -d "${TMPDIR:-/tmp}/llm-memory-fresh-install.XXXXXX")
     trap 'rm -rf "$work"' RETURN
     archive="$work/llm_memory.tar.gz"
     tree_sha=$(git -C "$repo_root" rev-parse HEAD)
-    tar -C "$repo_root" \
-        --exclude=.git --exclude=.venv --exclude=.agent-messages --exclude=.am-seat \
-        --transform "s,^,llm_memory-$tree_sha/," -czf "$archive" .
+    if [ -n "$(git -C "$repo_root" status --porcelain)" ]; then
+        echo "NOTE: working tree dirty; proving HEAD $tree_sha, not the working tree" >&2
+    fi
+    git -C "$repo_root" archive --format=tar.gz \
+        --prefix="llm_memory-$tree_sha/" "$tree_sha" > "$archive"
 
     "$engine" run --rm -i \
         -e DEBIAN_FRONTEND=noninteractive \
@@ -128,11 +130,15 @@ container_proof() {
         -e LLM_MEMORY_TARBALL_URL=/archive/llm_memory.tar.gz \
         -e LLM_MEMORY_TARBALL_SHA="$tree_sha" \
         -e LLM_MEMORY_FRESH_INSTALL_INNER=1 \
+        -e LLM_MEMORY_FRESH_INSTALL_MUTATION="$mutation" \
         -v "$repo_root:/work:ro" -v "$work:/archive:ro" \
         "$image" bash -s <<'CONTAINER'
 set -eu
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl jq python3 python3-venv sqlite3 tar
+apt-get install -y -qq ca-certificates curl jq python3 sqlite3 tar
+if [ "${LLM_MEMORY_FRESH_INSTALL_MUTATION:-}" != no-venv ]; then
+    apt-get install -y -qq python3-venv
+fi
 install_log=$(mktemp)
 if ! bash /work/install.sh >"$install_log" 2>&1; then
     cat "$install_log"
@@ -140,6 +146,16 @@ if ! bash /work/install.sh >"$install_log" 2>&1; then
     exit 1
 fi
 cat "$install_log"
+if [ "${LLM_MEMORY_FRESH_INSTALL_MUTATION:-}" = no-venv ]; then
+    if ! grep -q 'Missing: python3-venv' "$install_log"; then
+        echo 'ERROR: no-venv mutation did not require python3-venv.' >&2
+        exit 1
+    fi
+    if grep -q 'sudo: command not found' "$install_log"; then
+        echo 'ERROR: no-venv mutation tried sudo as root.' >&2
+        exit 1
+    fi
+fi
 if ! grep -q "WARNING: 'claude' CLI not found. Add manually:" "$install_log"; then
     echo 'ERROR: missing Claude manual-registration warning.' >&2
     exit 1
@@ -171,6 +187,13 @@ case "${1:-}" in
     --dry-run)
         dry_run
         ;;
+    --mutate)
+        if [ "${2:-}" != no-venv ]; then
+            echo "Usage: $0 [--dry-run|--mutate no-venv]" >&2
+            exit 2
+        fi
+        container_proof no-venv
+        ;;
     '')
         if [ -n "${LLM_MEMORY_HOME:-}" ] || [ "${LLM_MEMORY_FRESH_INSTALL_INNER:-}" = 1 ]; then
             verify_install
@@ -179,7 +202,7 @@ case "${1:-}" in
         fi
         ;;
     *)
-        echo "Usage: $0 [--dry-run]" >&2
+        echo "Usage: $0 [--dry-run|--mutate no-venv]" >&2
         exit 2
         ;;
 esac
