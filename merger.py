@@ -31,7 +31,7 @@ from tools.project_state import (
     load_full,
     write_full,
 )
-from narrative_lock import NarrativeLockBusy, project_lock
+from narrative_lock import NarrativeLockBusy, active_project_lock
 
 
 ID_PREFIXES = {
@@ -703,7 +703,7 @@ def main(argv: list[str] | None = None) -> None:
 
     project = project_path.stem
     try:
-        lock = project_lock(memory_root(), project)
+        lock = active_project_lock(memory_root(), project)
         lock.__enter__()
     except NarrativeLockBusy:
         print(f"LLM_MEMORY_WARN: narrative update already running for {project}; retry after it finishes")

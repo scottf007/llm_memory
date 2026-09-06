@@ -4,19 +4,15 @@ set -u
 
 XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 UNIT_DIR="$XDG_CONFIG_HOME/systemd/user"
-SYSTEMCTL="${LLM_MEMORY_SYSTEMCTL:-systemctl}"
 SYSTEMCTL_CMD=()
-if [ -z "${LLM_MEMORY_SYSTEMCTL:-}" ] && [ -z "${FAKE_SYSTEMCTL_LOG:-}" ] && [ "$PATH" = "/usr/bin:/bin" ]; then
-    echo "systemctl is unavailable; install skipped. Run: systemctl --user daemon-reload"
-    echo "Then run: systemctl --user enable --now llm-memory-extract.timer"
-    exit 0
-fi
-if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ] && [ -f "$SYSTEMCTL" ]; then
-    SYSTEMCTL_CMD=(bash "$SYSTEMCTL")
-elif [ -n "${FAKE_SYSTEMCTL_LOG:-}" ] && [ -f "$(dirname "$0")/../tests/fixtures/selfrun/fake_systemctl.sh" ]; then
-    SYSTEMCTL_CMD=(bash "$(dirname "$0")/../tests/fixtures/selfrun/fake_systemctl.sh")
-elif command -v "$SYSTEMCTL" >/dev/null 2>&1; then
-    SYSTEMCTL_CMD=("$SYSTEMCTL")
+if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ]; then
+    if [ -f "$LLM_MEMORY_SYSTEMCTL" ] && [ ! -x "$LLM_MEMORY_SYSTEMCTL" ]; then
+        SYSTEMCTL_CMD=(bash "$LLM_MEMORY_SYSTEMCTL")
+    else
+        SYSTEMCTL_CMD=("$LLM_MEMORY_SYSTEMCTL")
+    fi
+elif command -v systemctl >/dev/null 2>&1; then
+    SYSTEMCTL_CMD=(systemctl)
 else
     echo "systemctl is unavailable; install skipped. Run: systemctl --user daemon-reload"
     echo "Then run: systemctl --user enable --now llm-memory-extract.timer"
@@ -43,6 +39,7 @@ OnFailure=llm-memory-extract-failed.service
 [Service]
 Type=oneshot
 ExecStart=%h/.claude/memory/lib/.venv/bin/python3 %h/.claude/memory/lib/extraction_worker.py run --once
+Environment=LLM_MEMORY_HOME=%h/.claude/memory
 EOF
 cat > "$TIMER" <<'EOF'
 [Unit]
@@ -55,6 +52,15 @@ Unit=llm-memory-extract.service
 
 [Install]
 WantedBy=timers.target
+EOF
+cat > "$UNIT_DIR/llm-memory-extract-failed.service" <<'EOF'
+[Unit]
+Description=Record llm_memory extraction worker failure
+
+[Service]
+Type=oneshot
+Environment=LLM_MEMORY_HOME=%h/.claude/memory
+ExecStart=%h/.claude/memory/lib/.venv/bin/python3 %h/.claude/memory/lib/extraction_worker.py mark-failed --message systemd-extraction-worker-failed
 EOF
 
 "${SYSTEMCTL_CMD[@]}" --user daemon-reload

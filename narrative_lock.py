@@ -58,3 +58,14 @@ def project_lock(home: Path, project: str, *, wait: bool = False):
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+
+@contextmanager
+def active_project_lock(home: Path, project: str):
+    """Use a verified worker-held handle, or acquire the normal project lock."""
+    if os.environ.get("LLM_MEMORY_NARRATIVE_LOCK"):
+        inherited_lock(home, project)
+        yield
+        return
+    with project_lock(home, project):
+        yield

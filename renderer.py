@@ -31,7 +31,7 @@ from pathlib import Path
 import adapters
 from lib import certify
 from tools.memory_config import memory_root
-from narrative_lock import NarrativeLockBusy, project_lock
+from narrative_lock import NarrativeLockBusy, active_project_lock
 
 HOME = Path.home()
 
@@ -782,7 +782,7 @@ def main() -> None:
     state_path = Path(sys.argv[1])
     project = state_path.stem
     try:
-        lock = project_lock(memory_root(), project)
+        lock = active_project_lock(memory_root(), project)
         lock.__enter__()
     except NarrativeLockBusy:
         print(f"LLM_MEMORY_WARN: narrative update already running for {project}; retry after it finishes")
