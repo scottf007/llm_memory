@@ -172,7 +172,7 @@ def _call_claude(state: dict, transcript: str, observed_bounds: tuple[str, str])
               "\nsession_started_at: " + observed_bounds[0] +
               "\nsession_ended_at: " + observed_bounds[1])
     command_argv = ["bash", command] if command.endswith(".sh") else [command]
-    result = subprocess.run(command_argv + ["-p", "--model", "sonnet"], input=prompt,
+    result = subprocess.run(command_argv + ["-p", "--model", "sonnet", "--output-format", "json"], input=prompt,
                             text=True, capture_output=True)
     if result.returncode:
         raise RuntimeError((result.stderr or "Claude extraction failed").strip())
@@ -193,16 +193,39 @@ def _preserve_raw(path: Path, raw: str) -> None:
     path.chmod(0o444)
 
 
-def _reported_cost(delta: dict) -> float | None:
-    """Return a backend-reported USD cost when it is explicit and usable.
+DEFAULT_COST_TABLE = {
+    # USD per one million tokens. These are deliberately local defaults, not
+    # a live price lookup; installations can pin replacements with
+    # LLM_MEMORY_EXTRACT_COST_TABLE.
+    "sonnet": {"input_per_million_usd": 3.0, "output_per_million_usd": 15.0},
+    "opus": {"input_per_million_usd": 15.0, "output_per_million_usd": 75.0},
+    "haiku": {"input_per_million_usd": 0.8, "output_per_million_usd": 4.0},
+}
 
-    Claude's text mode normally cannot provide a billable amount, so unknown
-    is deliberately represented as ``None`` rather than guessed.  Fixtures or
-    a future backend may attach a cost either at the delta top level or in a
-    usage envelope.
+
+def _backend_response(raw: str) -> tuple[str, dict]:
+    """Return delta text and output metadata from text or Claude JSON output.
+
+    The frozen backend intentionally still emits a delta directly.  Real
+    ``claude --output-format json`` emits an envelope whose ``result`` (or
+    legacy ``text``) contains the delta; preserve that envelope as raw
+    evidence while extracting its usage fields for accounting.
     """
-    usage = delta.get("usage") if isinstance(delta.get("usage"), dict) else {}
-    values = (delta.get("cost_usd"), usage.get("cost_usd"), usage.get("cost"))
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw, {}
+    if not isinstance(envelope, dict):
+        return raw, {}
+    result = envelope.get("result", envelope.get("text"))
+    if isinstance(result, str):
+        return result, envelope
+    if isinstance(result, dict):
+        return json.dumps(result), envelope
+    return raw, {}
+
+
+def _nonnegative_number(*values: object) -> float | None:
     for value in values:
         try:
             number = float(value)
@@ -213,9 +236,65 @@ def _reported_cost(delta: dict) -> float | None:
     return None
 
 
+def _usage_values(response: dict, delta: dict) -> tuple[float | None, int | None, int | None]:
+    """Read a reported USD cost and token counts from either supported shape."""
+    response_usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
+    delta_usage = delta.get("usage") if isinstance(delta.get("usage"), dict) else {}
+    sources = (response, response_usage, delta, delta_usage)
+
+    def find(*names: str) -> float | None:
+        return _nonnegative_number(*(source.get(name) for source in sources for name in names))
+
+    cost = find("cost_usd", "total_cost_usd", "cost")
+    tokens_in = find("tokens_in", "input_tokens", "prompt_tokens")
+    tokens_out = find("tokens_out", "output_tokens", "completion_tokens")
+    return cost, int(tokens_in) if tokens_in is not None else None, int(tokens_out) if tokens_out is not None else None
+
+
+def _cost_table() -> dict | None:
+    """Load a deliberately pinned price table, or reject a bad override."""
+    override = os.environ.get("LLM_MEMORY_EXTRACT_COST_TABLE")
+    if not override:
+        return DEFAULT_COST_TABLE
+    try:
+        value = json.loads(override)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _estimated_cost(tokens_in: int | None, tokens_out: int | None, model: str = "sonnet") -> float | None:
+    if tokens_in is None or tokens_out is None:
+        return None
+    table = _cost_table()
+    if table is None:
+        return None
+    normalized = next((name for name in ("sonnet", "opus", "haiku") if name in model.lower()), model.lower())
+    rates = table.get(normalized)
+    if not isinstance(rates, dict):
+        return None
+    input_rate = _nonnegative_number(rates.get("input_per_million_usd"), rates.get("input_usd_per_million"))
+    output_rate = _nonnegative_number(rates.get("output_per_million_usd"), rates.get("output_usd_per_million"))
+    if input_rate is None or output_rate is None:
+        return None
+    return (tokens_in * input_rate + tokens_out * output_rate) / 1_000_000
+
+
+def _cost_details(response: dict, delta: dict) -> tuple[float | None, int | None, int | None, str]:
+    """Return billable cost, token counts, and reported/estimated/unknown source."""
+    reported, tokens_in, tokens_out = _usage_values(response, delta)
+    if reported is not None:
+        return reported, tokens_in, tokens_out, "reported"
+    estimated = _estimated_cost(tokens_in, tokens_out)
+    if estimated is not None:
+        return estimated, tokens_in, tokens_out, "estimated"
+    return None, tokens_in, tokens_out, "unknown"
+
+
 def _record_spend(home: Path, request_id: str, session_id: str, backend: str,
-                  cost_usd: float | None) -> None:
-    """Append durable extraction usage without fabricating unknown cost."""
+                  cost_usd: float | None, tokens_in: int | None,
+                  tokens_out: int | None, cost_source: str) -> None:
+    """Append durable usage; unknown calls reserve the full session cap."""
     path = home / "runtime" / "extraction-spend.json"
     today = iso()[:10]
     try:
@@ -227,23 +306,28 @@ def _record_spend(home: Path, request_id: str, session_id: str, backend: str,
     entries = data.setdefault("entries", [])
     if any(entry.get("request_id") == request_id for entry in entries if isinstance(entry, dict)):
         return
+    session_cap = float(os.environ.get("LLM_MEMORY_EXTRACT_SESSION_CAP_USD", "0.50"))
+    charged_usd = cost_usd if cost_usd is not None else session_cap
     entry = {"request_id": request_id, "session_id": session_id,
-             "backend": backend, "cost_usd": cost_usd, "recorded_at": iso()}
+             "backend": backend, "cost_usd": cost_usd, "tokens_in": tokens_in,
+             "tokens_out": tokens_out, "cost_source": cost_source,
+             "charged_usd": charged_usd, "recorded_at": iso()}
     entries.append(entry)
-    if cost_usd is not None:
-        data["total_usd"] = float(data.get("total_usd", 0.0)) + cost_usd
+    data["total_usd"] = float(data.get("total_usd", 0.0)) + charged_usd
     data["unknown_cost_count"] = sum(
-        1 for item in entries if isinstance(item, dict) and item.get("cost_usd") is None
+        1 for item in entries if isinstance(item, dict) and item.get("cost_source", "unknown") == "unknown"
     )
     atomic_json(path, data)
 
 
 def _provenance(backend: str, prompt_hash: str, request_id: str, raw: str,
-                quarantined: dict, cost_usd: float | None) -> dict:
+                quarantined: dict, cost_usd: float | None, tokens_in: int | None,
+                tokens_out: int | None, cost_source: str) -> dict:
     finished = iso()
     return {"backend": backend, "model": "sonnet", "prompt_hash": prompt_hash,
             "input_hash": prompt_hash, "attempted_at": finished, "completed_at": finished,
-            "duration_s": 0.0, "tokens_in": None, "tokens_out": None, "cost_usd": cost_usd,
+            "duration_s": 0.0, "tokens_in": tokens_in, "tokens_out": tokens_out,
+            "cost_usd": cost_usd, "cost_source": cost_source,
             "validator_version": "1", "request_id": request_id,
             "quarantined_revaluations": quarantined}
 
@@ -266,14 +350,19 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
     for session in state.get("sessions", []):
         if session.get("session_id") == req["session_id"]:
             prior = session.get("extraction") or {}
-            if isinstance(prior, dict) and prior.get("cost_usd") is not None and float(prior["cost_usd"]) >= session_cap:
+            if isinstance(prior, dict) and (
+                prior.get("cost_source") == "unknown" or
+                _nonnegative_number(prior.get("cost_usd")) is not None and
+                _nonnegative_number(prior.get("cost_usd")) >= session_cap
+            ):
                 return False, "session extraction spend cap reached", None
     observed_bounds = _observed_transcript_bounds(req["transcript_path"])
     raw, prompt_hash = _call_claude(state, req["transcript_path"], observed_bounds)
     raw_path = _result_path(home, project, req["session_id"], req["request_id"])
     _preserve_raw(raw_path, raw)
     try:
-        delta = json.loads(raw)
+        delta_text, response = _backend_response(raw)
+        delta = json.loads(delta_text)
         if isinstance(delta, dict):
             if rerun:
                 # A rerun refreshes the existing session watermark even when a
@@ -291,18 +380,20 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
     except Exception as exc:
         return False, str(exc), None
     quarantine = {"count": len(revals), "paths": [str(raw_path)] if revals else []}
-    cost_usd = _reported_cost(delta)
+    cost_usd, tokens_in, tokens_out, cost_source = _cost_details(response, delta)
     apply_delta(state, applied, rerun=rerun)
     for session in state.get("sessions", []):
         if session.get("session_id") == req["session_id"]:
-            provenance = _provenance("claude", prompt_hash, req["request_id"], raw, quarantine, cost_usd)
+            provenance = _provenance("claude", prompt_hash, req["request_id"], raw, quarantine,
+                                     cost_usd, tokens_in, tokens_out, cost_source)
             if rerun and session.get("extraction"):
                 previous = session["extraction"]
                 provenance["rerun"] = {"previous": previous}
             session["extraction"] = provenance
             break
     write_full(project, state, state_path.parent)
-    _record_spend(home, req["request_id"], req["session_id"], "claude", cost_usd)
+    _record_spend(home, req["request_id"], req["session_id"], "claude", cost_usd,
+                  tokens_in, tokens_out, cost_source)
     return True, None, quarantine
 
 
