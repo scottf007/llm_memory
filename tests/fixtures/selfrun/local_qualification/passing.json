@@ -1,0 +1,11 @@
+{
+  "evaluated_at": "2026-09-06T00:00:00Z",
+  "sample_size": 10,
+  "claim_recall": 0.93,
+  "valid_json_rate": 1.0,
+  "unsupported_terminal_actions": 0,
+  "closure_status_agreement": 0.95,
+  "load_bearing_share": 0.05,
+  "reference_load_bearing_share": 0.0,
+  "qualified": true
+}

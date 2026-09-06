@@ -1,0 +1,21 @@
+{
+  "session_id": "selfrun-sess-revalue",
+  "started": "2026-09-03T00:00:00Z",
+  "ended": "2026-09-03T01:00:00Z",
+  "topic": "selfrun fixture session with a contested revaluation",
+  "ledger_delta": {
+    "introduced": {
+      "decisions": [
+        {"text": "SELFRUN-MARKER-REVALUE: keep the sentinel widget as-is"}
+      ],
+      "goals": [], "suggestions": [], "learnings": [], "done": []
+    },
+    "revaluations": [
+      {
+        "id": "dec-existing01",
+        "value": 0.2,
+        "reason": "SELFRUN-MARKER-REVALUE: fixture-only contested downgrade, must be quarantined not applied"
+      }
+    ]
+  }
+}

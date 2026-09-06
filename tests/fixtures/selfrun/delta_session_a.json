@@ -1,0 +1,14 @@
+{
+  "session_id": "selfrun-sess-a",
+  "started": "2026-09-01T00:00:00Z",
+  "ended": "2026-09-01T01:00:00Z",
+  "topic": "selfrun fixture session A",
+  "ledger_delta": {
+    "introduced": {
+      "decisions": [
+        {"text": "SELFRUN-MARKER-A: adopt the sentinel widget for fixture testing"}
+      ],
+      "goals": [], "suggestions": [], "learnings": [], "done": []
+    }
+  }
+}

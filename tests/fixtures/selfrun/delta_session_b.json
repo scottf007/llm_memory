@@ -1,0 +1,14 @@
+{
+  "session_id": "selfrun-sess-b",
+  "started": "2026-09-02T00:00:00Z",
+  "ended": "2026-09-02T01:00:00Z",
+  "topic": "selfrun fixture session B",
+  "ledger_delta": {
+    "introduced": {
+      "decisions": [
+        {"text": "SELFRUN-MARKER-B: extend the sentinel widget with a second gadget"}
+      ],
+      "goals": [], "suggestions": [], "learnings": [], "done": []
+    }
+  }
+}

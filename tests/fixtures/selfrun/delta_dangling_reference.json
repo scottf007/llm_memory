@@ -1,0 +1,17 @@
+{
+  "session_id": "selfrun-sess-dangling",
+  "started": "2026-09-05T00:00:00Z",
+  "ended": "2026-09-05T01:00:00Z",
+  "topic": "selfrun fixture with a dangling decision_links reference",
+  "ledger_delta": {
+    "introduced": {
+      "decisions": [], "goals": [], "suggestions": [], "learnings": [],
+      "done": [
+        {
+          "text": "SELFRUN-MARKER-DANGLING: closes a decision that does not exist",
+          "decision_links": [{"decision_id": "dec-doesnotexist0"}]
+        }
+      ]
+    }
+  }
+}

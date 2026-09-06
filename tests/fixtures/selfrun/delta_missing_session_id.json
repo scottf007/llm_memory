@@ -1,0 +1,11 @@
+{
+  "started": "2026-09-04T00:00:00Z",
+  "ended": "2026-09-04T01:00:00Z",
+  "topic": "selfrun fixture missing session_id (schema-invalid)",
+  "ledger_delta": {
+    "introduced": {
+      "decisions": [{"text": "SELFRUN-MARKER-SCHEMA: this delta has no session_id"}],
+      "goals": [], "suggestions": [], "learnings": [], "done": []
+    }
+  }
+}
