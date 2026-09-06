@@ -268,6 +268,11 @@ else
         # other required module: loudly, and fatally if missing.
         cp "$EXTRACTED/merger.py" "$LIB_DIR/"
         cp "$EXTRACTED/renderer.py" "$LIB_DIR/"
+        # Transition updates can fetch an older archive before the automatic
+        # worker files existed; retain compatibility rather than aborting an
+        # otherwise valid self-update.
+        [ ! -f "$EXTRACTED/narrative_lock.py" ] || cp "$EXTRACTED/narrative_lock.py" "$LIB_DIR/"
+        [ ! -f "$EXTRACTED/extraction_worker.py" ] || cp "$EXTRACTED/extraction_worker.py" "$LIB_DIR/"
         cp "$EXTRACTED/delta_cache.py" "$LIB_DIR/"
         cp "$EXTRACTED/dashboard.py" "$LIB_DIR/"
         cp "$EXTRACTED/apply_settings.py" "$LIB_DIR/"
@@ -436,6 +441,10 @@ fi
 # --- Step 6: Install hooks, skills, and agents ---
 log "[6/8] Installing lifecycle hooks, skills, and agents..."
 LLM_MEMORY_INSTALLING=1 bash "$LIB_DIR/hooks/install_hooks.sh"
+if [ -f "$LIB_DIR/hooks/install_systemd_units.sh" ]; then
+    bash "$LIB_DIR/hooks/install_systemd_units.sh" || \
+        log "  WARNING: automatic extraction timer was not enabled; see the printed systemctl commands."
+fi
 
 # Install skills — ~/.claude/skills may contain skills owned by other tools,
 # so use a marker to clean only our own files. Marker entries are paths

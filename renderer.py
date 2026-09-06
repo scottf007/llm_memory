@@ -31,6 +31,7 @@ from pathlib import Path
 import adapters
 from lib import certify
 from tools.memory_config import memory_root
+from narrative_lock import NarrativeLockBusy, active_project_lock
 
 HOME = Path.home()
 
@@ -735,6 +736,14 @@ def render_with_report(state: dict, now: datetime | None = None) -> tuple[str, d
     # redundant — and wrong: it silently skipped the backlog line on a
     # clean-but-aged-backlog render. The two footer lines are independent.
     md += _integrity_footer(cert)
+    status_path = memory_root() / "projects" / f"{state_r.get('project')}.extraction-status.json"
+    try:
+        extraction_status = json.loads(status_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        extraction_status = {}
+    waiting = int(extraction_status.get("unprocessed", 0)) + int(extraction_status.get("stale", 0))
+    if extraction_status.get("state") in ("waiting", "failed") and waiting:
+        md += f"\n> ⚠ Narrative pipeline: {waiting} session(s) waiting — see {status_path}\n"
     report = {
         "project": state.get("project"),
         "rendered_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -771,9 +780,23 @@ def main() -> None:
         print("Usage: renderer.py <project_json_path> <output_md_path>", file=sys.stderr)
         sys.exit(1)
     state_path = Path(sys.argv[1])
+    project = state_path.stem
+    try:
+        lock = active_project_lock(memory_root(), project)
+        lock.__enter__()
+    except NarrativeLockBusy:
+        print(f"LLM_MEMORY_WARN: narrative update already running for {project}; retry after it finishes")
+        sys.exit(3)
+    try:
+        _main_locked(state_path, Path(sys.argv[2]))
+    finally:
+        lock.__exit__(None, None, None)
+
+
+def _main_locked(state_path: Path, output_path: Path) -> None:
     state = json.loads(state_path.read_text())
     md, report = render_with_report(state)
-    Path(sys.argv[2]).write_text(md)
+    output_path.write_text(md)
 
     # Sidecar next to the state JSON. Written only when something was cut, and
     # removed when nothing is, so its presence is the signal that a
@@ -797,7 +820,7 @@ def main() -> None:
         for name, s in report["sections"].items()
     )
     print(f"Rendered {len(md)} chars (~{report['total_tokens']} tokens, "
-          f"{len(md.splitlines())} lines) to {sys.argv[2]}")
+          f"{len(md.splitlines())} lines) to {output_path}")
     if over:
         print(f"  at budget: {over}")
         print(f"  contested items written to {contested_path}")

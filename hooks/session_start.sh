@@ -13,6 +13,48 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=hooks/lib_session_common.sh
 source "$SCRIPT_DIR/hooks/lib_session_common.sh"
 
+# Failure visibility is an intentionally tiny early path.  A waiting/failed
+# worker must be visible without making a new session pay for the legacy
+# transcript sweep, liveness coverage, or any model-facing subprocess.
+FAST_PROJECT=$(resolve_project_from_cwd "$CWD")
+FAST_STATUS="$MEMORY_DIR/projects/$FAST_PROJECT.extraction-status.json"
+EXTRACTION_DEGRADED=false
+if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
+    # A single jq process keeps this status-only path inside the 100 ms hook
+    # budget.  Do not call coverage or a model here: the worker owns both.
+    IFS=$'\t' read -r FAST_STATE FAST_UNPROCESSED FAST_STALE FAST_SINCE < <(
+        jq -r '[(.state // "idle"), (.unprocessed // 0), (.stale // 0),
+                (.oldest_waiting // .last_attempt // "")] | @tsv' "$FAST_STATUS" 2>/dev/null
+    )
+    FAST_WAITING=$(( ${FAST_UNPROCESSED:-0} + ${FAST_STALE:-0} ))
+    if { [ "$FAST_STATE" = "waiting" ] || [ "$FAST_STATE" = "failed" ]; } && [ "$FAST_WAITING" -gt 0 ] 2>/dev/null; then
+        echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
+        EXTRACTION_DEGRADED=true
+    fi
+fi
+
+# A degraded worker must not erase the normal context contract.  Emit the
+# lightweight part of the ordinary startup injection (including an actionable
+# automatic task) while deliberately avoiding legacy sweeps, coverage and
+# model-facing work below.  That keeps a broken backend visible *and* leaves
+# the owner with their project context at hook speed.
+if [ "$EXTRACTION_DEGRADED" = true ]; then
+    FAST_NARRATIVE_FILE="$MEMORY_DIR/projects/$FAST_PROJECT.narrative.md"
+    FAST_NARRATIVE=""
+    [ -f "$FAST_NARRATIVE_FILE" ] && FAST_NARRATIVE=$(<"$FAST_NARRATIVE_FILE")
+    echo "=== LOADED MEMORIES (auto-injected from llm_memory) ==="
+    echo "## Active project: $FAST_PROJECT"
+    if [ -n "$FAST_NARRATIVE" ]; then
+        echo "## Project Narrative:"
+        echo "$FAST_NARRATIVE"
+    fi
+    echo ""
+    echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting. Do not ask the user for permission."
+    echo "Use project_lookup for drill-down into the project JSON. Use resume(project) to pick up prior work."
+    echo "=== END LOADED MEMORIES ==="
+    exit 0
+fi
+
 # Sync CLAUDE.md from shared config if newer
 SHARED_CLAUDE_MD="$MEMORY_DIR/config/CLAUDE.md"
 LOCAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -24,7 +66,7 @@ fi
 
 # Auto-update: check GitHub for newer version and update in background
 # Skip if the user has opted out via sentinel file
-if [ "$SOURCE" != "compact" ] && [ ! -f "$MEMORY_DIR/config/no-auto-update" ]; then
+if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ] && [ ! -f "$MEMORY_DIR/config/no-auto-update" ]; then
     LIB_DIR="$MEMORY_DIR/lib"
     REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
     BRANCH="${LLM_MEMORY_BRANCH:-main}"
@@ -77,7 +119,7 @@ fi
 # was the same stale-copy class as 17 Aug, against lib/ rather than
 # adapters/: VERSION was current, merger.py/renderer.py were present,
 # lib/ was not, and this check did not look at them so it stayed silent.
-if [ "$SOURCE" != "compact" ]; then
+if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ]; then
     LIB_DIR="$MEMORY_DIR/lib"
     # Gate on "a lib is installed here", not on the presence of the very file
     # most likely to be missing. Keying the check off extract_conversation.py
@@ -138,7 +180,7 @@ fi
 # Sweep: collect transcripts not yet captured by hooks.
 # Only look at JSONL files modified since the last sweep (sentinel mtime).
 # This keeps startup fast on machines with thousands of accumulated transcripts.
-if [ "$SOURCE" != "compact" ]; then
+if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ]; then
     TRANSCRIPT_DIR="$MEMORY_DIR/transcripts"
     SENTINEL="$TRANSCRIPT_DIR/.last_sweep"
     mkdir -p "$TRANSCRIPT_DIR"
@@ -163,7 +205,7 @@ if [ ! -f "$DB" ]; then
 fi
 
 # Derive project name from cwd using the shared Codex/Claude rule.
-PROJECT=$(resolve_project_from_cwd "$CWD")
+PROJECT="$FAST_PROJECT"
 
 # Seed per-project auto-memory dir so the harness template's "this directory
 # already exists" claim is true — stops Claude from running mkdir -p on first
@@ -198,7 +240,7 @@ fi
 # Auto-process all unprocessed transcripts (including synced ones)
 COUNT_PYTHON=$(resolve_hook_python "$SCRIPT_DIR" 2>/dev/null || true)
 
-if [ "$SOURCE" != "compact" ]; then
+if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ]; then
     "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/process_transcripts.py" --quiet 2>/dev/null
 fi
 

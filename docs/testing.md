@@ -19,3 +19,12 @@ clear the default marker filter:
 ```bash
 .venv/bin/python3 -m pytest -m "" tests/test_archive_class.py::test_unclassified_trio_exact
 ```
+
+## Self-running extraction
+
+The automatic worker is tested only with the frozen fake Claude backend and
+fake systemctl command. It never calls a real model or user service manager:
+
+```bash
+flock -w 1800 ~/.am-host/test-llm.lock bash -c 'export TMUX_TMPDIR=$(mktemp -d); HOME=$(mktemp -d) LLM_MEMORY_HOME=$(mktemp -d) .venv/bin/python3 -m pytest tests/test_selfrun_*.py -p no:cacheprovider --basetemp=$(mktemp -d)'
+```

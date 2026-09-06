@@ -29,6 +29,30 @@ assignment before expanding `$MEMORY_ROOT`. The `Agent(...)` prompt is not a
 shell, so interpolate the printed absolute value there before launching the
 extractor; do not hand the subagent a literal `$MEMORY_ROOT` token.
 
+Before a manual drain, take the same per-project gate as the automatic worker.
+This is the filesystem form of `narrative_lock.project_lock`: the lock file is
+the shared contract, including for a manual run that cannot import Python.
+Keep every read/extract/merge/render command for one project inside one
+`flock` invocation; running separate shell snippets releases the gate between
+steps and can race a SessionEnd request.  Replace `PROJECT` below with the
+resolved project name and put the manual commands in `manual_drain.sh`:
+
+```bash
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+PROJECT="PROJECT"
+LOCK="$MEMORY_ROOT/runtime/locks/narrative/$PROJECT.lock"
+mkdir -p "$(dirname "$LOCK")"
+if ! flock -n "$LOCK" bash ./manual_drain.sh "$MEMORY_ROOT" "$PROJECT"; then
+  echo "LLM_MEMORY_WARN: narrative update already running for $PROJECT; retry after it finishes"
+  exit 1
+fi
+```
+
+`merger.py` and `renderer.py` also take this lock when invoked directly.  The
+single outer `flock` is nevertheless required for a manual multi-step drain:
+it makes the whole read/extract/merge/render sequence indivisible rather than
+locking only each individual write.
+
 ## Step 1: Discover work
 
 Call `narrative_coverage(project=PROJECT)` for the current project first, then

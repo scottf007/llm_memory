@@ -66,4 +66,23 @@ else
     log "extract failed for $ARCHIVE_PATH -> $OUT_PATH"
 fi
 
+# Queue extraction only after archive + conversation stripping completes.  The
+# detached service owns model work; the hook remains bounded and model-free.
+if [ -f "$OUT_PATH" ] && [ -n "$CWD" ]; then
+    # Use the same sourced shell helper as SessionStart.  A basename fallback
+    # would route sessions ended from subdirectories into phantom projects.
+    source "$SCRIPT_DIR/hooks/lib_session_common.sh"
+    PROJECT=$(resolve_project_from_cwd "$CWD")
+    "$PYTHON3" "$SCRIPT_DIR/extraction_worker.py" enqueue --project "$PROJECT" --session-id "$SESSION_ID" --transcript "$ARCHIVE_PATH" --source session_end >>"$LOG" 2>&1 || log "enqueue failed for $SESSION_ID"
+    if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ]; then
+        if [ -f "$LLM_MEMORY_SYSTEMCTL" ] && [ ! -x "$LLM_MEMORY_SYSTEMCTL" ]; then
+            bash "$LLM_MEMORY_SYSTEMCTL" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+        else
+            "$LLM_MEMORY_SYSTEMCTL" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+        fi
+    elif command -v systemctl >/dev/null 2>&1; then
+        systemctl --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"
+    fi
+fi
+
 exit 0
