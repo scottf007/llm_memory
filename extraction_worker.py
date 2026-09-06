@@ -89,7 +89,10 @@ def save_status(home: Path, project: str, **updates) -> dict:
     data.update(updates)
     # An idle sidecar is a promise that this project has no queued work.  Do
     # not let a partial drain turn that promise into a silent lie.
-    if data.get("state") == "idle" and request_files(home, project):
+    # Physical request files, not merely parseable/project-attributable ones,
+    # block the all-clear.  A malformed wake record is still unresolved work
+    # and must remain visible until an operator repairs or removes it.
+    if data.get("state") == "idle" and any(request_dir(home).glob("*.json")):
         data["state"] = "waiting"
         data["error_summary"] = "extraction request(s) remain pending"
     data["write_seq"] = int(data.get("write_seq", 0)) + 1
@@ -132,10 +135,42 @@ def _qualified_local(home: Path) -> bool:
     return bool(report.get("qualified") is True or report.get("passes") is True)
 
 
-def _call_claude(state: dict, transcript: str) -> tuple[str, str]:
+def _observed_transcript_bounds(transcript: str) -> tuple[str, str]:
+    """Read the transcript bounds before asking a backend to describe it.
+
+    The extractor may echo timestamps, but it cannot be the authority for how
+    far the worker actually read.  Keeping this observation outside the model
+    response also lets the final coverage check detect a transcript that grew
+    while the backend call was in flight.
+    """
+    first: datetime | None = None
+    last: datetime | None = None
+    try:
+        lines = Path(transcript).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ValueError(f"cannot read transcript bounds: {exc}") from exc
+    for line in lines:
+        try:
+            value = json.loads(line).get("timestamp")
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        stamp = stamp.astimezone(timezone.utc)
+        first = stamp if first is None or stamp < first else first
+        last = stamp if last is None or stamp > last else last
+    if first is None or last is None:
+        raise ValueError("transcript has no parseable timestamps")
+    return (first.strftime("%Y-%m-%dT%H:%M:%SZ"), last.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+
+def _call_claude(state: dict, transcript: str, observed_bounds: tuple[str, str]) -> tuple[str, str]:
     command = os.environ.get("LLM_MEMORY_CLAUDE_CMD", "claude")
     prompt = ("Return one JSON delta only.\nProject active state:\n" +
-              json.dumps(state, sort_keys=True) + "\nTranscript: " + transcript)
+              json.dumps(state, sort_keys=True) + "\nTranscript: " + transcript +
+              "\nsession_started_at: " + observed_bounds[0] +
+              "\nsession_ended_at: " + observed_bounds[1])
     command_argv = ["bash", command] if command.endswith(".sh") else [command]
     result = subprocess.run(command_argv + ["-p", "--model", "sonnet"], input=prompt,
                             text=True, capture_output=True)
@@ -233,7 +268,8 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
             prior = session.get("extraction") or {}
             if isinstance(prior, dict) and prior.get("cost_usd") is not None and float(prior["cost_usd"]) >= session_cap:
                 return False, "session extraction spend cap reached", None
-    raw, prompt_hash = _call_claude(state, req["transcript_path"])
+    observed_bounds = _observed_transcript_bounds(req["transcript_path"])
+    raw, prompt_hash = _call_claude(state, req["transcript_path"], observed_bounds)
     raw_path = _result_path(home, project, req["session_id"], req["request_id"])
     _preserve_raw(raw_path, raw)
     try:
@@ -243,10 +279,9 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
                 # A rerun refreshes the existing session watermark even when a
                 # backend fixture (or stale cache) names the original pass.
                 delta["session_id"] = req["session_id"]
-            # The watermark represents how far the extractor read, not a
-            # model-supplied historical timestamp.  Record this completed
-            # attempt so coverage does not immediately reclassify it stale.
-            delta["ended"] = iso()
+            # Model timestamp echoes are provenance only.  The applied
+            # watermark is what this worker observed before the call began.
+            delta["started"], delta["ended"] = observed_bounds
         if not isinstance(delta, dict) or delta.get("session_id") != req["session_id"]:
             raise ValueError("invalid delta session_id")
         applied = copy.deepcopy(delta)
