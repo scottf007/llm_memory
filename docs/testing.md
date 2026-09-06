@@ -1,9 +1,18 @@
 # Testing
 
-The default suite is hermetic and does not read local conversation stores:
+The default suite is hermetic and does not read local conversation stores.
+Run it first with a fake HOME and the legacy default store location:
 
 ```bash
-flock -w 1800 ~/.am-host/test.lock bash -c 'export TMUX_TMPDIR=$(mktemp -d); .venv/bin/python3 -m pytest tests/'
+flock -w 1800 ~/.am-host/test-llm.lock bash -c 'export TMUX_TMPDIR=$(mktemp -d); home=$(mktemp -d); base=$(mktemp -d); HOME="$home" LLM_MEMORY_HOME= env -u PYTEST_ADDOPTS .venv/bin/python3 -m pytest tests/ -p no:cacheprovider --basetemp="$base"'
+```
+
+Then run the same oracle with HOME and the configured store root in two
+different temporary directories. This catches tests that accidentally pin the
+legacy HOME fallback instead of the configured store root:
+
+```bash
+flock -w 1800 ~/.am-host/test-llm.lock bash -c 'export TMUX_TMPDIR=$(mktemp -d); home=$(mktemp -d); store=$(mktemp -d); base=$(mktemp -d); HOME="$home" LLM_MEMORY_HOME="$store" env -u PYTEST_ADDOPTS .venv/bin/python3 -m pytest tests/ -p no:cacheprovider --basetemp="$base"'
 ```
 
 To re-verify the 35 mutable local-corpus rows on the owner machine, opt in:

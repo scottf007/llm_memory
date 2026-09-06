@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import merger
+from tools.memory_config import memory_root
 
 
 BASE_TS = "2026-01-01T00:00:00Z"
@@ -154,6 +155,7 @@ def _fake_home(tmp_path, monkeypatch):
     (home / ".claude" / "memory" / "items").mkdir(parents=True)
     (home / ".claude" / "memory" / "memory.db").write_bytes(b"SENTINEL-DB")
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".claude" / "memory"))
     return home
 
 
@@ -180,10 +182,10 @@ def _write_state(path, project="example_project"):
 def test_canonical_state_file_resolves_to_the_real_items_root_and_db():
     """Production invocation must be unchanged: no writes here, just the
     resolved paths."""
-    canonical = Path.home() / ".claude" / "memory" / "projects" / "example_project.json"
+    canonical = memory_root() / "projects" / "example_project.json"
     items_root, db_path, sandboxed = merger.resolve_paths(canonical)
-    assert items_root == Path.home() / ".claude" / "memory" / "items"
-    assert db_path == Path.home() / ".claude" / "memory" / "memory.db"
+    assert items_root == memory_root() / "items"
+    assert db_path == memory_root() / "memory.db"
     assert sandboxed is False
 
 
@@ -501,6 +503,7 @@ def test_atomic_fault_after_replace_before_fanout(tmp_path, monkeypatch):
     (home / ".claude" / "memory" / "projects").mkdir(parents=True)
     (home / ".claude" / "memory" / "items").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".claude" / "memory"))
 
     state_path = home / ".claude" / "memory" / "projects" / "example_project.json"
     state_path.write_text(json.dumps({
