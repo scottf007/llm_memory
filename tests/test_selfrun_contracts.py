@@ -80,24 +80,62 @@ def _write_transcript_ending_at(transcripts_dir, session_id, end_iso, n_turns=5)
 # ======================================================================
 
 def test_final_coverage_gates_retirement_request_stays_status_waiting_last_success_not_advanced(tmp_path):
+    # The worker stamps the applied delta's started/ended from its OWN
+    # observation of the transcript, taken before the backend call — a
+    # model-echoed timestamp is provenance only (design l.94 ruling). So the
+    # real reason a merged session can still be stale is that the transcript
+    # kept growing during the backend call, past what the worker observed.
+    # DELTA_SESSION_A's own "ended" (2026-09-01) is irrelevant here and is
+    # expected to be overwritten.
     home, memory_home = H.make_home(tmp_path)
     H.write_project_state(memory_home, "selfrunproj")
-    # DELTA_SESSION_A's "ended" is fixed at 2026-09-01T01:00:00Z; the
-    # transcript's real tail is "now" (H.write_transcript), which on any run
-    # date after that is >24h later. The merge succeeds, but the worker's own
-    # freshly recomputed coverage must still show this exact session stale.
     transcript = H.write_transcript(memory_home / "transcripts", "selfrun-sess-a")
     claude_logs = tmp_path / "claude-calls"
     queue = tmp_path / "queue"
     H.make_response_queue(queue, H.DELTA_SESSION_A)
     env = H.worker_env(home, memory_home, claude_log_dir=claude_logs, response_queue=queue)
+    env["FAKE_CLAUDE_SLEEP_ON_CALL"] = "1"
+    env["FAKE_CLAUDE_SLEEP_SECONDS"] = "4"
 
     assert _enqueue(env, "selfrunproj", "selfrun-sess-a", transcript).returncode == 0
-    result = H.run_worker(["run", "--once", "--project", "selfrunproj"], env, timeout=30)
-    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    proc = subprocess.Popen(
+        [sys.executable, str(H.REPO_DIR / "extraction_worker.py"),
+         "run", "--once", "--project", "selfrunproj"],
+        env=env,
+    )
+    try:
+        started = claude_logs / "call-1.started"
+        for _ in range(200):
+            if started.exists():
+                break
+            time.sleep(0.05)
+        assert started.exists(), "backend call never started; cannot open the observation window"
+
+        # The worker already read (observed the bounds of) this transcript
+        # before the backend call above started. Append one more substantive
+        # record now, while the call is still sleeping, dated well past
+        # server.STALE_TAIL_HOURS (24h) past what was just observed, so the
+        # session is unambiguously stale regardless of how fast this test runs.
+        growth_ts = (datetime.utcnow() + timedelta(hours=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with (memory_home / "transcripts" / "selfrun-sess-a.jsonl").open("a") as f:
+            f.write(json.dumps({
+                "type": "user", "timestamp": growth_ts,
+                "message": {"role": "user",
+                            "content": "selfrun fixture: one more turn after the worker's read"},
+            }) + "\n")
+
+        proc.wait(timeout=15)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=10)
+    assert proc.returncode == 0, f"worker did not exit cleanly (returncode={proc.returncode})"
 
     # Fixture sanity: the merge really happened, and the session really is
-    # still stale by the worker's own coverage function immediately after.
+    # still stale by the worker's own coverage function immediately after —
+    # because the transcript grew past the worker's own observed bounds, not
+    # because of any timestamp the backend echoed.
     state = _project_state(memory_home, "selfrunproj")
     assert any(s.get("session_id") == "selfrun-sess-a" for s in state["sessions"]), (
         "fixture setup bug: session must actually merge"
@@ -107,7 +145,8 @@ def test_final_coverage_gates_retirement_request_stays_status_waiting_last_succe
     server.DB_DIR = memory_home
     coverage = server.compute_narrative_coverage("selfrunproj")
     assert any(s["session_id"] == "selfrun-sess-a" for s in coverage["stale"]), (
-        "fixture setup bug: session must still show stale immediately after merge"
+        "fixture setup bug: appending past the worker's observed bounds must "
+        "still show stale immediately after merge"
     )
 
     status = _status(memory_home, "selfrunproj")
@@ -128,8 +167,12 @@ def test_final_coverage_gates_retirement_request_stays_status_waiting_last_succe
 
 def test_control_normal_drain_retires_request_and_writes_idle(tmp_path):
     """Control: a session whose transcript does not keep growing past its
-    merge point clears normally. Delta's `ended` and the transcript's own
-    tail are anchored to the same instant, so nothing is stale."""
+    merge point clears normally. DELTA_SESSION_A's own "ended" echo is
+    2026-09-01T01:00:00Z, deliberately not matched to anything here — the
+    worker overwrites it with its own observed bound, which (with no growth
+    at all) sits at the transcript's real tail, `end_iso` below. That the run
+    still comes back idle proves the observed timestamp is what governs
+    retirement, not the model's echo."""
     home, memory_home = H.make_home(tmp_path)
     H.write_project_state(memory_home, "selfrunproj")
     end_iso = "2026-09-01T01:00:00Z"  # matches DELTA_SESSION_A's "ended"
