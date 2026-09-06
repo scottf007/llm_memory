@@ -30,3 +30,13 @@ jobs:
 
       - name: Run tests
         run: python -m pytest tests/ -v
+
+  fresh-install: # verifies an ubuntu:24.04 container from the runner's Docker daemon
+    runs-on: ubuntu-latest
+    env:
+      LLM_MEMORY_FRESH_INSTALL_IMAGE: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prove a clean Ubuntu install
+        run: tools/fresh_install_check.sh
