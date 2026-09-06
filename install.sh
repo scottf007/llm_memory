@@ -4,6 +4,11 @@ set -e
 REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
 BRANCH="${LLM_MEMORY_BRANCH:-main}"
 MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+# Test and release-validation override.  It accepts either a URL or an
+# already-downloaded tarball path, but deliberately requires the source SHA:
+# VERSION is the assertion that an installation is complete, so it must never
+# be guessed from an archive filename.
+TARBALL_URL="${LLM_MEMORY_TARBALL_URL:-}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 LIB_DIR="$MEMORY_DIR/lib"
 VENV_DIR="$LIB_DIR/.venv"
@@ -179,8 +184,17 @@ trap 'rm -rf "$TMPDIR"; rm -f "${LLM_MEMORY_INSTALL_REEXEC_TMP:-}"' EXIT
 # instead of claiming the partially-applied source tree is current.
 UPDATED_VERSION=""
 
-# Get the latest commit hash
-REMOTE_SHA=$(curl -sf "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/commits/$BRANCH" | jq -r '.sha' 2>/dev/null)
+# Get the latest commit hash.  Fresh-install proof runs use a tarball built
+# from the checkout but retain the normal download/extract/copy path.
+if [ -n "$TARBALL_URL" ]; then
+    REMOTE_SHA="${LLM_MEMORY_TARBALL_SHA:-}"
+    if [ -z "$REMOTE_SHA" ]; then
+        echo "  ERROR: LLM_MEMORY_TARBALL_URL requires LLM_MEMORY_TARBALL_SHA." >&2
+        exit 1
+    fi
+else
+    REMOTE_SHA=$(curl -sf "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/commits/$BRANCH" | jq -r '.sha' 2>/dev/null)
+fi
 if [ -z "$REMOTE_SHA" ] || [ "$REMOTE_SHA" = "null" ]; then
     # If API fails (rate limit, no network, private repo w/o token), check if we already have files
     if [ -f "$LIB_DIR/server.py" ]; then
@@ -201,8 +215,20 @@ else
     if [ "$LOCAL_SHA" = "$REMOTE_SHA" ] && [ "$1" != "--force" ]; then
         log "  Already up to date ($REMOTE_SHA)."
     else
-        # Download and extract (api.github.com/tarball endpoint works for both public and private)
-        if ! curl -fsSL "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/tarball/$BRANCH" | tar xz -C "$TMPDIR"; then
+        # Download and extract (api.github.com/tarball endpoint works for both
+        # public and private).  A proof may supply a local archive path so the
+        # exact checkout is exercised without publishing it first.
+        if [ -n "$TARBALL_URL" ] && [ -f "$TARBALL_URL" ]; then
+            tar xz -f "$TARBALL_URL" -C "$TMPDIR" || {
+                echo "  ERROR: Download or extraction failed; installation was not marked current." >&2
+                exit 1
+            }
+        elif [ -n "$TARBALL_URL" ]; then
+            curl -fsSL "$TARBALL_URL" | tar xz -C "$TMPDIR" || {
+                echo "  ERROR: Download or extraction failed; installation was not marked current." >&2
+                exit 1
+            }
+        elif ! curl -fsSL "${AUTH_HEADER[@]}" "https://api.github.com/repos/$REPO/tarball/$BRANCH" | tar xz -C "$TMPDIR"; then
             echo "  ERROR: Download or extraction failed; installation was not marked current." >&2
             exit 1
         fi

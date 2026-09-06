@@ -18,7 +18,8 @@ LLM Memory fixes this. It gives Claude Code a local, persistent memory that surv
 curl -sL https://raw.githubusercontent.com/scottf007/llm_memory/main/install.sh | bash
 ```
 
-Requires Python 3.10+, `jq`, `sqlite3`, and `curl`. No Node.js needed. Restart Claude Code after installing.
+Requires Python 3.10+, `jq`, `sqlite3`, `curl`, and Python's venv support
+(`python3-venv` on Ubuntu/Debian). No Node.js needed. Restart Claude Code after installing.
 
 <details>
 <summary>Or install from source</summary>
