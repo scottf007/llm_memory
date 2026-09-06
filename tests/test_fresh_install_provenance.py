@@ -47,6 +47,9 @@ def _run_container_proof(repo: Path, tmp_path: Path) -> subprocess.CompletedProc
     bin_dir.mkdir()
     _fake_docker(bin_dir)
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+    # This test exercises the container-proof branch; an outer test run may
+    # configure a different temporary memory root for unrelated tests.
+    env.pop("LLM_MEMORY_HOME", None)
     return subprocess.run(
         ["bash", str(repo / "tools" / "fresh_install_check.sh")],
         cwd=repo,

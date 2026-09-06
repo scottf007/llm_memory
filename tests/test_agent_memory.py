@@ -73,6 +73,7 @@ def _run_hook(hook_name, home, input_json, timeout=10):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
+    env["LLM_MEMORY_HOME"] = str(home / ".claude" / "memory")
     # Prevent auto-update check and process_transcripts from running
     (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
 

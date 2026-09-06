@@ -99,6 +99,7 @@ def _run_hook(hook_name, home, input_json, timeout=30, extra_env=None):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
+    env["LLM_MEMORY_HOME"] = str(home / ".claude" / "memory")
     # The age-signal snippet imports server.py (needs mcp). Prefer the
     # interpreter running this test so a bare `python3` on PATH is not the
     # system one.
@@ -150,7 +151,7 @@ def _run_session_start(home, source="startup", cwd="/home/user/projects/testproj
     return stdout, stderr, rc
 
 
-def test_memory_index_drill_down_uses_configured_root(tmp_path, monkeypatch):
+def test_memory_index_drill_down_uses_configured_root(tmp_path):
     home, conn, _ = _setup_test_home(tmp_path)
     configured = tmp_path / "relocated"
     (configured / "config").mkdir(parents=True)
@@ -159,10 +160,11 @@ def test_memory_index_drill_down_uses_configured_root(tmp_path, monkeypatch):
     (configured / "memory.db").touch()
     (configured / "config" / "no-auto-update").touch()
     (configured / "projects" / "testproj.narrative.md").write_text("narrative")
-    monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
     conn.close()
 
-    _, stderr, rc = _run_session_start(home)
+    _, stderr, rc = _run_session_start(
+        home, extra_env={"LLM_MEMORY_HOME": str(configured)}
+    )
 
     assert rc == 0, stderr
     memory_index = (

@@ -74,6 +74,7 @@ _REAL_INSTALLED_PYTHON = Path.home() / ".claude" / "memory" / "lib" / ".venv" / 
 def _base_env(fake_home):
     env = dict(os.environ)
     env["HOME"] = str(fake_home)
+    env["LLM_MEMORY_HOME"] = str(fake_home / ".claude" / "memory")
     # memory_wrap_resume.py imports server.py, which imports the real `mcp`
     # SDK. Point at the installed lib venv (what memory_wrap uses by
     # default in production) rather than this repo's dev .venv, whose `mcp`
