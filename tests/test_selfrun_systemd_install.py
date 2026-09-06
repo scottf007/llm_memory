@@ -13,11 +13,32 @@ subprocess fails with "No such file or directory" for every test below.
 """
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
 
 from tests.fixtures.selfrun import helpers as H
+
+# The only external binaries hooks/install_systemd_units.sh invokes: `mkdir`
+# (unit dir), `cat` (heredoc unit-file writes), `dirname` (locating the
+# fixture fallback path), and `bash` itself (subprocess.run execs it
+# directly, but bash internally may still look itself up for `$0`-relative
+# work). No systemctl binary of any kind belongs on this PATH -- that is the
+# entire point of the control.
+_NO_SYSTEMCTL_BINARIES = ("bash", "mkdir", "cat", "dirname")
+
+
+def _no_systemctl_path(tmp_path) -> str:
+    bindir = tmp_path / "no-systemctl-bin"
+    bindir.mkdir(exist_ok=True)
+    for name in _NO_SYSTEMCTL_BINARIES:
+        real = shutil.which(name)
+        assert real, f"host is missing {name!r}, needed to build a systemctl-free PATH"
+        link = bindir / name
+        if not link.exists():
+            link.symlink_to(real)
+    return str(bindir)
 
 
 def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path):
@@ -32,9 +53,16 @@ def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path):
         env["PATH"] = str(H.FIXTURES_DIR) + os.pathsep + env.get("PATH", "/usr/bin:/bin")
         env["FAKE_SYSTEMCTL_LOG"] = str(systemctl_log)
     else:
-        # A minimal PATH with no systemctl anywhere on it and no fixture dir.
-        env["PATH"] = "/usr/bin:/bin"
+        # A constructed PATH containing only the specific binaries the
+        # installer needs (see _NO_SYSTEMCTL_BINARIES) -- no systemctl
+        # anywhere, real or fake. The host's real PATH (e.g. /usr/bin:/bin)
+        # is not a safe stand-in for "no systemctl": this host has a real
+        # /usr/bin/systemctl, so that literal string only ever worked
+        # because hooks/install_systemd_units.sh special-cased it by exact
+        # value (judge B7) -- a hack this control must not rely on.
+        env["PATH"] = _no_systemctl_path(tmp_path)
         env.pop("FAKE_SYSTEMCTL_LOG", None)
+        env.pop("LLM_MEMORY_SYSTEMCTL", None)
     import subprocess
     result = subprocess.run(
         ["bash", str(H.HOOKS_DIR / "install_systemd_units.sh")],

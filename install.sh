@@ -129,7 +129,14 @@ fi
 if [ -n "$MISSING" ]; then
     echo "  Missing:$MISSING — attempting to install..."
     if command -v apt-get &> /dev/null; then
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING
+        if [ "$(id -u)" -eq 0 ]; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING
+        elif command -v sudo &> /dev/null; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $MISSING
+        else
+            echo "  ERROR: Cannot auto-install without root or sudo. Run: apt-get install -y$MISSING"
+            exit 1
+        fi
     elif command -v brew &> /dev/null; then
         brew install $MISSING
     elif command -v pacman &> /dev/null; then

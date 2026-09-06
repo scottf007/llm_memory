@@ -1,0 +1,6 @@
+#!/bin/bash
+# Shim so a bare `systemctl` on the fixture PATH resolves to the fake,
+# without production code ever needing to know the fixture's real filename
+# (judge B7: hooks/install_systemd_units.sh must only ever look for a
+# command named `systemctl`, injected via PATH or LLM_MEMORY_SYSTEMCTL).
+exec "$(dirname "$0")/fake_systemctl.sh" "$@"
