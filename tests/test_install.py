@@ -572,3 +572,15 @@ class TestInlinePythonIsNotShellInterpolated:
         settings = json.loads((home / ".claude" / "settings.json").read_text())
         cmd = settings["hooks"]["SessionStart"][0]["hooks"][0]["command"]
         assert cmd.endswith("session_start.sh")
+
+
+def test_install_copies_transcript_skips_next_to_process_transcripts():
+    """process_transcripts.py imports transcript_skips; omitting the copy
+    breaks a fresh install (CI fresh-install on a36b53b).
+    """
+    script = (REPO_DIR / "install.sh").read_text()
+    assert 'cp "$EXTRACTED/process_transcripts.py" "$LIB_DIR/"' in script
+    assert 'cp "$EXTRACTED/transcript_skips.py" "$LIB_DIR/"' in script
+    idx_proc = script.index("process_transcripts.py")
+    idx_skip = script.index("transcript_skips.py")
+    assert idx_skip > idx_proc

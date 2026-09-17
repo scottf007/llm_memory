@@ -39,7 +39,8 @@ def _make_tarball(tmp_path: Path, installer: str) -> Path:
     # deliberately small also makes the test independent of local artefacts
     # such as transcript caches that are not shipped by GitHub tarballs.
     for name in [
-        "server.py", "process_transcripts.py", "extract_conversation.py",
+        "server.py", "process_transcripts.py", "transcript_skips.py",
+        "extract_conversation.py",
         "conversations.py", "indexer.py", "migrate_item_ids.py",
         "resolve_conflicts.py", "merger.py", "renderer.py", "delta_cache.py",
         "dashboard.py", "apply_settings.py", "requirements.txt", "settings.yaml",

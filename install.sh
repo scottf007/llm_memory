@@ -256,6 +256,7 @@ else
         rm -f "$LIB_DIR/"*.py
         cp "$EXTRACTED/server.py" "$LIB_DIR/"
         cp "$EXTRACTED/process_transcripts.py" "$LIB_DIR/"
+        cp "$EXTRACTED/transcript_skips.py" "$LIB_DIR/"
         cp "$EXTRACTED/extract_conversation.py" "$LIB_DIR/"
         cp "$EXTRACTED/conversations.py" "$LIB_DIR/"
         cp "$EXTRACTED/indexer.py" "$LIB_DIR/"
