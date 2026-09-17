@@ -30,6 +30,7 @@ from pathlib import Path
 import pytest
 
 import server
+from transcript_skips import record_skip
 
 # The literal preamble the multi-agent board's codex-auto harness sends as
 # the first user turn of every session it launches (verified against real
@@ -424,6 +425,42 @@ def test_coverage_payload_exposes_skipped_id_lists(sandbox):
     for key in ("skipped_subagent_count", "skipped_codex_auto_count",
                 "skipped_low_turn_count", "skipped_low_content_count"):
         assert isinstance(result[key], int)
+
+
+def test_indexed_session_is_excluded_before_coverage_reads_its_body(sandbox, monkeypatch):
+    """Transcript-noise trigger/control: index lookup is a cheap set difference."""
+    indexed = _grok_session(sandbox, "grok-indexed-pong", GROK_KEEPALIVE_TRIGGER)
+    eligible = _grok_session(sandbox, "grok-indexed-control", GROK_WORK_LOOP_PROMPT)
+    record_skip(
+        sandbox,
+        "grok-indexed-pong",
+        "grok",
+        {"path": "/fixture/grok-indexed-pong", "mtime_ns": 1, "size": 1},
+        "grok_pong_healthcheck",
+    )
+
+    def assert_not_indexed(path: str) -> bool:
+        assert path != str(indexed), "coverage reopened an indexed transcript body"
+        return False
+
+    def count_not_indexed(path: str, cap: int) -> int:
+        assert path != str(indexed), "coverage counted an indexed transcript body"
+        return cap
+
+    def content_not_indexed(path: str, min_chars: int) -> bool:
+        assert path != str(indexed), "coverage scanned an indexed transcript body"
+        return True
+
+    monkeypatch.setattr(server, "_is_grok_keepalive_loop", assert_not_indexed)
+    monkeypatch.setattr(server, "_count_substantive_user_turns", count_not_indexed)
+    monkeypatch.setattr(server, "_has_substantive_assistant_content", content_not_indexed)
+
+    result = _coverage()
+    assert str(indexed) not in result["unprocessed"]
+    assert str(eligible) in result["unprocessed"]
+    assert result["skipped_indexed_count"] == 1
+    assert isinstance(result["unprocessed"], list)
+    assert isinstance(result["unprocessed_sorted"], list)
 
 
 def test_narrative_coverage_tool_description_names_grok_keepalive_loops():

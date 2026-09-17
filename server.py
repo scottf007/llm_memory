@@ -26,6 +26,7 @@ import mcp.types as types
 import conversations
 from tools.memory_config import memory_root
 from tools.project_state import load_active, load_full
+from transcript_skips import skipped_session_ids
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -635,6 +636,7 @@ def compute_narrative_coverage(
     ]
 
     client_by_sid = _client_by_session(DB_DIR / "conversations")
+    indexed_skips = skipped_session_ids(DB_DIR)
 
     # Filter: drop sub-agent transcripts (agent-*), the codex-auto board
     # harness's own sessions, Grok's self-wake keep-alive loops, short one-shot
@@ -651,7 +653,11 @@ def compute_narrative_coverage(
     skipped_low_turn = 0
     skipped_low_turn_paths: list[str] = []
     skipped_low_content = 0
+    skipped_indexed = 0
     for sid, p in raw_unprocessed:
+        if sid in indexed_skips:
+            skipped_indexed += 1
+            continue
         if sid.startswith("agent-"):
             skipped_subagent += 1
             continue
@@ -707,11 +713,11 @@ def compute_narrative_coverage(
             pass
 
     skipped_total = (
-        skipped_subagent + skipped_codex_auto + len(skipped_grok_keepalive)
+        skipped_indexed + skipped_subagent + skipped_codex_auto + len(skipped_grok_keepalive)
         + skipped_low_turn + skipped_low_content
     )
     filter_note = (
-        f" (excluded {skipped_total}: {skipped_subagent} sub-agent, "
+        f" (excluded {skipped_total}: {skipped_indexed} indexed, {skipped_subagent} sub-agent, "
         f"{skipped_codex_auto} codex-auto harness, {len(skipped_grok_keepalive)} grok-keepalive, "
         f"{skipped_low_turn} low-turn, "
         f"{skipped_low_content} low-content)"
@@ -727,6 +733,7 @@ def compute_narrative_coverage(
             "unprocessed_count": len(unprocessed),
             "unprocessed": unprocessed,
             "unprocessed_sorted": unprocessed_sorted,
+            "skipped_indexed_count": skipped_indexed,
             "skipped_subagent_count": skipped_subagent,
             "skipped_codex_auto_count": skipped_codex_auto,
             "skipped_grok_keepalive_count": len(skipped_grok_keepalive),
@@ -752,6 +759,7 @@ def compute_narrative_coverage(
         "unprocessed_count": len(unprocessed),
         "unprocessed": unprocessed,
         "unprocessed_sorted": unprocessed_sorted,
+        "skipped_indexed_count": skipped_indexed,
         "skipped_subagent_count": skipped_subagent,
         "skipped_codex_auto_count": skipped_codex_auto,
         "skipped_grok_keepalive_count": len(skipped_grok_keepalive),

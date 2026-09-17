@@ -193,6 +193,8 @@ def test_process_foreign_session_skips_only_the_superseded_parent(tmp_path, monk
 
     archive = tmp_path / "transcripts"
     conv = tmp_path / "conversations"
+    memory = tmp_path / "memory"
+    monkeypatch.setattr(pt, "DB_DIR", memory)
     monkeypatch.setattr(pt, "ARCHIVE_DIR", archive)
     monkeypatch.setattr(pt, "CONVERSATIONS_DIR", conv)
 
@@ -203,6 +205,19 @@ def test_process_foreign_session_skips_only_the_superseded_parent(tmp_path, monk
     assert pt.process_foreign_session(tail_ref) is not None
     assert (archive / f"{tail_ref.session_id}.jsonl").exists()
     assert not (archive / f"{parent_ref.session_id}.jsonl").exists()
+
+
+def test_grok_harness_skip_reason_matches_only_the_fixed_health_checks():
+    """PONG is a health-check only in its exact first-prompt form."""
+    pong = [base.Turn("user", "", "Reply with exactly the word: PONG. Nothing else.")]
+    discussion = [base.Turn(
+        "user", "", "Document why a PONG health-check is useful before we migrate."
+    )]
+    keepalive = [base.Turn("user", "", "Self-wake KEEP-ALIVE FOR SEAT demo")]
+
+    assert grok.harness_skip_reason(pong) == "grok_pong_healthcheck"
+    assert grok.harness_skip_reason(keepalive) == "grok_keepalive"
+    assert grok.harness_skip_reason(discussion) is None
 
 
 # --------------------------------------------------------------------------

@@ -17,6 +17,7 @@ under test lives entirely in `process_transcripts.process_foreign_session`.
 
 from __future__ import annotations
 
+import json
 import time
 import types
 from pathlib import Path
@@ -64,6 +65,8 @@ def _make_fake_adapter(name: str, text: str = "hello") -> types.ModuleType:
 def sandbox(tmp_path, monkeypatch):
     archive = tmp_path / "transcripts"
     conv = tmp_path / "conversations"
+    memory = tmp_path / "memory"
+    monkeypatch.setattr(pt, "DB_DIR", memory)
     monkeypatch.setattr(pt, "ARCHIVE_DIR", archive)
     monkeypatch.setattr(pt, "CONVERSATIONS_DIR", conv)
     return archive, conv
@@ -248,3 +251,27 @@ def test_not_superseded_unchanged_source_still_skips(sandbox, tmp_path, monkeypa
     second = pt.process_foreign_session(ref)
     assert second is not None
     assert second[0].stat().st_mtime_ns == env_mtime_1, "the D8 skip must still fire for a live tail"
+
+
+def test_grok_harness_skip_is_indexed_before_active_archive(sandbox, tmp_path, monkeypatch):
+    """Transcript-noise trigger: a Grok harness prompt is an ingest skip.
+
+    The adapter supplies the narrow prompt classification; this test owns the
+    process boundary and the durable record, rather than duplicating the
+    complete Grok parser fixture setup in this incremental-sweep module.
+    """
+    fake = _register(monkeypatch, "grok", text="ordinary parsed turn")
+    fake.harness_skip_reason = lambda turns: "grok_pong_healthcheck"
+    source = tmp_path / "pong-source.txt"
+    source.write_text("Reply with exactly the word: PONG. Nothing else.")
+    ref = SessionRef(session_id="grok-pong-ingest", path=source, client="grok")
+
+    assert pt.process_foreign_session(ref) is None
+
+    archive, conv = sandbox
+    assert not (archive / f"{ref.session_id}.jsonl").exists()
+    assert not (conv / f"{ref.session_id}.md").exists()
+    entry = json.loads((pt.DB_DIR / "transcript-skips.json").read_text())["entries"][ref.session_id]
+    assert entry["reason"] == "grok_pong_healthcheck"
+    assert entry["client"] == "grok"
+    assert entry["source_version"]["path"] == str(source.resolve())

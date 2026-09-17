@@ -25,7 +25,7 @@ import functools
 import json
 import re
 from pathlib import Path
-from typing import Iterator
+from typing import Iterable, Iterator
 from urllib.parse import unquote
 
 from .base import SessionMeta, SessionRef, Turn, archive_path, make_adapter_parser, project_from_cwd
@@ -39,6 +39,12 @@ SESSIONS_DIR = Path.home() / ".grok" / "sessions"
 # reason has an explicit, reviewable addition rather than another parser rule.
 _DROPPED_SYNTHETIC_REASONS = frozenset({"subagent_completed", "task_completed"})
 
+_KEEPALIVE_MARKER = "keep-alive for seat"
+_PONG_HEALTHCHECK = re.compile(
+    r"^\s*reply with exactly the word:\s*pong\.\s*nothing else\.\s*$",
+    re.IGNORECASE,
+)
+
 
 def client_name() -> str:
     return CLIENT
@@ -47,6 +53,16 @@ def client_name() -> str:
 def session_id_for(raw_id: str) -> str:
     """Prefix a Grok session id, idempotently."""
     return raw_id if raw_id.startswith(ID_PREFIX) else f"{ID_PREFIX}{raw_id}"
+
+
+def harness_skip_reason(turns: Iterable[Turn]) -> str | None:
+    """Classify Grok's fixed harness prompts without overmatching real work."""
+    first_prompt = next((turn.text for turn in turns if turn.role == "user" and turn.text), "")
+    if _KEEPALIVE_MARKER in first_prompt.lower():
+        return "grok_keepalive"
+    if _PONG_HEALTHCHECK.fullmatch(first_prompt):
+        return "grok_pong_healthcheck"
+    return None
 
 
 def _clean_text(text: str) -> str:

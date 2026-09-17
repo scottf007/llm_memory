@@ -24,10 +24,21 @@ from pathlib import Path
 
 import adapters
 from tools.memory_config import memory_root
+from transcript_skips import (
+    applicable_skip,
+    clear_eligible,
+    clear_skip,
+    eligible_source_is_current,
+    mark_eligible,
+    record_skip,
+    source_version,
+)
 
 DB_DIR = memory_root()
 ARCHIVE_DIR = DB_DIR / "transcripts"
 CONVERSATIONS_DIR = DB_DIR / "conversations"
+
+_FOREIGN_MIN_USER_TURNS = {"codex": 1, "grok": 3}
 
 
 def reattribute_dotted_conversations(*, dry_run: bool = False) -> tuple[int, int]:
@@ -134,6 +145,41 @@ def ensure_conversation_md(jsonl_path: Path, session_id: str,
     return dest
 
 
+def _foreign_skip_reason(adapter, meta, turns) -> str | None:
+    """Return the ingest-time exclusion reason for normalized foreign turns."""
+    harness_reason = getattr(adapter, "harness_skip_reason", lambda parsed: None)(turns)
+    if harness_reason:
+        return harness_reason
+    user_turns = adapters.envelope.user_turn_count(turns)
+    if not user_turns:
+        return "empty"
+    threshold = _FOREIGN_MIN_USER_TURNS.get(adapter.client_name())
+    # D4's non-superseded fork tail is the only retained part of a resumed
+    # subagent chain.  Its inherited context can leave it below Grok's normal
+    # prompt count, but dropping it would reintroduce the duplicate-parent
+    # loss that the existing fork contract prevents.
+    if getattr(meta, "extra", {}).get("session_kind") == "subagent_resume":
+        threshold = None
+    if threshold is not None and user_turns < threshold:
+        return "low_turn"
+    return None
+
+
+def _quarantine_active_artifacts(session_id: str, *paths: Path) -> None:
+    """Move legacy noise aside without deleting its original bytes."""
+    destination_dir = DB_DIR / "transcript-quarantine" / session_id
+    for path in paths:
+        if not path.exists():
+            continue
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = destination_dir / path.name
+        suffix = 1
+        while destination.exists():
+            destination = destination_dir / f"{path.stem}-{suffix}{path.suffix}"
+            suffix += 1
+        path.replace(destination)
+
+
 def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None:
     """Archive one foreign session as an envelope and write its .md.
 
@@ -151,8 +197,25 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
         envelope_path.unlink(missing_ok=True)
         md_path.unlink(missing_ok=True)
         return None
+    version = source_version(source_path)
+    if applicable_skip(DB_DIR, ref.session_id, ref.client, version) is not None:
+        # An old pre-index archive can coexist with a just-written index only
+        # after an interrupted reconciliation.  Finish the non-destructive
+        # move before returning so registry and index cannot disagree.
+        _quarantine_active_artifacts(ref.session_id, envelope_path, md_path)
+        return None
+    if (
+        eligible_source_is_current(DB_DIR, ref.session_id, ref.client, version)
+        and envelope_path.exists()
+        and md_path.exists()
+    ):
+        return envelope_path, md_path
     try:
-        if envelope_path.exists() and envelope_path.stat().st_mtime >= source_path.stat().st_mtime:
+        if (
+            ref.client != "grok"
+            and envelope_path.exists()
+            and envelope_path.stat().st_mtime >= source_path.stat().st_mtime
+        ):
             return envelope_path, md_path
     except OSError:
         # Parsing below provides the existing tolerant behaviour for a source
@@ -167,6 +230,13 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
         md_path.unlink(missing_ok=True)
         return None
 
+    reason = _foreign_skip_reason(adapter, meta, turns)
+    if reason:
+        record_skip(DB_DIR, ref.session_id, ref.client, version, reason)
+        clear_eligible(DB_DIR, ref.session_id)
+        _quarantine_active_artifacts(ref.session_id, envelope_path, md_path)
+        return None
+
     envelope = adapters.write_envelope(meta, turns, ARCHIVE_DIR)
     expected = adapters.envelope.user_turn_count(turns)
     ok, detail = adapters.verify_envelope(envelope, expected)
@@ -179,6 +249,8 @@ def process_foreign_session(ref, quiet: bool = True) -> tuple[Path, Path] | None
     CONVERSATIONS_DIR.mkdir(parents=True, exist_ok=True)
     md = md_path
     md.write_text(adapters.render_conversation(meta, turns))
+    clear_skip(DB_DIR, ref.session_id)
+    mark_eligible(DB_DIR, ref.session_id, ref.client, version)
     return envelope, md
 
 
