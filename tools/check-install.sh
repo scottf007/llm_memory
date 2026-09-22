@@ -77,7 +77,9 @@ else
         printf '%s\n' "$paths" | sed 's/^/             /'
     fi
     if [ -f "$ROOT/.stignore" ]; then
-        grep -qx 'lib/.venv' "$ROOT/.stignore" && pass ".stignore excludes lib/.venv (machine-specific)" \
+        # '/lib' excludes the whole installed tree and so covers lib/.venv.
+        # Accept either form; the broader one is the documented five-tier rule.
+        grep -qE '^/?lib(/\.venv)?$' "$ROOT/.stignore" && pass ".stignore excludes the venv (machine-specific)" \
                                                || warning ".stignore does NOT exclude lib/.venv — venvs will fight across machines"
     else
         warning "no .stignore in the root; memory.db and lib/.venv will sync and conflict"

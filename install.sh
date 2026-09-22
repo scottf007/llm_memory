@@ -435,13 +435,23 @@ if [ -f "$MEMORY_DIR/config/CLAUDE.md" ]; then
     fi
 fi
 
-# Create Syncthing ignore file
-cat > "$MEMORY_DIR/.stignore" << 'STIGNORE'
+# Create Syncthing ignore file.
+# Only when absent. This file is hand-maintained per machine (Syncthing never
+# syncs it) and carries the five-tier exclusions that keep transcripts/,
+# runtime/ and logs/ off the wire. Overwriting it unconditionally silently
+# re-enabled syncing of ~47,000 files and 5.2 GB on SCOTT-XPS, 22 Sep 2026,
+# and would have done so again on every nightly --update run.
+if [ ! -f "$MEMORY_DIR/.stignore" ]; then
+    cat > "$MEMORY_DIR/.stignore" << 'STIGNORE'
 memory.db
 memory.db-wal
 memory.db-shm
 lib/.venv
 STIGNORE
+    log "  Wrote a starter .stignore; see config/MACHINE-SETUP.md Step 3."
+else
+    log "  Kept existing .stignore (hand-maintained)."
+fi
 log "  Directories ready."
 
 # --- Step 5: Register MCP servers ---
