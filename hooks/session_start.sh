@@ -102,7 +102,7 @@ if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ] && [ ! -f "$
         # Token sources for private-repo support. Priority:
         #   1. $GH_TOKEN
         #   2. ~/.ssh/github_token (rides the existing ~/.ssh Syncthing sync)
-        #   3. ~/.claude/memory/config/github_token
+        #   3. ~/.llm-memory/config/github_token
         #   4. gh CLI (`gh auth token`)
         # No token = unauthenticated curl (still works while repo is public).
         _tok=""

@@ -4,7 +4,7 @@ These exercise the same production paths (classify/backfill, cascade.apply,
 certify.evaluate, claim_match U1-U4, merger.apply_delta pairing, renderer
 quarantine) on hand-built fixtures. They do not reproduce live-corpus
 counts (33/37/3, 397, hash pins of owner files) and they never read
-~/.claude/memory.
+~/.llm-memory.
 """
 from __future__ import annotations
 

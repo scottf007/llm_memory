@@ -3,7 +3,24 @@ set -e
 
 REPO="${LLM_MEMORY_REPO:-scottf007/llm_memory}"
 BRANCH="${LLM_MEMORY_BRANCH:-main}"
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+# ~/.claude/memory is RETIRED. The store is not Claude-specific -- codex and
+# grok sessions ingest into it too -- and living under another tool's config
+# directory made it look like Claude Code state.
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
+LEGACY_MEMORY_DIR="$HOME/.claude/memory"
+# A machine that never moved has a REAL directory at the retired path. Silently
+# defaulting to the new one would start it on an empty store and quietly lose
+# every narrative it has. Refuse, and say exactly what to do. A symlink is the
+# expected post-move compatibility shim and is fine to leave.
+if [ -z "${LLM_MEMORY_HOME:-}" ] && [ ! -e "$MEMORY_DIR" ] \
+   && [ -d "$LEGACY_MEMORY_DIR" ] && [ ! -L "$LEGACY_MEMORY_DIR" ]; then
+    echo "  ERROR: the memory store default moved to $MEMORY_DIR, but this machine" >&2
+    echo "  still has a real directory at the retired path $LEGACY_MEMORY_DIR." >&2
+    echo "  Installing now would start from an empty store. Move it first:" >&2
+    echo "    mv \"$LEGACY_MEMORY_DIR\" \"$MEMORY_DIR\"" >&2
+    echo "  (or set LLM_MEMORY_HOME to keep the old location)." >&2
+    exit 1
+fi
 # Test and release-validation override.  It accepts either a URL or an
 # already-downloaded tarball path, but deliberately requires the source SHA:
 # VERSION is the assertion that an installation is complete, so it must never
@@ -549,7 +566,7 @@ fi
 "$VENV_DIR/bin/python3" "$LIB_DIR/migrate_item_ids.py" \
     || warn "item-ID migration failed (see error above); existing item IDs are unchanged."
 
-# Fan out items from each {project}.json to ~/.claude/memory/items/ so they
+# Fan out items from each {project}.json to ~/.llm-memory/items/ so they
 # can be synced and indexed, then rebuild the FTS5 index that memory_search
 # queries.
 if "$VENV_DIR/bin/python3" -c "

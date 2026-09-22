@@ -1,4 +1,4 @@
-"""Resolve Syncthing sync-conflict files under ~/.claude/memory/items/.
+"""Resolve Syncthing sync-conflict files under ~/.llm-memory/items/.
 
 Syncthing creates files like `{id}.sync-conflict-20260419-143000-XYZ.json`
 when two machines wrote the same per-item file before sync converged.

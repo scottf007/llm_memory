@@ -6,7 +6,7 @@ interface, and everything downstream of it is client-agnostic already.
 
     from adapters import get, extract_session
 
-    md = extract_session(Path("~/.claude/memory/transcripts/<sid>.jsonl"))
+    md = extract_session(Path("~/.llm-memory/transcripts/<sid>.jsonl"))
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 
 memory.db's job post-Phase-6/7 is a single FTS5 table over ledger items
 (decisions/learnings/done/goals/suggestions) rebuilt from
-~/.claude/memory/items/{project}/{kind}/{id}.json. `memory_search` queries
+~/.llm-memory/items/{project}/{kind}/{id}.json. `memory_search` queries
 this index for cross-project fuzzy search.
 
 Rebuild is cheap (a few thousand JSON reads) and fully recoverable from

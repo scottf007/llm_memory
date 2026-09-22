@@ -19,7 +19,7 @@ Before any step, resolve the store root with the same convention as the
 runtime code and hooks:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 printf '%s\n' "$MEMORY_ROOT"
 ```
 
@@ -52,7 +52,7 @@ Open the lock on an explicit descriptor, export it, and run the steps inline.
 Replace `PROJECT` with the resolved project name:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 PROJECT="PROJECT"
 LOCK="$MEMORY_ROOT/runtime/locks/narrative/$PROJECT.lock"
 mkdir -p "$(dirname "$LOCK")"
@@ -88,7 +88,7 @@ against `{project}.json.sessions[]` (i.e. sessions already merged).
 To enumerate all projects with session activity:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 -c "
 import sys; sys.path.insert(0, '$MEMORY_ROOT/lib')
 from conversations import iter_sessions
@@ -171,7 +171,7 @@ not been archived yet, and silently skipping it loses the work permanently:
 
 ```bash
 # Find the live transcript (it may not be in the archive yet) and strip it.
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 SRC=$(find "$HOME/.claude/projects" -maxdepth 2 -name 'SESSION_ID.jsonl' | head -1)
 cp -n "$SRC" "$MEMORY_ROOT/transcripts/SESSION_ID.jsonl"
 python3 "$MEMORY_ROOT/lib/extract_conversation.py" "$SRC" \
@@ -187,7 +187,7 @@ that had nothing to say.
 1. **Check the delta cache** before spawning an agent:
 
    ```bash
-   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
    python3 "$MEMORY_ROOT/lib/delta_cache.py" check SESSION_ID ISO8601_START
    ```
 
@@ -225,7 +225,7 @@ that had nothing to say.
    ```
 
    ```bash
-   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
    python3 "$MEMORY_ROOT/lib/delta_cache.py" stamp \
      "$MEMORY_ROOT/deltas/SESSION_ID.delta.json"
    ```
@@ -233,7 +233,7 @@ that had nothing to say.
 3. **Run the merger** on whichever delta is now on disk (cached or fresh):
 
    ```bash
-   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
    python3 "$MEMORY_ROOT/lib/merger.py" \
      "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
      "$MEMORY_ROOT/deltas/SESSION_ID.delta.json"
@@ -252,7 +252,7 @@ that had nothing to say.
 
 4. Before the first delta-extractor call for a run, ensure the deltas dir
    exists in that Bash call:
-   `MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"; mkdir -p "$MEMORY_ROOT/deltas"`.
+   `MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"; mkdir -p "$MEMORY_ROOT/deltas"`.
    The merger is idempotent
    per session_id; the cache is idempotent by `extractor_hash`. Leftover
    delta files are a feature, not debt — they act as the pre-processed
@@ -269,7 +269,7 @@ that had nothing to say.
 ### 2d. Render after every merge
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 "$MEMORY_ROOT/lib/renderer.py" \
   "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
   "$MEMORY_ROOT/projects/PROJECT_NAME.narrative.md"
@@ -298,7 +298,7 @@ written, integrity work remains", not a failed render, so treat it as continue,
 not abort:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 "$MEMORY_ROOT/lib/tools/resolve_cascade_reviews.py" \
   "$MEMORY_ROOT/projects/PROJECT_NAME.json"
 ```
@@ -338,7 +338,7 @@ whenever a pair looks contestable.
 To resolve a single review by hand:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 "$MEMORY_ROOT/lib/tools/cascade_review.py" list "$MEMORY_ROOT/projects/PROJECT_NAME.json"
 python3 "$MEMORY_ROOT/lib/tools/cascade_review.py" confirm "$MEMORY_ROOT/projects/PROJECT_NAME.json" \
   --child work-abcd1234 --parent dec-abcd1234 --reason "restates the same claim"

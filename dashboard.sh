@@ -2,7 +2,7 @@
 # Launch the LLM Memory web dashboard
 # Works from either the git clone or the installed lib/ directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"  # ~/.claude/memory is retired
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 LIB_DIR="$MEMORY_DIR/lib"
 PORT="${1:-8765}"

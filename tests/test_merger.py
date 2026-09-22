@@ -4,7 +4,7 @@ re-grades them; these entries apply that re-grade back into the ledger.
 
 Plus tests for path resolution: which items tree and which FTS index a merge
 writes to is derived from where the state JSON lives, so merging a scratch
-copy can never mutate the real ~/.claude/memory tree.
+copy can never mutate the real ~/.llm-memory tree.
 """
 
 import json
@@ -142,7 +142,7 @@ def test_session_paths_are_relative_to_relocatable_root():
 
 # --- Path resolution -------------------------------------------------------
 #
-# None of these tests may write under the real ~/.claude/memory. Behavioural
+# None of these tests may write under the real ~/.llm-memory. Behavioural
 # tests relocate HOME to a tmp dir; assertions about the canonical (real)
 # paths only ever call the pure resolver.
 
@@ -201,7 +201,7 @@ def test_state_file_outside_canonical_dir_resolves_to_a_sandbox():
 def test_merging_outside_the_canonical_dir_never_touches_the_real_tree(
         tmp_path, monkeypatch, capsys):
     """The footgun: a scratch copy kept under its real project name used to
-    fan out into ~/.claude/memory/items/{project} and rebuild the real index."""
+    fan out into ~/.llm-memory/items/{project} and rebuild the real index."""
     home = _fake_home(tmp_path, monkeypatch)
     scratch = tmp_path / "scratch"
     scratch.mkdir()

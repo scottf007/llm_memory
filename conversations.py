@@ -1,4 +1,4 @@
-"""Read session metadata from ~/.claude/memory/conversations/ frontmatter.
+"""Read session metadata from ~/.llm-memory/conversations/ frontmatter.
 
 Replaces the old session_log SQL table. Each conversation.md file carries a YAML
 frontmatter block with `session_id`, `project`, `started`, `ended`, etc. Those

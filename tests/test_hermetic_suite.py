@@ -26,7 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # HOME pointed at an empty temp dir and LLM_MEMORY_HOME="", read only through
 # pytest's own SKIPPED lines (never through a store file). That run produced
 # exactly 36 skips. 35 of them have a reason naming a live store or corpus
-# (~/.claude/memory ledger/snapshots, ~/.codex, ~/.grok, "local conversation
+# (~/.llm-memory ledger/snapshots, ~/.codex, ~/.grok, "local conversation
 # corpus", "live store"); the one exclusion is structural, not store-gated:
 # test_codex_adapter.py::test_fixture_envelope_survives_the_turn_counter[
 # 01-compacted-dialect_item_completed-u0], reason "subagent threads are

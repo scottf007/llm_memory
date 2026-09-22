@@ -1,7 +1,7 @@
 """Shared live-ledger loader for certification/cascade tests.
 
 Several §14 test rows in SPEC-rev2-certification-cascade.md assert facts
-measured directly against the live ~/.claude/memory/projects/llm_memory.json
+measured directly against the live ~/.llm-memory/projects/llm_memory.json
 (the 33/37/3 archive-class split, the U3/U4 fixture pairs, the U1/U2
 citation pairs) rather than a synthetic fixture — the spec pins this file's
 sha256 as of 2026-08-24 and every design/spec/judge round re-verified

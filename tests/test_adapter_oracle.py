@@ -67,7 +67,7 @@ def test_every_adapter_module_on_disk_is_registered():
 def test_installer_ships_the_adapters_package():
     """extract_conversation.py imports adapters/; the installer must copy it.
 
-    ~/.claude/memory/lib self-updates from GitHub on session start, replacing
+    ~/.llm-memory/lib self-updates from GitHub on session start, replacing
     flat *.py. If the copy block for adapters/ is ever dropped, that update
     lands a new extract_conversation.py next to no adapters package and every
     session stops producing a conversation .md — silently, from a hook.
@@ -268,7 +268,7 @@ def test_oracle_accepts_only_the_declared_client_line():
 def test_oracle_accepts_only_the_declared_archive_path_migration():
     stored = (
         "---\nsession_id: s\n"
-        "raw: ~/.claude/memory/transcripts/s.jsonl\nturns: 1\n---\n\nbody\n"
+        "raw: ~/.llm-memory/transcripts/s.jsonl\nturns: 1\n---\n\nbody\n"
     )
     produced = (
         "---\nsession_id: s\nclient: claude\n"
@@ -287,7 +287,7 @@ def test_oracle_accepts_only_the_declared_archive_path_migration():
 def test_archive_path_normalization_does_not_touch_conversation_body():
     text = (
         "---\nsession_id: s\nraw: transcripts/s.jsonl\n---\n\n"
-        "raw: ~/.claude/memory/transcripts/s.jsonl\n"
+        "raw: ~/.llm-memory/transcripts/s.jsonl\n"
     )
 
     normalized, legacy = adapter_oracle.normalize_archive_path(text)

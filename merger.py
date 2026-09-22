@@ -10,8 +10,8 @@ adjacent ``{project}.archived.json`` sidecar. Idempotent per delta file (won't
 re-append if the session_id is already present).
 
 The per-item files and the FTS index are derived from where the state JSON
-lives, not hardcoded: a state file inside ~/.claude/memory/projects/ uses the
-real ~/.claude/memory/items/ + memory.db; a state file anywhere else is
+lives, not hardcoded: a state file inside ~/.llm-memory/projects/ uses the
+real ~/.llm-memory/items/ + memory.db; a state file anywhere else is
 treated as a sandbox and fans out into a sibling items/ directory with its own
 memory.db, so dry-running a copy can never mutate the real memory tree.
 """
@@ -55,8 +55,8 @@ def resolve_paths(project_path: Path,
 
     Returns (items_root, db_path, sandboxed).
 
-    - State file inside ~/.claude/memory/projects/ → the real
-      ~/.claude/memory/items/ and ~/.claude/memory/memory.db. This is the
+    - State file inside ~/.llm-memory/projects/ → the real
+      ~/.llm-memory/items/ and ~/.llm-memory/memory.db. This is the
       production pipeline path and its behaviour is unchanged.
     - Anywhere else → a sibling `items/` directory next to the state file plus
       a `memory.db` alongside it, so merging a scratch copy of a project (even
@@ -178,7 +178,7 @@ def inbox_merge(state: dict, project: str,
                 items_root: Path | None = None) -> int:
     """Reconcile incoming per-item file changes into state.
 
-    Walks ~/.claude/memory/items/{project}/{kind}/*.json and for each file:
+    Walks ~/.llm-memory/items/{project}/{kind}/*.json and for each file:
       - If the item isn't in state[kind], append it.
       - If the item exists and the file's status is archived and state's
         isn't, prefer archived (archive supersedes regardless of timestamp).
@@ -611,7 +611,7 @@ def apply_delta(state: dict, delta: dict, rerun: bool = False) -> dict:
 
 def fan_out_items(state: dict, project: str,
                   items_root: Path | None = None) -> int:
-    """Write every ledger item to ~/.claude/memory/items/{project}/{kind}/{id}.json.
+    """Write every ledger item to ~/.llm-memory/items/{project}/{kind}/{id}.json.
 
     Idempotent — each write overwrites the file in place. Returns the count
     of files written. Archived items are fanned out too (their status field

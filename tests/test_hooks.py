@@ -172,7 +172,7 @@ def test_memory_index_drill_down_uses_configured_root(tmp_path):
         "memory" / "MEMORY.md"
     ).read_text()
     assert str(configured / "projects" / "testproj.json") in memory_index
-    assert "~/.claude/memory/projects/testproj.json" not in memory_index
+    assert "~/.llm-memory/projects/testproj.json" not in memory_index
 
 
 # ---- Post-compaction narrative staleness ----

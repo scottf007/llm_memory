@@ -14,11 +14,18 @@ import setup_syncthing
 from tools.memory_config import memory_root
 
 
-def test_memory_root_unset_preserves_legacy_location(tmp_path, monkeypatch):
+def test_memory_root_unset_uses_the_generic_location_not_the_retired_one(tmp_path, monkeypatch):
+    """~/.claude/memory is retired.
+
+    The store is not Claude-specific -- codex and grok sessions ingest into it
+    too -- and living under another tool's config directory made it look like
+    Claude Code state. Machines that moved kept a symlink at the old path; that
+    shim must not be what the default resolves to."""
     monkeypatch.delenv("LLM_MEMORY_HOME", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
 
-    assert memory_root() == tmp_path / ".claude" / "memory"
+    assert memory_root() == tmp_path / ".llm-memory"
+    assert memory_root() != tmp_path / ".claude" / "memory"
 
 
 def test_memory_root_set_uses_configured_location(tmp_path, monkeypatch):
@@ -95,7 +102,7 @@ def test_renderer_drill_down_uses_configured_memory_root(tmp_path, monkeypatch):
     rendered = renderer._render_source_transcripts(state)
 
     assert str(configured / "projects" / "demo.json") in rendered
-    assert "~/.claude/memory/projects/demo.json" not in rendered
+    assert "~/.llm-memory/projects/demo.json" not in rendered
 
 
 def test_syncthing_second_device_guidance_uses_configured_root(
@@ -120,7 +127,7 @@ def test_syncthing_second_device_guidance_uses_configured_root(
 
     output = capsys.readouterr().out
     assert f"point it to {configured}/" in output
-    assert "point it to ~/.claude/memory/" not in output
+    assert "point it to ~/.llm-memory/" not in output
 
 
 def test_permission_expansion_uses_configured_memory_root(tmp_path, monkeypatch):
@@ -128,7 +135,7 @@ def test_permission_expansion_uses_configured_memory_root(tmp_path, monkeypatch)
     monkeypatch.setenv("LLM_MEMORY_HOME", str(configured))
 
     assert apply_settings._expand_home(
-        "Write(~/.claude/memory/**)", str(tmp_path)
+        "Write(~/.llm-memory/**)", str(tmp_path)
     ) == f"Write({configured}/**)"
     assert apply_settings._expand_home(
         "Read(~/.codex/**)", str(tmp_path)
@@ -160,7 +167,12 @@ def test_subagent_hook_reads_relocated_store(tmp_path):
 def test_installer_exports_root_and_deploys_resolver():
     install = (Path(__file__).parent.parent / "install.sh").read_text()
 
-    assert 'MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"' in install
+    assert 'MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"' in install
+    # A machine that never moved must be refused, not silently started on an
+    # empty store: defaulting past a real directory at the retired path would
+    # lose every narrative it holds.
+    assert 'LEGACY_MEMORY_DIR="$HOME/.claude/memory"' in install
+    assert "still has a real directory at the retired path" in install
     assert 'export LLM_MEMORY_HOME="$MEMORY_DIR"' in install
     assert 'cp "$EXTRACTED/tools/"*.py "$LIB_DIR/tools/"' in install
     assert "fan_out_items(state, p.stem, memory_root() / 'items')" in install
@@ -171,8 +183,8 @@ def test_narrative_skill_threads_configured_root_into_extractor_prompt():
         Path(__file__).parent.parent / "skills" / "narrative" / "SKILL.md"
     ).read_text()
 
-    assert 'MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"' in skill
-    assert skill.count('MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"') >= 8
+    assert 'MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"' in skill
+    assert skill.count('MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"') >= 8
     assert "Bash tool calls do not share exported shell" in skill
     for relative_path in (
         "conversations/SESSION_ID.md",

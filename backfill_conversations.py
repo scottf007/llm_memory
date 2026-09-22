@@ -1,7 +1,7 @@
 """
 One-shot backfill: extract `conversation.md` for every MAIN-session archived
-JSONL in ~/.claude/memory/transcripts/ that doesn't already have a fresh .md
-in ~/.claude/memory/conversations/.
+JSONL in ~/.llm-memory/transcripts/ that doesn't already have a fresh .md
+in ~/.llm-memory/conversations/.
 
 - Skips subagent transcripts (stems starting with 'agent-').
 - Skips sessions whose .md already exists and is newer than the source JSONL.

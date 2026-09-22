@@ -1,8 +1,8 @@
 """Batch processor for session transcripts, across every registered client.
 
 Ensures each main session has an archived .jsonl in
-~/.claude/memory/transcripts/ and a matching conversation.md in
-~/.claude/memory/conversations/. Agent and audit transcripts are skipped.
+~/.llm-memory/transcripts/ and a matching conversation.md in
+~/.llm-memory/conversations/. Agent and audit transcripts are skipped.
 
 Claude sessions are archived by copying the transcript. Foreign clients keep
 their own format, so their archive entry is a canonical Claude-shaped

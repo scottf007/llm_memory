@@ -18,13 +18,13 @@ permissions:
   - "Bash(python -m pytest:*)"
   - "WebSearch"
   # File ops on the memory dir — needed by /narrative so the delta-extractor
-  # subagent can write deltas to ~/.claude/memory/deltas/ without prompting.
+  # subagent can write deltas to ~/.llm-memory/deltas/ without prompting.
   # Without these, every /narrative run prompts ~4× and parent-Claude tends
   # to invent a /tmp workaround that triggers more prompts.
   # "~" is expanded to the installing user's home directory by
   # apply_settings.py — do not hardcode an absolute path here.
-  - "Write(~/.claude/memory/**)"
-  - "Edit(~/.claude/memory/**)"
+  - "Write(~/.llm-memory/**)"
+  - "Edit(~/.llm-memory/**)"
   # MCP memory server tools (the 4 tools server.py actually exposes)
   - "mcp__llm_memory__memory_search"
   - "mcp__llm_memory__narrative_coverage"

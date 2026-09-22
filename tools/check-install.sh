@@ -2,13 +2,13 @@
 # Read-only health check for an llm_memory installation on THIS machine.
 #
 # Written 22 Sep 2026 after the memory root moved to a generic location
-# (~/.llm-memory, with ~/.claude/memory kept as a compatibility symlink) and
+# (~/.llm-memory, with ~/.llm-memory kept as a compatibility symlink) and
 # it became unclear whether the other syncing machines had followed.
 #
 # This script CHANGES NOTHING. It prints findings and the commands to fix
 # them. Run it on each machine:  bash ~/projects/llm_memory/tools/check-install.sh
 #
-# The dangerous case it exists to catch: a machine where ~/.claude/memory is a
+# The dangerous case it exists to catch: a machine where ~/.llm-memory is a
 # REAL DIRECTORY rather than a symlink. That machine has a second, unsynced
 # memory root, and its narratives silently diverge from everyone else's.
 

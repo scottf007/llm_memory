@@ -1,5 +1,5 @@
 """
-Set up Syncthing to share the ~/.claude/memory/ directory.
+Set up Syncthing to share the ~/.llm-memory/ directory.
 
 Finds the local Syncthing instance, adds the memory folder, and applies
 the .stignore. Works on Linux, macOS, and WSL (where Syncthing runs on Windows).

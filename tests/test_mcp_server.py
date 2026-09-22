@@ -78,7 +78,7 @@ def test_resume_with_empty_conversation_path_reports_no_transcript(tmp_path, mon
 @pytest.mark.parametrize(
     "recorded_path",
     [
-        "~/.claude/memory/conversations/session-1.md",
+        "~/.llm-memory/conversations/session-1.md",
         "conversations/session-1.md",
     ],
 )

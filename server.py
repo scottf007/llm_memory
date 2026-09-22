@@ -4,9 +4,9 @@ MCP server for persistent Claude Code memory.
 Live DB surface is a single FTS5-indexed `items` table (managed by
 indexer.py) that projects per-project ledger items for cross-project
 search. The canonical state for each project is split between the active JSON
-ledger at ~/.claude/memory/projects/{project}.json and archived ledger items at
+ledger at ~/.llm-memory/projects/{project}.json and archived ledger items at
 {project}.archived.json; per-item files under
-~/.claude/memory/items/{project}/{kind}/{id}.json are the indexer's input.
+~/.llm-memory/items/{project}/{kind}/{id}.json are the indexer's input.
 memory.db is derived; delete it and re-run indexer.py to rebuild.
 
 Usage:
@@ -54,7 +54,7 @@ async def list_tools() -> list[types.Tool]:
             name="memory_search",
             description="Cross-project fuzzy search over per-project ledger items "
             "(decisions/learnings/done/goals/suggestions). Queries the FTS5 index "
-            "built from ~/.claude/memory/items/. Use project_lookup for single-project "
+            "built from ~/.llm-memory/items/. Use project_lookup for single-project "
             "drill-down; use memory_search when you don't know which project a fact is in.",
             inputSchema={
                 "type": "object",
@@ -536,7 +536,7 @@ def _find_project_transcripts(project: str) -> set[str]:
     """Return all .jsonl transcript files on disk for a project.
 
     Live sessions live under ~/.claude/projects/<dir>/ where <dir> encodes
-    the project. Archived sessions live under ~/.claude/memory/transcripts/
+    the project. Archived sessions live under ~/.llm-memory/transcripts/
     and are attributed to a project via their conversation.md frontmatter.
     """
     def normalize(name: str) -> str:
@@ -935,7 +935,7 @@ def _handle_resume(args: dict[str, Any]) -> list[types.TextContent]:
     conv_rel = last.get("conversation_md") or ""
     excerpt = "(no conversation transcript recorded)"
     if conv_rel:
-        # conversation_md used to contain ~/.claude/memory/... and is now
+        # conversation_md used to contain ~/.llm-memory/... and is now
         # stored relative to the configured root.  Derive from session_id so
         # both forms survive a store relocation after the merge was recorded.
         conv_path = memory_root() / "conversations" / f"{sid}.md"

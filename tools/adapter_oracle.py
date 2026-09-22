@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The adapter oracle: regenerating a stored conversation must reproduce it.
 
-5,500+ files in ~/.claude/memory/conversations/ are the asset this project
+5,500+ files in ~/.llm-memory/conversations/ are the asset this project
 exists to protect. They were produced by the pre-adapter extractor. If the
 adapter refactor changed the output by so much as a byte, every downstream
 narrative silently drifts — so this is the guard, and it is meant to keep
@@ -51,7 +51,7 @@ SETTLED_AFTER_HOURS = 24
 
 _CLIENT_LINE = re.compile(r"^client: [A-Za-z0-9_.-]+\n", re.MULTILINE)
 _LEGACY_RAW_LINE = re.compile(
-    r"^raw: ~/.claude/memory/transcripts/([^/\r\n]+\.jsonl)\n", re.MULTILINE
+    r"^raw: ~/.llm-memory/transcripts/([^/\r\n]+\.jsonl)\n", re.MULTILINE
 )
 
 
@@ -136,7 +136,7 @@ def compare(
     Equality is byte equality after excusing the `client:` frontmatter line
     and normalizing one exact legacy archive prefix. Both excuses are narrow:
     exactly one `client:` line carrying the expected name, and at most one
-    `raw: ~/.claude/memory/transcripts/<filename>.jsonl` line rewritten to
+    `raw: ~/.llm-memory/transcripts/<filename>.jsonl` line rewritten to
     `raw: transcripts/<filename>.jsonl` without changing the filename.
 
     A stored file that already carries `client:` needs no client-line excuse;

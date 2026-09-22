@@ -4,7 +4,7 @@ Consumes docs/design/codex-client-memory-2026-09-03.md (D1-D6). Written by the
 test-author seat; a codex seat implements against this file unmodified; an
 opus seat judges by execution. Every test is hermetic: fake $HOME, a fake
 `codex` executable on PATH (never the real one), no reads/writes under the
-real ~/.codex or ~/.claude/memory, sandboxed LLM_MEMORY_HOME.
+real ~/.codex or ~/.llm-memory, sandboxed LLM_MEMORY_HOME.
 
 This file IS the contract for six new surfaces the implementer must add.
 Where the design note names an entry point, that name is used; where it
