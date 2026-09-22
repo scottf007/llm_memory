@@ -34,24 +34,49 @@ This is the filesystem form of `narrative_lock.project_lock`: the lock file is
 the shared contract, including for a manual run that cannot import Python.
 Keep every read/extract/merge/render command for one project inside one
 `flock` invocation; running separate shell snippets releases the gate between
-steps and can race a SessionEnd request.  Replace `PROJECT` below with the
-resolved project name and put the manual commands in `manual_drain.sh`:
+steps and can race a SessionEnd request.
+
+**You MUST pass the held descriptor down, or the drain deadlocks against
+itself.** `merger.py` and `renderer.py` each take this same lock internally via
+`narrative_lock.active_project_lock`. If you hold an outer `flock` and do not
+tell them, they block on the lock you are holding and exit **3** with
+`LLM_MEMORY_WARN: narrative update already running`. That failure is
+indistinguishable from a real concurrent run, so the drain looks gated when it
+actually did nothing. `active_project_lock` reads `LLM_MEMORY_NARRATIVE_LOCK`
+(format `<project>:<fd>`) and `inherited_lock` verifies the descriptor really
+is the same inode as the project lock file -- the variable alone is never
+sufficient authority, so a wrong value fails closed rather than skipping the
+gate.
+
+Open the lock on an explicit descriptor, export it, and run the steps inline.
+Replace `PROJECT` with the resolved project name:
 
 ```bash
 MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
 PROJECT="PROJECT"
 LOCK="$MEMORY_ROOT/runtime/locks/narrative/$PROJECT.lock"
 mkdir -p "$(dirname "$LOCK")"
-if ! flock -n "$LOCK" bash ./manual_drain.sh "$MEMORY_ROOT" "$PROJECT"; then
+exec 9>"$LOCK"
+if ! flock -n 9; then
   echo "LLM_MEMORY_WARN: narrative update already running for $PROJECT; retry after it finishes"
   exit 1
 fi
+export LLM_MEMORY_NARRATIVE_LOCK="$PROJECT:9"
+# ... every merger.py / renderer.py / resolver call for this project goes here,
+# in this same shell, while fd 9 is held.
 ```
 
-`merger.py` and `renderer.py` also take this lock when invoked directly.  The
-single outer `flock` is nevertheless required for a manual multi-step drain:
-it makes the whole read/extract/merge/render sequence indivisible rather than
-locking only each individual write.
+`exec 9>` leaves the descriptor without close-on-exec, so child processes
+inherit it and `inherited_lock` can fstat it. Do not wrap the steps in a
+separate `bash script.sh` invocation unless that script also inherits fd 9 --
+the descriptor, not the variable, is what grants the right to proceed.
+
+The single outer lock is what makes the whole read/extract/merge/render
+sequence indivisible rather than locking only each individual write.
+
+A `delta-extractor` Agent call cannot run inside that shell. Extraction does
+not mutate project state, so run the agent first, then take the lock for the
+merge/render/resolve steps.
 
 ## Step 1: Discover work
 
