@@ -41,7 +41,17 @@ def _no_systemctl_path(tmp_path) -> str:
     return str(bindir)
 
 
-def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path):
+def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path,
+                   enable_extraction: bool = True):
+    """Run the unit installer.
+
+    enable_extraction defaults True here because most of these tests are about
+    the CONTENT of the extraction units. Installing them is opt-in in
+    production (LLM_MEMORY_ENABLE_EXTRACTION), because the SessionEnd hook
+    starts llm-memory-extract.service directly -- the unit merely existing is
+    what enables extraction, and its spend is not recorded on the failure
+    path. See test_extraction_units_are_opt_in_by_default.
+    """
     xdg = tmp_path / "xdg-config"
     xdg.mkdir(exist_ok=True)
     home = tmp_path / "home"
@@ -49,6 +59,7 @@ def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path):
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["XDG_CONFIG_HOME"] = str(xdg)
+    env["LLM_MEMORY_ENABLE_EXTRACTION"] = "1" if enable_extraction else "0"
     if with_systemctl:
         env["PATH"] = str(H.FIXTURES_DIR) + os.pathsep + env.get("PATH", "/usr/bin:/bin")
         env["FAKE_SYSTEMCTL_LOG"] = str(systemctl_log)
@@ -128,3 +139,48 @@ def test_control_no_systemctl_on_path_prints_manual_instructions_and_installs_no
     unit_dir = xdg / "systemd" / "user"
     assert not (unit_dir / "llm-memory-extract.service").exists()
     assert not (unit_dir / "llm-memory-extract.timer").exists()
+
+
+def test_extraction_units_are_opt_in_by_default(tmp_path):
+    """Installing must not arm extraction.
+
+    hooks/session_end.sh ends with
+        systemctl --user start --no-block llm-memory-extract.service
+    so the SERVICE EXISTING is sufficient: every session end starts it. The
+    timer is a recovery sweep, not the driver, which is why "the extraction
+    timer is disabled" was never protection -- it cost USD 358 on 2026-09-13
+    and a further USD 19.91 on 2026-09-22, none of it recorded.
+
+    Regenerating these on every --update also silently undid an operator's
+    deliberate removal of them, nightly, with no output saying so.
+    """
+    systemctl_log = tmp_path / "systemctl.log"
+    result, xdg = _run_installer(tmp_path, with_systemctl=True,
+                                 systemctl_log=systemctl_log,
+                                 enable_extraction=False)
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    unit_dir = xdg / "systemd" / "user"
+    assert not (unit_dir / "llm-memory-extract.service").exists(), \
+        "extraction service must not be created without an explicit opt-in"
+    assert not (unit_dir / "llm-memory-extract.timer").exists(), \
+        "extraction timer must not be created without an explicit opt-in"
+
+    log_text = systemctl_log.read_text() if systemctl_log.exists() else ""
+    assert "llm-memory-extract.timer" not in log_text, \
+        "nothing may enable the extraction timer without the opt-in"
+
+    # The operator must be told, not left guessing why extraction is absent.
+    assert "opt-in" in result.stdout.lower() or "opt-in" in result.stderr.lower()
+
+
+def test_update_timer_is_installed_regardless_of_the_extraction_opt_in(tmp_path):
+    """The update path must never be gated: it is the only route a fix reaches
+    a machine, and gating it would strand a machine on a broken version."""
+    systemctl_log = tmp_path / "systemctl.log"
+    _, xdg = _run_installer(tmp_path, with_systemctl=True,
+                            systemctl_log=systemctl_log,
+                            enable_extraction=False)
+    unit_dir = xdg / "systemd" / "user"
+    assert (unit_dir / "llm-memory-update.service").is_file()
+    assert (unit_dir / "llm-memory-update.timer").is_file()
