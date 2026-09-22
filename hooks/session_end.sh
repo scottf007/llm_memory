@@ -73,7 +73,22 @@ if [ -f "$OUT_PATH" ] && [ -n "$CWD" ]; then
     # would route sessions ended from subdirectories into phantom projects.
     source "$SCRIPT_DIR/hooks/lib_session_common.sh"
     PROJECT=$(resolve_project_from_cwd "$CWD")
-    "$PYTHON3" "$SCRIPT_DIR/extraction_worker.py" enqueue --project "$PROJECT" --session-id "$SESSION_ID" --transcript "$ARCHIVE_PATH" --source session_end >>"$LOG" 2>&1 || log "enqueue failed for $SESSION_ID"
+    # Do not enqueue what coverage will only filter.  compute_narrative_coverage
+    # skips sessions below a per-client substantive-turn floor (claude 5), so a
+    # request for one can never merge -- but the worker still pays for a model
+    # call before finding that out.  Enqueueing unconditionally is how the queue
+    # reached 10,720 requests on 2026-09-22, 96.4% of them low-turn noise, and
+    # it kept growing by ~300 in the nine days the worker was switched off.
+    #
+    # extract_conversation already wrote the count into the frontmatter, so this
+    # costs one grep and keeps the hook model-free and bounded as intended.
+    MIN_TURNS="${LLM_MEMORY_MIN_USER_TURNS_CLAUDE:-5}"
+    SESSION_TURNS=$(sed -n 's/^turns: *\([0-9][0-9]*\).*/\1/p' "$OUT_PATH" 2>/dev/null | head -1)
+    if [ -n "$SESSION_TURNS" ] && [ "$SESSION_TURNS" -lt "$MIN_TURNS" ] 2>/dev/null; then
+        log "not enqueued: $SESSION_ID has $SESSION_TURNS substantive turn(s), below the $MIN_TURNS floor coverage applies"
+    else
+        "$PYTHON3" "$SCRIPT_DIR/extraction_worker.py" enqueue --project "$PROJECT" --session-id "$SESSION_ID" --transcript "$ARCHIVE_PATH" --source session_end >>"$LOG" 2>&1 || log "enqueue failed for $SESSION_ID"
+    fi
     if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ]; then
         if [ -f "$LLM_MEMORY_SYSTEMCTL" ] && [ ! -x "$LLM_MEMORY_SYSTEMCTL" ]; then
             bash "$LLM_MEMORY_SYSTEMCTL" --user start --no-block llm-memory-extract.service >>"$LOG" 2>&1 || log "service dispatch failed"

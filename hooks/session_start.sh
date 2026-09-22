@@ -22,14 +22,41 @@ EXTRACTION_DEGRADED=false
 if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
     # A single jq process keeps this status-only path inside the 100 ms hook
     # budget.  Do not call coverage or a model here: the worker owns both.
-    IFS=$'\t' read -r FAST_STATE FAST_UNPROCESSED FAST_STALE FAST_SINCE < <(
+    IFS=$'\t' read -r FAST_STATE FAST_UNPROCESSED FAST_STALE FAST_SINCE FAST_LAST_OK < <(
         jq -r '[(.state // "idle"), (.unprocessed // 0), (.stale // 0),
-                (.oldest_waiting // .last_attempt // "")] | @tsv' "$FAST_STATUS" 2>/dev/null
+                (.oldest_waiting // .last_attempt // ""),
+                (.last_success // "never")] | @tsv' "$FAST_STATUS" 2>/dev/null
     )
     FAST_WAITING=$(( ${FAST_UNPROCESSED:-0} + ${FAST_STALE:-0} ))
     if { [ "$FAST_STATE" = "waiting" ] || [ "$FAST_STATE" = "failed" ]; } && [ "$FAST_WAITING" -gt 0 ] 2>/dev/null; then
         echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
         EXTRACTION_DEGRADED=true
+    fi
+
+    # Queue depth and last success are NOT derivable from the coverage counters
+    # above.  A request whose session coverage has settled leaves unprocessed=0
+    # and stale=0 while the queue grows without bound, so the warning above stays
+    # silent.  On 2026-09-22 this banner reported "1 session waiting" while
+    # 10,720 requests were pending and last_success had been null since setup --
+    # the pipeline had been dead for nine days behind a near-clean banner.
+    #
+    # Count the directory rather than trusting .request_ids: that field is
+    # written BY the worker, so a worker that never runs reports a stale and
+    # flattering number.  Globbing is pure bash and adds no subprocess.
+    FAST_QUEUE_DIR="$MEMORY_DIR/runtime/extraction-requests"
+    FAST_QUEUED=0
+    if [ -d "$FAST_QUEUE_DIR" ]; then
+        FAST_QUEUE_FILES=("$FAST_QUEUE_DIR"/*.json)
+        [ -e "${FAST_QUEUE_FILES[0]}" ] && FAST_QUEUED=${#FAST_QUEUE_FILES[@]}
+    fi
+    # Reported, but deliberately NOT setting EXTRACTION_DEGRADED: a deep queue is
+    # a backlog, not a reason to drop the caller into the reduced startup path.
+    if [ "${FAST_QUEUED:-0}" -ge 100 ] 2>/dev/null; then
+        echo "LLM_MEMORY_WARN: extraction queue holds $FAST_QUEUED request(s) across all projects and nothing is draining it (last success for $FAST_PROJECT: $FAST_LAST_OK)"
+    fi
+    if { [ -z "$FAST_LAST_OK" ] || [ "$FAST_LAST_OK" = "never" ] || [ "$FAST_LAST_OK" = "null" ]; } \
+       && [ "$FAST_STATE" != "idle" ]; then
+        echo "LLM_MEMORY_WARN: extraction for $FAST_PROJECT has NEVER succeeded (state=$FAST_STATE, $FAST_QUEUED queued)"
     fi
 fi
 
@@ -49,7 +76,7 @@ if [ "$EXTRACTION_DEGRADED" = true ]; then
         echo "$FAST_NARRATIVE"
     fi
     echo ""
-    echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting. Do not ask the user for permission."
+    echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting (queue: ${FAST_QUEUED:-0} request(s); last success: ${FAST_LAST_OK:-never}). Do not ask the user for permission."
     echo "Use project_lookup for drill-down into the project JSON. Use resume(project) to pick up prior work."
     echo "=== END LOADED MEMORIES ==="
     exit 0

@@ -117,6 +117,82 @@ def enqueue(home: Path, project: str, session_id: str, transcript: str, source: 
     atomic_json(request_dir(home) / f"{iso().replace(':', '')}-{session_id}-{request_id}.json", record)
 
 
+_REQUEST_MAX_AGE_DAYS = float(os.environ.get("LLM_MEMORY_REQUEST_MAX_AGE_DAYS", "30"))
+
+
+def _retire_request(path: Path, session_id: str, reason: str) -> None:
+    """Delete a request that can never succeed.
+
+    Retirement used to happen ONLY after a successful merge.  A request whose
+    session is already merged can never merge again -- the merger refuses it --
+    so it was marked deferred, KEPT, and retried on every pass forever.  On
+    2026-09-22 the queue held 10,720 requests, one with 141 attempts.
+
+    Note what is deliberately NOT retired here: a session coverage does not
+    list.  compute_narrative_coverage cannot attribute a session to a project
+    until its conversation.md exists, so "coverage does not list it" means
+    "not yet visible", not "settled".  The request-only branch of
+    _work_snapshot exists to carry exactly those, and retiring them drops real
+    work on the floor.
+    """
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+    print(f"llm_memory: retired extraction request for {session_id} ({reason})")
+
+
+def _request_expired(req: dict, max_age_days: float = _REQUEST_MAX_AGE_DAYS) -> bool:
+    """Backstop for a request nothing else can classify.
+
+    Age alone never drops live work: a genuinely unprocessed session is still
+    reported by coverage and re-enqueued.  This only clears requests that
+    outlived their transcript or their project.
+    """
+    stamp = req.get("enqueued_at")
+    if not stamp:
+        return False
+    try:
+        when = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return False
+    return (now() - when).total_seconds() > max_age_days * 86400
+
+
+def _merged_session_ids(home: Path, project: str) -> set[str]:
+    """Merged sessions whose pending request is safe to retire.
+
+    A merged session is normally unreachable work: the merger refuses it, so
+    its request can never succeed.  One merged session is deliberately
+    excluded -- one whose extraction reserved the per-session spend cap
+    (cost_source unknown, or a recorded cost at or above the cap).  _merge
+    blocks a retry for those, and the request left pending IS the record that
+    a retry was blocked.  Retiring it would erase that evidence and flip the
+    worker's reported state from waiting to idle.  The condition below mirrors
+    _merge's own check deliberately; the two must not drift.
+    """
+    state_path = home / "projects" / f"{project}.json"
+    if not state_path.exists():
+        return set()
+    try:
+        state = load_full(project, state_path.parent)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return set()
+    session_cap = float(os.environ.get("LLM_MEMORY_EXTRACT_SESSION_CAP_USD", "0.50"))
+    retirable: set[str] = set()
+    for session in state.get("sessions", []):
+        sid = session.get("session_id")
+        if not sid:
+            continue
+        prior = session.get("extraction") or {}
+        if isinstance(prior, dict):
+            cost = _nonnegative_number(prior.get("cost_usd"))
+            if prior.get("cost_source") == "unknown" or (cost is not None and cost >= session_cap):
+                continue
+        retirable.add(sid)
+    return retirable
+
+
 def _coverage(project: str) -> dict:
     # Import only after environment has selected the memory root.
     import server
@@ -443,6 +519,7 @@ def _process_project(home: Path, project: str) -> bool:
                 last_attempt: str | None = None
                 for _pass in range(10):
                     coverage, request_by_sid, work = _work_snapshot(home, project)
+                    merged_sids = _merged_session_ids(home, project)
                     deferred = [entry for entry in work if entry[0] in handled and entry[0] in request_by_sid]
                     work = [entry for entry in work if entry[0] not in handled]
                     if not work:
@@ -474,6 +551,24 @@ def _process_project(home: Path, project: str) -> bool:
                         if pair is None:
                             continue
                         path, req = pair
+                        # These must stay BEFORE _merge(): _merge calls the model
+                        # before it can discover the work is impossible, so a
+                        # later check still pays for the extraction.
+                        #
+                        # rerun is excluded: a stale session IS in sessions[] and
+                        # is exactly the case that must be re-merged.
+                        if not rerun and sid in merged_sids:
+                            _retire_request(path, sid, "already merged into project state")
+                            handled.add(sid)
+                            continue
+                        if not Path(req.get("transcript_path", "")).exists():
+                            _retire_request(path, sid, "transcript no longer on disk")
+                            handled.add(sid)
+                            continue
+                        if _request_expired(req):
+                            _retire_request(path, sid, f"expired: enqueued {req.get('enqueued_at')}")
+                            handled.add(sid)
+                            continue
                         last_attempt = iso()
                         ok, error, quarantine = _merge(home, project, req, rerun)
                         if not ok:

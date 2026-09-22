@@ -15,6 +15,12 @@ Usage:
     python extract_conversation.py <jsonl_path> --output PATH    # to file
     python extract_conversation.py <jsonl_path> --output PATH --force
     python extract_conversation.py <path> --client claude        # explicit
+
+--client selects the parsing adapter AND the frontmatter label. Archived
+transcripts under transcripts/ are normalised flat JSONL whatever produced
+them, so the default (claude) is the correct reader for an archive even when
+the session came from grok or codex. Passing a --client whose adapter expects a
+different on-disk shape now FAILS rather than writing an empty conversation.
 """
 
 import argparse
@@ -27,6 +33,17 @@ import adapters
 def extract(jsonl_path: Path, client: str = adapters.DEFAULT) -> str:
     """Render one transcript to the conversations/<sid>.md contract."""
     return adapters.extract_session(Path(jsonl_path), client)
+
+
+def _rendered_turns(rendered: str) -> int | None:
+    """Turn count from the rendered frontmatter, or None when absent."""
+    for line in rendered.splitlines()[:20]:
+        if line.startswith("turns:"):
+            try:
+                return int(line.split(":", 1)[1].strip())
+            except ValueError:
+                return None
+    return None
 
 
 def main() -> None:
@@ -48,6 +65,33 @@ def main() -> None:
             return
 
     result = extract(args.jsonl_path, args.client)
+
+    # A wrong --client renders an empty conversation instead of failing.
+    # adapters.grok expects a session DIRECTORY and looks for
+    # <path>/chat_history.jsonl; handed the flat archived .jsonl it finds
+    # nothing, returns `turns: 0`, and the stub is written over a good
+    # conversation.  That destroyed 131 KB on 2026-09-22 and exited 0.
+    #
+    # Re-extraction is exactly where this bites: narrative_coverage reports
+    # sessions that grew after being merged, and draining one REQUIRES
+    # regenerating its conversation.
+    #
+    # Note the underlying conflation, not fixed here: --client selects both the
+    # parsing adapter AND the frontmatter label.  Archived transcripts are
+    # normalised flat JSONL and every record carries its origin in a "client"
+    # field, so the adapter should follow the file's shape while the label is
+    # read from the record.  Splitting that touches hooks, process_transcripts
+    # and backfill_conversations, so this guard only stops the data loss.
+    turns = _rendered_turns(result)
+    if turns == 0 and args.jsonl_path.stat().st_size > 0:
+        print(
+            f"Error: extraction produced 0 turns from a non-empty transcript "
+            f"({args.jsonl_path}) using --client {args.client}. Refusing to write.\n"
+            f"Archived transcripts are flat JSONL regardless of origin client; "
+            f"'--client {adapters.DEFAULT}' reads them.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
