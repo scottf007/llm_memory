@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import stat
 import subprocess
 import sys
@@ -282,13 +283,59 @@ def _observed_transcript_bounds(transcript: str) -> tuple[str, str]:
     return (first.strftime("%Y-%m-%dT%H:%M:%SZ"), last.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
+# Where a user-scoped install puts the CLI.  systemd --user hands a oneshot a
+# minimal PATH (/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# and little else) that deliberately excludes $HOME, so the bare name below
+# resolves in an interactive shell and fails under the unit that actually runs
+# this worker.  On 2026-09-22 that gap meant last_success had been null since
+# setup: every run died on FileNotFoundError('claude') before any request was
+# touched.  Searching these explicitly makes the worker independent of who
+# exported what.
+_CLAUDE_FALLBACK_DIRS = (
+    "~/.local/bin",
+    "/usr/local/bin",
+    "~/.npm-global/bin",
+    "~/node_modules/.bin",
+)
+
+
+def _resolve_claude_cmd() -> list[str]:
+    """argv prefix for the extraction backend, or RuntimeError naming the search.
+
+    An explicit LLM_MEMORY_CLAUDE_CMD is honoured verbatim -- an operator who
+    pins a path (or a test fixture that pins a script) has already answered the
+    question and must not be second-guessed by a PATH lookup.
+    """
+    pinned = os.environ.get("LLM_MEMORY_CLAUDE_CMD")
+    command = pinned or "claude"
+    if command.endswith(".sh"):
+        return ["bash", command]
+    if pinned:
+        return [pinned]
+    found = shutil.which(command)
+    if found:
+        return [found]
+    for raw in _CLAUDE_FALLBACK_DIRS:
+        candidate = Path(raw).expanduser() / command
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return [str(candidate)]
+    # Name the search, not just the miss.  A bare FileNotFoundError here reads
+    # as a missing install; the actual fault is almost always an environment
+    # that cannot see an install which is present.
+    raise RuntimeError(
+        f"extraction backend {command!r} not found on PATH "
+        f"({os.environ.get('PATH', '')!r}) or in {list(_CLAUDE_FALLBACK_DIRS)}; "
+        "set LLM_MEMORY_CLAUDE_CMD to an absolute path, or add its directory to "
+        "the unit's Environment=PATH"
+    )
+
+
 def _call_claude(state: dict, transcript: str, observed_bounds: tuple[str, str]) -> tuple[str, str]:
-    command = os.environ.get("LLM_MEMORY_CLAUDE_CMD", "claude")
     prompt = ("Return one JSON delta only.\nProject active state:\n" +
               json.dumps(state, sort_keys=True) + "\nTranscript: " + transcript +
               "\nsession_started_at: " + observed_bounds[0] +
               "\nsession_ended_at: " + observed_bounds[1])
-    command_argv = ["bash", command] if command.endswith(".sh") else [command]
+    command_argv = _resolve_claude_cmd()
     result = subprocess.run(command_argv + ["-p", "--model", "sonnet", "--output-format", "json"], input=prompt,
                             text=True, capture_output=True)
     if result.returncode:
@@ -450,7 +497,10 @@ def _provenance(backend: str, prompt_hash: str, request_id: str, raw: str,
 
 
 def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str | None, dict | None]:
-    cap = float(os.environ.get("LLM_MEMORY_EXTRACT_DAY_CAP_USD", "3"))
+    # 3 was below the cost of a single observed extraction (USD 3.29 on
+    # 2026-09-21), so the cap could not bind before the first call of the day
+    # had already exceeded it.  5 is the owner's figure.
+    cap = float(os.environ.get("LLM_MEMORY_EXTRACT_DAY_CAP_USD", "5"))
     spend_path = home / "runtime" / "extraction-spend.json"
     if spend_path.exists():
         try:
@@ -458,7 +508,10 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
             if spend.get("day") == iso()[:10] and float(spend.get("total_usd", 0)) >= cap:
                 return False, "day extraction spend cap reached", None
         except (OSError, ValueError, json.JSONDecodeError):
-            pass
+            # A ledger that cannot be read is not evidence of zero spend.
+            # Falling through here spends real money against an unknown running
+            # total, which is the one direction this check must never fail in.
+            return False, "extraction spend ledger unreadable; refusing to spend", None
     state_path = home / "projects" / f"{project}.json"
     if not state_path.exists():
         return False, "project state missing", None
@@ -473,9 +526,60 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
                 _nonnegative_number(prior.get("cost_usd")) >= session_cap
             ):
                 return False, "session extraction spend cap reached", None
-    observed_bounds = _observed_transcript_bounds(req["transcript_path"])
-    raw, prompt_hash = _call_claude(state, req["transcript_path"], observed_bounds)
+    # Both of these were outside the guard below until 2026-09-22, so a
+    # backend that could not start (or a transcript with no parseable
+    # timestamps) raised straight out of _merge, past _process_project's
+    # per-request error handling, and aborted the whole multi-project drain.
+    # One unreachable CLI therefore starved every other project's queue
+    # instead of recording one project's failure and moving on.
+    try:
+        observed_bounds = _observed_transcript_bounds(req["transcript_path"])
+        raw, prompt_hash = _call_claude(state, req["transcript_path"], observed_bounds)
+    except Exception as exc:
+        return False, str(exc), None
     raw_path = _result_path(home, project, req["session_id"], req["request_id"])
+
+    # Everything below this line is post-payment: _call_claude has already been
+    # billed and no later failure refunds it.  _record_spend used to sit at the
+    # very end, reachable only when the delta parsed and applied, so a response
+    # that could not be read cost real money and left no ledger entry at all.
+    # On SCOTT-PC that gap ran to USD 19.91 across 7 calls against a ledger
+    # still reading zero.  The finally below is the guarantee: every exit from
+    # here banks the call exactly once.
+    banked = False
+
+    def _bank(response: dict, delta: dict) -> None:
+        nonlocal banked
+        if banked:
+            return
+        cost_usd, tokens_in, tokens_out, cost_source = _cost_details(response, delta)
+        _record_spend(home, req["request_id"], req["session_id"], "claude",
+                      cost_usd, tokens_in, tokens_out, cost_source)
+        banked = True
+
+    try:
+        return _merge_banked(home, project, req, rerun, state, state_path,
+                             raw, raw_path, prompt_hash, observed_bounds, _bank)
+    finally:
+        if not banked:
+            # The response was never parsed, so its cost is unknown.
+            # _record_spend charges the full session cap for an unknown call,
+            # which is the safe direction for one we could not read.
+            try:
+                _bank({}, {})
+            except Exception:
+                pass
+
+
+def _merge_banked(home: Path, project: str, req: dict, rerun: bool, state: dict,
+                  state_path: Path, raw: str, raw_path: Path, prompt_hash: str,
+                  observed_bounds: tuple[str, str], bank) -> tuple[bool, str | None, dict | None]:
+    """The post-payment half of `_merge`, with spend banking made mandatory.
+
+    Split out purely so `_merge`'s `finally` cannot be bypassed by an early
+    `return` added here later.  `bank` must be called with the parsed response
+    and delta as soon as both are known.
+    """
     _preserve_raw(raw_path, raw)
     try:
         delta_text, response = _backend_response(raw)
@@ -498,6 +602,8 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
         return False, str(exc), None
     quarantine = {"count": len(revals), "paths": [str(raw_path)] if revals else []}
     cost_usd, tokens_in, tokens_out, cost_source = _cost_details(response, delta)
+    # Bank here, with the real figures, before anything else can fail.
+    bank(response, delta)
     apply_delta(state, applied, rerun=rerun)
     for session in state.get("sessions", []):
         if session.get("session_id") == req["session_id"]:
@@ -509,8 +615,6 @@ def _merge(home: Path, project: str, req: dict, rerun: bool) -> tuple[bool, str 
             session["extraction"] = provenance
             break
     write_full(project, state, state_path.parent)
-    _record_spend(home, req["request_id"], req["session_id"], "claude", cost_usd,
-                  tokens_in, tokens_out, cost_source)
     return True, None, quarantine
 
 
