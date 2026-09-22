@@ -49,8 +49,11 @@ def _run_installer(tmp_path, *, with_systemctl: bool, systemctl_log: Path,
     the CONTENT of the extraction units. Installing them is opt-in in
     production (LLM_MEMORY_ENABLE_EXTRACTION), because the SessionEnd hook
     starts llm-memory-extract.service directly -- the unit merely existing is
-    what enables extraction, and its spend is not recorded on the failure
-    path. See test_extraction_units_are_opt_in_by_default.
+    what enables extraction, whatever the timer is doing.
+    (Spend going unrecorded on the failure path was a second reason until
+    33f1e59 moved the banking behind a `finally`; it no longer applies, and
+    the installer's own message said otherwise for one commit.)
+    See test_extraction_units_are_opt_in_by_default.
     """
     xdg = tmp_path / "xdg-config"
     xdg.mkdir(exist_ok=True)

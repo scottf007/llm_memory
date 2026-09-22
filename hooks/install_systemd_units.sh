@@ -102,9 +102,15 @@ EOF
 else
     echo "  Extraction units NOT installed (opt-in). The SessionEnd hook starts"
     echo "  llm-memory-extract.service directly, so creating it is what enables"
-    echo "  extraction -- the timer is only a recovery sweep. Spend is currently"
-    echo "  not recorded on the failure path. Set LLM_MEMORY_ENABLE_EXTRACTION=1"
-    echo "  to install them."
+    echo "  extraction -- the timer is only a recovery sweep."
+    echo "  Spend is banked on every exit from _merge and capped per day by"
+    echo "  LLM_MEMORY_EXTRACT_DAY_CAP_USD (default 5)."
+    echo "  Installing them drains runtime/extraction-requests/ at the next"
+    echo "  session end -- including requests for sessions a manual /narrative"
+    echo "  has already merged, which are paid for again. Count that directory"
+    echo "  first; the request_ids in *.extraction-status.json are a stale"
+    echo "  snapshot written by the worker, not a queue depth."
+    echo "  Set LLM_MEMORY_ENABLE_EXTRACTION=1 to install them."
 fi
 
 # Daily update check. The updater, the GitHub SHA comparison and the VERSION
