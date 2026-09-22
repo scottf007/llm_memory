@@ -18,7 +18,7 @@ report() {
 
 verify_install() {
     local memory_dir lib_dir py
-    memory_dir="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+    memory_dir="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
     lib_dir="$memory_dir/lib"
     py="$lib_dir/.venv/bin/python3"
     local failed=0 version="" tools=""

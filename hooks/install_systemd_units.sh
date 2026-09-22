@@ -9,7 +9,7 @@ UNIT_DIR="$XDG_CONFIG_HOME/systemd/user"
 # the pre-move layout or the compatibility symlink. A machine whose root is
 # elsewhere got units pointing at a path that does not exist, and a oneshot
 # that cannot start is close to invisible.
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 SYSTEMCTL_CMD=()
 if [ -n "${LLM_MEMORY_SYSTEMCTL:-}" ]; then
     if [ -f "$LLM_MEMORY_SYSTEMCTL" ] && [ ! -x "$LLM_MEMORY_SYSTEMCTL" ]; then

@@ -20,7 +20,7 @@ import narrative_score  # noqa: E402
 
 
 def _write_project(home: Path, project: str, **kinds) -> Path:
-    projects_dir = home / ".claude" / "memory" / "projects"
+    projects_dir = home / ".llm-memory" / "projects"
     projects_dir.mkdir(parents=True, exist_ok=True)
     state = {
         "project": project,
@@ -45,13 +45,13 @@ def _write_certificate(home: Path, project: str, **over) -> Path:
         "fuse_reason": None,
     }
     cert.update(over)
-    path = home / ".claude" / "memory" / "projects" / f"{project}.certificate.json"
+    path = home / ".llm-memory" / "projects" / f"{project}.certificate.json"
     path.write_text(json.dumps(cert))
     return path
 
 
 def test_false_id_regression_kept(tmp_path, monkeypatch):
-    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".claude" / "memory"))
+    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".llm-memory"))
     home = tmp_path
     _write_project(home, "falseidproj", decisions=[
         {"id": "dec-old1", "text": "the old thing", "status": "archived",
@@ -65,7 +65,7 @@ def test_false_id_regression_kept(tmp_path, monkeypatch):
 
 
 def test_certificate_aware_false_replaces_headline(tmp_path, monkeypatch):
-    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".claude" / "memory"))
+    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".llm-memory"))
     _write_project(tmp_path, "certproj")
     _write_certificate(tmp_path, "certproj", verdict="CONTRADICTION",
                         counts={"rendered_eligible": 10, "contradiction": 3, "suspect": 1,
@@ -77,7 +77,7 @@ def test_certificate_aware_false_replaces_headline(tmp_path, monkeypatch):
 
 
 def test_never_bare_clean_while_not_checked_nonempty(tmp_path, monkeypatch):
-    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".claude" / "memory"))
+    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".llm-memory"))
     _write_project(tmp_path, "dirtyproj")
     _write_certificate(tmp_path, "dirtyproj", not_checked=[
         {"class": "unclassified_parents", "count": 3, "ids": ["dec-a", "dec-b", "dec-c"],
@@ -96,7 +96,7 @@ def test_never_bare_clean_while_not_checked_nonempty(tmp_path, monkeypatch):
 
 
 def test_missing_certificate_falls_back_not_silently_clean(tmp_path, monkeypatch):
-    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".claude" / "memory"))
+    monkeypatch.setattr(narrative_score, "HOME", str(tmp_path / ".llm-memory"))
     _write_project(tmp_path, "nocertproj", decisions=[
         {"id": "dec-old2", "text": "the retired thing", "status": "archived",
          "archived_in": "sess1", "archived_reason": "no longer current"},

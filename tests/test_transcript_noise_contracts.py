@@ -59,7 +59,7 @@ PONG_DISCUSSION_PROMPT = (
 def sandbox(tmp_path, monkeypatch):
     """A complete memory root plus mutable Grok-shaped source directories."""
     home = tmp_path / "home"
-    memory = home / ".claude" / "memory"
+    memory = home / ".llm-memory"
     for child in ("transcripts", "conversations", "projects"):
         (memory / child).mkdir(parents=True, exist_ok=True)
     (memory / "projects" / "demo.json").write_text(json.dumps({"sessions": []}))

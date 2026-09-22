@@ -14,7 +14,7 @@ verbatim by the design doc, so fixed here by the test author):
   --dry-run   prints the six check ids below, one per line, in this order,
               and exits 0 without touching HOME or LLM_MEMORY_HOME.
   (no args)   reads HOME / LLM_MEMORY_HOME (same defaulting convention as
-              install.sh: LLM_MEMORY_HOME defaults to $HOME/.claude/memory),
+              install.sh: LLM_MEMORY_HOME defaults to $HOME/.llm-memory),
               runs every check, and for each prints exactly one line:
                 "PASS <id>: <message>"  or  "FAIL <id>: <message>"
               If every check passed: exits 0 and prints a final line
@@ -127,7 +127,7 @@ def _build_fake_install(
     narrative/ingest checks. Callers break exactly one property for each
     seeded-broken-state test."""
     fake_home = tmp_path / "home"
-    memory_dir = fake_home / ".claude" / "memory"
+    memory_dir = fake_home / ".llm-memory"
     lib_dir = memory_dir / "lib"
     fake_home.mkdir()
     _copy_lib_tree(lib_dir)

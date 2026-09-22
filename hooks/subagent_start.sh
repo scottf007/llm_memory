@@ -2,7 +2,7 @@
 # SubagentStart hook: injects project context (narrative + important notes) into subagents.
 # Fires when a subagent is spawned.
 
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 
 INPUT=$(cat)

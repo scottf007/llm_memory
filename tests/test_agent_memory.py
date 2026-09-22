@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS connections (
 def _setup_test_home(tmp_path):
     """Create a fake HOME with memory DB structure."""
     home = tmp_path / "home"
-    memory_dir = home / ".claude" / "memory"
+    memory_dir = home / ".llm-memory"
     memory_dir.mkdir(parents=True)
     (memory_dir / "records").mkdir()
     (memory_dir / "transcripts").mkdir()
@@ -64,7 +64,7 @@ def _setup_test_home(tmp_path):
 
 
 def _write_narrative(home, project, content="# narrative"):
-    path = home / ".claude" / "memory" / "projects" / f"{project}.narrative.md"
+    path = home / ".llm-memory" / "projects" / f"{project}.narrative.md"
     path.write_text(content)
     return path
 
@@ -73,9 +73,9 @@ def _run_hook(hook_name, home, input_json, timeout=10):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
-    env["LLM_MEMORY_HOME"] = str(home / ".claude" / "memory")
+    env["LLM_MEMORY_HOME"] = str(home / ".llm-memory")
     # Prevent auto-update check and process_transcripts from running
-    (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
+    (home / ".llm-memory" / "config" / "no-auto-update").touch()
 
     result = subprocess.run(
         ["bash", str(HOOKS_DIR / hook_name)],

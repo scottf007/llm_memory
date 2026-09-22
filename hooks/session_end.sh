@@ -10,7 +10,7 @@
 # visible on the final session of a `claude --resume` chain where there's no
 # follow-on session_start.sh sweep to recover the missed .md.
 
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 
 INPUT=$(cat)

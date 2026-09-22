@@ -115,7 +115,7 @@ INPUT=$(cat)
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 
-DB="$HOME/.claude/memory/memory.db"
+DB="$HOME/.llm-memory/memory.db"
 [ -f "$DB" ] || exit 0
 
 PROJECT=""

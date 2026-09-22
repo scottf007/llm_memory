@@ -25,7 +25,7 @@ def _setup_fake_install(tmp_path):
     (claude_dir / "settings.json").write_text("{}")
 
     # Simulate LIB_DIR (what install.sh copies repo files into)
-    lib_dir = home / ".claude" / "memory" / "lib"
+    lib_dir = home / ".llm-memory" / "lib"
     lib_dir.mkdir(parents=True)
 
     # Copy real repo files into lib_dir to simulate post-download state

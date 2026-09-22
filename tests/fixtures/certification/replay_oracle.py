@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-SNAPSHOT_PATH = (Path.home() / ".claude" / "memory" / "snapshots-pm-2026-08-24"
+SNAPSHOT_PATH = (Path.home() / ".llm-memory" / "snapshots-pm-2026-08-24"
                   / "llm_memory.json.before")
 SNAPSHOT_SHA256 = "57510144a88704003d229ebd6bec3822cca51d49755cf62d2bc06598acfc03b3"
 
-DELTA_PATH = Path.home() / ".claude" / "memory" / "deltas" / "llm_memory.audit.delta.json"
+DELTA_PATH = Path.home() / ".llm-memory" / "deltas" / "llm_memory.audit.delta.json"
 DELTA_SHA256 = "4b6c344372d9e7deab155de9c8afc2a11214914b0ff72c80a021b47ff6954d7b"
 
 REPLAY_SOURCE_ABSENT = (

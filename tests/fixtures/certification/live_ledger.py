@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-LIVE_LEDGER_PATH = Path.home() / ".claude" / "memory" / "projects" / "llm_memory.json"
+LIVE_LEDGER_PATH = Path.home() / ".llm-memory" / "projects" / "llm_memory.json"
 LIVE_LEDGER_SHA256 = "f3d6e0b80f4cf61b30b566b3b54f8db3dc134a84fb117164027a3b268e66ac00"
 
 LIVE_LEDGER_ABSENT = (

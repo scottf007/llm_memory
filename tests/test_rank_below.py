@@ -34,8 +34,8 @@ PANEL = [
     "syncthing sync",
 ]
 
-LIVE_DB = Path.home() / ".claude" / "memory" / "memory.db"
-LIVE_JSON = Path.home() / ".claude" / "memory" / "projects" / "llm_memory.json"
+LIVE_DB = Path.home() / ".llm-memory" / "memory.db"
+LIVE_JSON = Path.home() / ".llm-memory" / "projects" / "llm_memory.json"
 
 
 def _archived_above_active_count(rows: list[dict]) -> int:

@@ -17,7 +17,7 @@ $MEMORY_ROOT/          (default ~/.claude/memory, or $LLM_MEMORY_HOME if set)
 
 The store's location is configurable per machine via the `LLM_MEMORY_HOME`
 environment variable; every command below substitutes
-`MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"` the same way the
+`MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"` the same way the
 installed scripts do. Each device can use a different real location —
 Syncthing pairs devices by folder ID, not by local path, so what matters is
 pointing each machine's Syncthing folder at *that machine's* configured
@@ -42,7 +42,7 @@ Follow the [Syncthing installation guide](https://docs.syncthing.net/intro/getti
 Run the included setup script:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 "$MEMORY_ROOT/lib/setup_syncthing.py"
 ```
 
@@ -53,7 +53,7 @@ This script:
 
 Alternatively, add the folder manually in the Syncthing web UI (`http://localhost:8384`):
 1. Add a new folder with path set to *this machine's* configured memory root
-   (`echo "${LLM_MEMORY_HOME:-$HOME/.claude/memory}"` to see it) — use the
+   (`echo "${LLM_MEMORY_HOME:-$HOME/.llm-memory}"` to see it) — use the
    real underlying directory, not a symlink, as the folder path
 2. Set the folder ID to `llm-memory`
 3. Share it with your other devices
@@ -92,7 +92,7 @@ lib/.venv
 If the SQLite index does not reflect recently synced records:
 
 ```bash
-MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 python3 "$MEMORY_ROOT/lib/server.py" --rebuild
 ```
 
@@ -103,7 +103,7 @@ This deletes `memory.db` and rebuilds it from all JSON files in `records/`.
 1. Check Syncthing is running on both machines: `http://localhost:8384`
 2. Verify the `llm-memory` folder is connected and not paused
 3. Check that new `.json` files exist under `records/` in the configured
-   memory root (`echo "${LLM_MEMORY_HOME:-$HOME/.claude/memory}"`)
+   memory root (`echo "${LLM_MEMORY_HOME:-$HOME/.llm-memory}"`)
 4. Rebuild the database if files are present but not indexed
 
 ### Conflict files

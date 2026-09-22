@@ -37,11 +37,11 @@ HOOK = REPO / "hooks" / "session_start.sh"
 @pytest.fixture
 def installed_lib(tmp_path):
     """A sandbox HOME holding a complete installed lib."""
-    lib = tmp_path / ".claude" / "memory" / "lib"
+    lib = tmp_path / ".llm-memory" / "lib"
     lib.mkdir(parents=True)
-    (tmp_path / ".claude" / "memory" / "config").mkdir(parents=True)
+    (tmp_path / ".llm-memory" / "config").mkdir(parents=True)
     # Opt out of the network auto-update; this test is about the local state.
-    (tmp_path / ".claude" / "memory" / "config" / "no-auto-update").touch()
+    (tmp_path / ".llm-memory" / "config" / "no-auto-update").touch()
 
     for py in REPO.glob("*.py"):
         shutil.copy2(py, lib / py.name)
@@ -166,8 +166,8 @@ def test_lib_with_version_but_no_python_is_reported(installed_lib, tmp_path):
 def test_absent_lib_is_not_reported_as_broken(tmp_path):
     """A machine with no llm_memory installed is not a failure to shout about."""
     home = tmp_path / "home"
-    (home / ".claude" / "memory" / "config").mkdir(parents=True)
-    (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
+    (home / ".llm-memory" / "config").mkdir(parents=True)
+    (home / ".llm-memory" / "config" / "no-auto-update").touch()
 
     assert "LLM_MEMORY_BROKEN" not in _run_hook(home, tmp_path)
 

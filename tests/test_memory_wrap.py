@@ -35,7 +35,7 @@ def fake_client(tmp_path):
 @pytest.fixture
 def fake_home(tmp_path):
     home = tmp_path / "home"
-    (home / ".claude" / "memory" / "projects").mkdir(parents=True)
+    (home / ".llm-memory" / "projects").mkdir(parents=True)
     return home
 
 
@@ -53,7 +53,7 @@ def _write_project(home, project, *, journal="did the thing", closure="closed"):
             }
         ]
     }
-    path = home / ".claude" / "memory" / "projects" / f"{project}.json"
+    path = home / ".llm-memory" / "projects" / f"{project}.json"
     path.write_text(json.dumps(state))
     return path
 
@@ -68,13 +68,13 @@ def _client_config(tmp_path, fake_client, *, prompt_mode="append", flag=None, ex
     return path
 
 
-_REAL_INSTALLED_PYTHON = Path.home() / ".claude" / "memory" / "lib" / ".venv" / "bin" / "python3"
+_REAL_INSTALLED_PYTHON = Path.home() / ".llm-memory" / "lib" / ".venv" / "bin" / "python3"
 
 
 def _base_env(fake_home):
     env = dict(os.environ)
     env["HOME"] = str(fake_home)
-    env["LLM_MEMORY_HOME"] = str(fake_home / ".claude" / "memory")
+    env["LLM_MEMORY_HOME"] = str(fake_home / ".llm-memory")
     # memory_wrap_resume.py imports server.py, which imports the real `mcp`
     # SDK. Point at the installed lib venv (what memory_wrap uses by
     # default in production) rather than this repo's dev .venv, whose `mcp`
@@ -178,7 +178,7 @@ class TestProjectResolution:
         # A --basetemp inside a worktree has a Git ancestor. Simulate the
         # documented non-repository path so the fallback is cwd's basename.
         monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
-        monkeypatch.setenv("LLM_MEMORY_HOME", str(fake_home / ".claude" / "memory"))
+        monkeypatch.setenv("LLM_MEMORY_HOME", str(fake_home / ".llm-memory"))
         _write_project(fake_home, "portable-project", journal="inferred from cwd")
         clients_json = _client_config(tmp_path, fake_client, prompt_mode="append")
 

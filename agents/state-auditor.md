@@ -19,7 +19,7 @@ the merger applies.
 ## Input Contract
 
 The launcher resolves `<memory-root>` from `LLM_MEMORY_HOME`, defaulting to
-`$HOME/.claude/memory`, and hands you absolute paths in the prompt. The
+`$HOME/.llm-memory`, and hands you absolute paths in the prompt. The
 launcher-provided values are:
 - `project_state_path`: `<memory-root>/projects/{project}.json`
 - `project`: project name (e.g. `llm_memory`)

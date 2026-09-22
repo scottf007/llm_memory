@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS connections (
 def _setup_test_home(tmp_path):
     """Create a fake HOME with memory DB structure."""
     home = tmp_path / "home"
-    memory_dir = home / ".claude" / "memory"
+    memory_dir = home / ".llm-memory"
     memory_dir.mkdir(parents=True)
     (memory_dir / "records").mkdir()
     (memory_dir / "transcripts").mkdir()
@@ -69,14 +69,14 @@ def _setup_test_home(tmp_path):
 
 def _write_narrative(home, project, content="# narrative"):
     """Write a rendered narrative file to the test home."""
-    path = home / ".claude" / "memory" / "projects" / f"{project}.narrative.md"
+    path = home / ".llm-memory" / "projects" / f"{project}.narrative.md"
     path.write_text(content)
     return path
 
 
 def _write_project_state(home, project, merged_session_ids=()):
     """Write a minimal {project}.json with the given merged session_ids."""
-    path = home / ".claude" / "memory" / "projects" / f"{project}.json"
+    path = home / ".llm-memory" / "projects" / f"{project}.json"
     state = {
         "schema_version": "0.1",
         "project": project,
@@ -88,7 +88,7 @@ def _write_project_state(home, project, merged_session_ids=()):
 
 def _register_session(home, session_id, project):
     """Write a stub conversation.md with the frontmatter the hooks read as the session registry."""
-    path = home / ".claude" / "memory" / "conversations" / f"{session_id}.md"
+    path = home / ".llm-memory" / "conversations" / f"{session_id}.md"
     path.write_text(
         f"---\nsession_id: {session_id}\nproject: {project}\n---\n\n=== user ===\nhi\n"
     )
@@ -99,7 +99,7 @@ def _run_hook(hook_name, home, input_json, timeout=30, extra_env=None):
     """Run a hook script with a fake HOME and return stdout, stderr, rc."""
     env = os.environ.copy()
     env["HOME"] = str(home)
-    env["LLM_MEMORY_HOME"] = str(home / ".claude" / "memory")
+    env["LLM_MEMORY_HOME"] = str(home / ".llm-memory")
     # The age-signal snippet imports server.py (needs mcp). Prefer the
     # interpreter running this test so a bare `python3` on PATH is not the
     # system one.
@@ -109,7 +109,7 @@ def _run_hook(hook_name, home, input_json, timeout=30, extra_env=None):
     if extra_env:
         env.update(extra_env)
     # Prevent auto-update check and process_transcripts from running
-    (home / ".claude" / "memory" / "config" / "no-auto-update").touch()
+    (home / ".llm-memory" / "config" / "no-auto-update").touch()
 
     result = subprocess.run(
         ["bash", str(HOOKS_DIR / hook_name)],
@@ -421,7 +421,7 @@ def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None
             ).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "message": {"role": "assistant", "content": SUBSTANTIVE_ASSISTANT},
         })
-    path = home / ".claude" / "memory" / "transcripts" / f"{session_id}.jsonl"
+    path = home / ".llm-memory" / "transcripts" / f"{session_id}.jsonl"
     path.write_text("".join(json.dumps(r) + "\n" for r in records))
     return path
 
@@ -467,7 +467,7 @@ class TestNarrativeLivenessAgeSignal:
         ended = (datetime.now(timezone.utc) - timedelta(days=20)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path = home / ".llm-memory" / "projects" / "testproj.json"
         path.write_text(json.dumps({
             "schema_version": "0.1",
             "project": "testproj",
@@ -502,7 +502,7 @@ class TestNarrativeLivenessAgeSignal:
         ended = (datetime.now(timezone.utc) - timedelta(days=13)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path = home / ".llm-memory" / "projects" / "testproj.json"
         path.write_text(json.dumps({
             "schema_version": "0.1",
             "project": "testproj",
@@ -573,7 +573,7 @@ class TestNarrativeLivenessAgeSignal:
         ended = (datetime.now(timezone.utc) - timedelta(days=20)).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         )
-        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path = home / ".llm-memory" / "projects" / "testproj.json"
         path.write_text(json.dumps({
             "schema_version": "0.1",
             "project": "testproj",
@@ -601,7 +601,7 @@ class TestNarrativeLivenessAgeSignal:
         _age_file(narr, 1)
         last = datetime.now(timezone.utc) - timedelta(days=16)
         ended = last - timedelta(hours=36)
-        path = home / ".claude" / "memory" / "projects" / "testproj.json"
+        path = home / ".llm-memory" / "projects" / "testproj.json"
         path.write_text(json.dumps({
             "schema_version": "0.1",
             "project": "testproj",

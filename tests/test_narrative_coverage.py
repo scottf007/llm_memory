@@ -60,7 +60,7 @@ SUBSTANTIVE_REPLY = (
 @pytest.fixture
 def sandbox(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    memory = home / ".claude" / "memory"
+    memory = home / ".llm-memory"
     (memory / "transcripts").mkdir(parents=True)
     (memory / "conversations").mkdir(parents=True)
     (memory / "projects").mkdir(parents=True)
@@ -478,7 +478,7 @@ def test_narrative_coverage_tool_description_names_grok_keepalive_loops():
 # unprocessed count would be flaky by construction.
 # --------------------------------------------------------------------------
 
-_LIVE_MEMORY_DIR = Path.home() / ".claude" / "memory"
+_LIVE_MEMORY_DIR = Path.home() / ".llm-memory"
 
 
 def _kept_user_turn_count(transcript_path: str) -> int:

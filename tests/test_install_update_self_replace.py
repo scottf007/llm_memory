@@ -82,7 +82,7 @@ def _fake_bin(tmp_path: Path) -> Path:
 def _run_update(tmp_path: Path, remote_installer: str, *, local_sha: str = OLD_SHA,
                 step3_exit: int = 0, download_fails: bool = False) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     home = tmp_path / "home"
-    lib_dir = home / ".claude" / "memory" / "lib"
+    lib_dir = home / ".llm-memory" / "lib"
     lib_dir.mkdir(parents=True)
     local_installer = _instrument_step_three(INSTALLER.read_text())
     installed = lib_dir / "install.sh"
@@ -96,7 +96,7 @@ def _run_update(tmp_path: Path, remote_installer: str, *, local_sha: str = OLD_S
     env = {
         **os.environ,
         "HOME": str(home),
-        "LLM_MEMORY_HOME": str(home / ".claude" / "memory"),
+        "LLM_MEMORY_HOME": str(home / ".llm-memory"),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "FAKE_REMOTE_SHA": REMOTE_SHA if local_sha != REMOTE_SHA else local_sha,
         "FAKE_TARBALL": str(archive),

@@ -151,11 +151,11 @@ def _fake_home(tmp_path, monkeypatch):
     """A relocated HOME with a populated-looking memory tree, so an accidental
     write to the 'real' tree is detectable."""
     home = tmp_path / "home"
-    (home / ".claude" / "memory" / "projects").mkdir(parents=True)
-    (home / ".claude" / "memory" / "items").mkdir(parents=True)
-    (home / ".claude" / "memory" / "memory.db").write_bytes(b"SENTINEL-DB")
+    (home / ".llm-memory" / "projects").mkdir(parents=True)
+    (home / ".llm-memory" / "items").mkdir(parents=True)
+    (home / ".llm-memory" / "memory.db").write_bytes(b"SENTINEL-DB")
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".claude" / "memory"))
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".llm-memory"))
     return home
 
 
@@ -195,7 +195,7 @@ def test_state_file_outside_canonical_dir_resolves_to_a_sandbox():
     assert items_root == scratch.parent / "items"
     assert db_path == scratch.parent / "memory.db"
     assert sandboxed is True
-    assert items_root != Path.home() / ".claude" / "memory" / "items"
+    assert items_root != Path.home() / ".llm-memory" / "items"
 
 
 def test_merging_outside_the_canonical_dir_never_touches_the_real_tree(
@@ -210,9 +210,9 @@ def test_merging_outside_the_canonical_dir_never_touches_the_real_tree(
 
     merger.main([str(state_path), str(delta_path)])
 
-    real_items = home / ".claude" / "memory" / "items"
+    real_items = home / ".llm-memory" / "items"
     assert list(real_items.rglob("*")) == []
-    assert (home / ".claude" / "memory" / "memory.db").read_bytes() == b"SENTINEL-DB"
+    assert (home / ".llm-memory" / "memory.db").read_bytes() == b"SENTINEL-DB"
     # ...and it said so, out loud.
     assert "sandbox mode" in capsys.readouterr().err
 
@@ -262,13 +262,13 @@ def test_canonical_state_file_fans_out_to_the_canonical_items_root(
     """Same run, but with the state file where the pipeline puts it: items go
     to {HOME}/.claude/memory/items and no sandbox notice is printed."""
     home = _fake_home(tmp_path, monkeypatch)
-    projects = home / ".claude" / "memory" / "projects"
+    projects = home / ".llm-memory" / "projects"
     state_path = _write_state(projects / "example_project.json")
     delta_path = _write_delta(tmp_path / "d.json")
 
     merger.main([str(state_path), str(delta_path)])
 
-    fanned = home / ".claude" / "memory" / "items" / "example_project" / "decisions"
+    fanned = home / ".llm-memory" / "items" / "example_project" / "decisions"
     assert len(list(fanned.glob("*.json"))) == 1
     assert not (projects / "items").exists()
     assert "sandbox mode" not in capsys.readouterr().err
@@ -291,11 +291,11 @@ def test_items_root_override_is_honoured(tmp_path, monkeypatch):
 
 def test_items_root_override_equal_to_canonical_is_not_sandboxed(tmp_path, monkeypatch):
     home = _fake_home(tmp_path, monkeypatch)
-    canonical_items = home / ".claude" / "memory" / "items"
+    canonical_items = home / ".llm-memory" / "items"
     items_root, db_path, sandboxed = merger.resolve_paths(
         tmp_path / "scratch" / "example_project.json", canonical_items)
     assert items_root == canonical_items
-    assert db_path == home / ".claude" / "memory" / "memory.db"
+    assert db_path == home / ".llm-memory" / "memory.db"
     assert sandboxed is False
 
 
@@ -500,12 +500,12 @@ def test_atomic_fault_before_replace(tmp_path, monkeypatch):
 
 def test_atomic_fault_after_replace_before_fanout(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    (home / ".claude" / "memory" / "projects").mkdir(parents=True)
-    (home / ".claude" / "memory" / "items").mkdir(parents=True)
+    (home / ".llm-memory" / "projects").mkdir(parents=True)
+    (home / ".llm-memory" / "items").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".claude" / "memory"))
+    monkeypatch.setenv("LLM_MEMORY_HOME", str(home / ".llm-memory"))
 
-    state_path = home / ".claude" / "memory" / "projects" / "example_project.json"
+    state_path = home / ".llm-memory" / "projects" / "example_project.json"
     state_path.write_text(json.dumps({
         "project": "example_project",
         "decisions": [], "goals": [], "suggestions": [],
@@ -530,13 +530,13 @@ def test_atomic_fault_after_replace_before_fanout(tmp_path, monkeypatch):
     # The state JSON is new (os.replace already completed); items/ is stale.
     written_state = json.loads(state_path.read_text())
     assert len(written_state["decisions"]) == 1
-    assert list((home / ".claude" / "memory" / "items").rglob("*")) == []
+    assert list((home / ".llm-memory" / "items").rglob("*")) == []
 
     # The next merge (self-healing) repairs items/ without re-applying the delta.
     monkeypatch.setattr(merger, "fan_out_items", real_fan_out)
     merger.main([str(state_path), str(delta_path)])
 
-    fanned = home / ".claude" / "memory" / "items" / "example_project" / "decisions"
+    fanned = home / ".llm-memory" / "items" / "example_project" / "decisions"
     assert len(list(fanned.glob("*.json"))) == 1
 
 
@@ -715,8 +715,8 @@ def test_inbox_stale_active_file_cannot_erase_decision_links(tmp_path):
 
 def test_apply_delta_no_item_file_writes(tmp_path, monkeypatch):
     home = tmp_path / "home"
-    (home / ".claude" / "memory" / "projects").mkdir(parents=True)
-    (home / ".claude" / "memory" / "items").mkdir(parents=True)
+    (home / ".llm-memory" / "projects").mkdir(parents=True)
+    (home / ".llm-memory" / "items").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
 
     state = _cascade_state()
@@ -727,5 +727,5 @@ def test_apply_delta_no_item_file_writes(tmp_path, monkeypatch):
     }
     merger.apply_delta(state, delta)
 
-    assert list((home / ".claude" / "memory" / "items").rglob("*")) == []
-    assert not (home / ".claude" / "memory" / "memory.db").exists()
+    assert list((home / ".llm-memory" / "items").rglob("*")) == []
+    assert not (home / ".llm-memory" / "memory.db").exists()

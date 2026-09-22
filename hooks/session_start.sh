@@ -7,7 +7,7 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
-MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.claude/memory}"
+MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=hooks/lib_session_common.sh

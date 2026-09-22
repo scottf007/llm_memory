@@ -12,7 +12,7 @@ state file — the merger does that after you emit your output.
 
 ## Input Contract
 The launcher resolves `<memory-root>` from `LLM_MEMORY_HOME`, defaulting to
-`$HOME/.claude/memory`, and hands you absolute paths in the prompt. The
+`$HOME/.llm-memory`, and hands you absolute paths in the prompt. The
 launcher-provided values are:
 - `conversation_md_path`: `<memory-root>/conversations/{session_id}.md` —
   stripped dialogue for the session just completed.
