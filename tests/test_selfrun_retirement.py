@@ -120,19 +120,78 @@ def test_request_whose_transcript_vanished_is_retired(tmp_path):
     assert list(logs.glob("call-*.argv")) == []
 
 
-def test_expired_request_is_retired(tmp_path):
-    """Age backstop for anything the other rules cannot classify."""
+def test_an_old_request_is_NOT_retired_while_its_project_still_exists(tmp_path):
+    """Age is never sufficient. This is the blocker a reviewer caught.
+
+    An earlier version retired on a timestamp compare alone. A session coverage
+    cannot yet see -- no conversation.md, so no project attribution -- is
+    invisible to coverage and will never be re-enqueued, because session_end
+    fires once. Deleting its request on a birthday destroys the only pointer to
+    work that was still perfectly doable."""
     _, memory_home, transcript, env, logs = _setup(tmp_path, {
         "project": PROJECT, "decisions": [], "goals": [], "suggestions": [],
         "learnings": [], "done": [], "sessions": [],
     })
     assert _enqueue(env, PROJECT, SESSION, transcript).returncode == 0
+    env["LLM_MEMORY_REQUEST_MAX_AGE_DAYS"] = "0"      # everything is "expired"
+
+    result = H.run_worker(["run", "--once", "--project", PROJECT], env, timeout=30)
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    assert any(s["session_id"] == SESSION for s in _project_state(memory_home, PROJECT)["sessions"]), \
+        "an old but doable request must still be merged, not aged out"
+    assert len(list(logs.glob("call-*.argv"))) == 1
+
+
+def test_orphaned_request_is_retired_when_its_project_state_is_gone(tmp_path):
+    """The narrow case age retirement is actually for: no project to merge into,
+    which no amount of re-running can fix."""
+    _, memory_home, transcript, env, logs = _setup(tmp_path, {
+        "project": PROJECT, "decisions": [], "goals": [], "suggestions": [],
+        "learnings": [], "done": [], "sessions": [],
+    })
+    assert _enqueue(env, PROJECT, SESSION, transcript).returncode == 0
+    (memory_home / "projects" / f"{PROJECT}.json").unlink()
     env["LLM_MEMORY_REQUEST_MAX_AGE_DAYS"] = "0"
 
     result = H.run_worker(["run", "--once", "--project", PROJECT], env, timeout=30)
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
 
-    assert _requests(memory_home) == [], "request older than the age cap must be retired"
+    assert _requests(memory_home) == [], "a request whose project is gone must be retired"
+    assert list(logs.glob("call-*.argv")) == []
+
+
+def test_a_request_whose_recorded_path_is_stale_is_rebased_not_deleted(tmp_path):
+    """The store root moved, so every request enqueued before the move carries
+    an absolute path that no longer resolves. Treating a dangling path as
+    'transcript gone' would unlink the only pointer to that work."""
+    _, memory_home, transcript, env, logs = _setup(tmp_path, {
+        "project": PROJECT, "decisions": [], "goals": [], "suggestions": [],
+        "learnings": [], "done": [], "sessions": [],
+    })
+    assert _enqueue(env, PROJECT, SESSION, str(tmp_path / "old-root" / "transcripts" / f"{SESSION}.jsonl")).returncode == 0
+    assert transcript.is_file(), "the transcript is still present under the CURRENT root"
+
+    result = H.run_worker(["run", "--once", "--project", PROJECT], env, timeout=30)
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+    assert any(s["session_id"] == SESSION for s in _project_state(memory_home, PROJECT)["sessions"]), \
+        "a stale recorded path must be rebased onto the current root, not treated as missing"
+    assert len(list(logs.glob("call-*.argv"))) == 1
+
+
+def test_cap_hold_survives_a_duplicate_under_cap_session_row(tmp_path):
+    """sessions[] can carry more than one row per session id. A single
+    under-cap row must not cancel a cap-reserved hold."""
+    state = _merged_state(SESSION)
+    state["sessions"].append({"session_id": SESSION, "ended": END_ISO,
+                              "extraction": {"cost_usd": None, "cost_source": "unknown"}})
+    _, memory_home, transcript, env, logs = _setup(tmp_path, state)
+    assert _enqueue(env, PROJECT, SESSION, transcript).returncode == 0
+
+    H.run_worker(["run", "--once", "--project", PROJECT], env, timeout=30)
+
+    assert _requests(memory_home) != [], "the cap hold must be sticky across duplicate rows"
     assert list(logs.glob("call-*.argv")) == []
 
 

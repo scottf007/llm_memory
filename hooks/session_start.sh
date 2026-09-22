@@ -51,11 +51,16 @@ if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
     fi
     # Reported, but deliberately NOT setting EXTRACTION_DEGRADED: a deep queue is
     # a backlog, not a reason to drop the caller into the reduced startup path.
+    # Report the depth; do NOT assert a cause. A deep queue during a legitimate
+    # drain is not a stall, and this count is global while last_success is
+    # per-project, so the two must not be narrated as one fact.
     if [ "${FAST_QUEUED:-0}" -ge 100 ] 2>/dev/null; then
-        echo "LLM_MEMORY_WARN: extraction queue holds $FAST_QUEUED request(s) across all projects and nothing is draining it (last success for $FAST_PROJECT: $FAST_LAST_OK)"
+        echo "LLM_MEMORY_WARN: extraction queue holds $FAST_QUEUED request(s) across all projects (last success for $FAST_PROJECT: $FAST_LAST_OK)"
     fi
-    if { [ -z "$FAST_LAST_OK" ] || [ "$FAST_LAST_OK" = "never" ] || [ "$FAST_LAST_OK" = "null" ]; } \
-       && [ "$FAST_STATE" != "idle" ]; then
+    # An empty FAST_STATE means jq failed, not that extraction never ran, so it
+    # must not be reported as a never-succeeded worker.
+    if [ -n "$FAST_STATE" ] && [ "$FAST_STATE" != "idle" ] \
+       && { [ -z "$FAST_LAST_OK" ] || [ "$FAST_LAST_OK" = "never" ] || [ "$FAST_LAST_OK" = "null" ]; }; then
         echo "LLM_MEMORY_WARN: extraction for $FAST_PROJECT has NEVER succeeded (state=$FAST_STATE, $FAST_QUEUED queued)"
     fi
 fi

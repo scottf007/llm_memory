@@ -12,8 +12,22 @@ LEGACY_MEMORY_DIR="$HOME/.claude/memory"
 # defaulting to the new one would start it on an empty store and quietly lose
 # every narrative it has. Refuse, and say exactly what to do. A symlink is the
 # expected post-move compatibility shim and is fine to leave.
-if [ -z "${LLM_MEMORY_HOME:-}" ] && [ ! -e "$MEMORY_DIR" ] \
-   && [ -d "$LEGACY_MEMORY_DIR" ] && [ ! -L "$LEGACY_MEMORY_DIR" ]; then
+#
+# The test is "does the new root hold a LEDGER", not "does the directory
+# exist". An earlier version checked existence, which a reviewer correctly
+# called a blocker: the first process to use the new default CREATES the
+# directory, after which the guard never fires again and the old tree is
+# orphaned in silence with new writes going to the empty root.
+new_root_has_ledger=0
+if compgen -G "$MEMORY_DIR/projects/*.json" >/dev/null 2>&1; then
+    new_root_has_ledger=1
+fi
+legacy_has_ledger=0
+if compgen -G "$LEGACY_MEMORY_DIR/projects/*.json" >/dev/null 2>&1; then
+    legacy_has_ledger=1
+fi
+if [ -z "${LLM_MEMORY_HOME:-}" ] && [ "$new_root_has_ledger" = 0 ] \
+   && [ "$legacy_has_ledger" = 1 ] && [ ! -L "$LEGACY_MEMORY_DIR" ]; then
     echo "  ERROR: the memory store default moved to $MEMORY_DIR, but this machine" >&2
     echo "  still has a real directory at the retired path $LEGACY_MEMORY_DIR." >&2
     echo "  Installing now would start from an empty store. Move it first:" >&2

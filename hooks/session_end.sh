@@ -83,7 +83,25 @@ if [ -f "$OUT_PATH" ] && [ -n "$CWD" ]; then
     # extract_conversation already wrote the count into the frontmatter, so this
     # costs one grep and keeps the hook model-free and bounded as intended.
     MIN_TURNS="${LLM_MEMORY_MIN_USER_TURNS_CLAUDE:-5}"
-    SESSION_TURNS=$(sed -n 's/^turns: *\([0-9][0-9]*\).*/\1/p' "$OUT_PATH" 2>/dev/null | head -1)
+    # Read ONLY the frontmatter. extract_conversation's own parser stops after
+    # 20 lines; an unbounded match would let a body line that happens to read
+    # "turns: 3" decide whether a session is narrated.
+    SESSION_TURNS=$(sed -n '1,20{s/^turns: *\([0-9][0-9]*\) *$/\1/p}' "$OUT_PATH" 2>/dev/null | head -1)
+    # 10# forces base 10: a zero-padded count like 08 is not octal here.
+    if [ -n "$SESSION_TURNS" ]; then
+        SESSION_TURNS=$((10#$SESSION_TURNS))
+    fi
+    # Fail OPEN in every ambiguous case. A missing or unparseable turns field
+    # enqueues. So does turns:0 on a non-empty transcript -- that combination
+    # means the conversation was rendered by the wrong adapter and is a stub,
+    # not that the session had no turns. Treating that stub as "below the
+    # floor" would silently drop a real session forever, because session_end
+    # fires once and nothing re-reads the archive.
+    if [ -n "$SESSION_TURNS" ] && [ "$SESSION_TURNS" -eq 0 ] 2>/dev/null \
+       && [ -s "$ARCHIVE_PATH" ]; then
+        log "enqueuing $SESSION_ID despite turns:0 — non-empty transcript means a stub conversation, not an empty session"
+        SESSION_TURNS=""
+    fi
     if [ -n "$SESSION_TURNS" ] && [ "$SESSION_TURNS" -lt "$MIN_TURNS" ] 2>/dev/null; then
         log "not enqueued: $SESSION_ID has $SESSION_TURNS substantive turn(s), below the $MIN_TURNS floor coverage applies"
     else

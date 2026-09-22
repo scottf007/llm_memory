@@ -117,9 +117,6 @@ def enqueue(home: Path, project: str, session_id: str, transcript: str, source: 
     atomic_json(request_dir(home) / f"{iso().replace(':', '')}-{session_id}-{request_id}.json", record)
 
 
-_REQUEST_MAX_AGE_DAYS = float(os.environ.get("LLM_MEMORY_REQUEST_MAX_AGE_DAYS", "30"))
-
-
 def _retire_request(path: Path, session_id: str, reason: str) -> None:
     """Delete a request that can never succeed.
 
@@ -142,13 +139,24 @@ def _retire_request(path: Path, session_id: str, reason: str) -> None:
     print(f"llm_memory: retired extraction request for {session_id} ({reason})")
 
 
-def _request_expired(req: dict, max_age_days: float = _REQUEST_MAX_AGE_DAYS) -> bool:
-    """Backstop for a request nothing else can classify.
+def _request_orphaned(home: Path, project: str, req: dict) -> bool:
+    """An old request whose PROJECT no longer exists.
 
-    Age alone never drops live work: a genuinely unprocessed session is still
-    reported by coverage and re-enqueued.  This only clears requests that
-    outlived their transcript or their project.
+    An earlier version of this retired on age alone, and a reviewer was right
+    to call that a blocker: age is not evidence that work is dead.  A session
+    that coverage cannot yet see -- no conversation.md, so no project
+    attribution -- is invisible to coverage and will never be re-enqueued,
+    because session_end fires once.  Deleting its request on a birthday
+    destroys the only pointer to work that was still perfectly doable.  The
+    same unconditional check also deleted the spend-cap hold (excluded from
+    merged_sids, then caught by expiry anyway) and stale re-merges, whose
+    enqueued_at is old by definition.
+
+    So age is necessary but never sufficient. This fires only when the project
+    state file itself is gone, which no amount of re-running can fix.
     """
+    if (home / "projects" / f"{project}.json").exists():
+        return False
     stamp = req.get("enqueued_at")
     if not stamp:
         return False
@@ -156,7 +164,34 @@ def _request_expired(req: dict, max_age_days: float = _REQUEST_MAX_AGE_DAYS) -> 
         when = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
         return False
+    try:
+        max_age_days = float(os.environ.get("LLM_MEMORY_REQUEST_MAX_AGE_DAYS", "30"))
+    except ValueError:
+        # A malformed env var must not crash the worker at import time.
+        max_age_days = 30.0
     return (now() - when).total_seconds() > max_age_days * 86400
+
+
+def _transcript_for(home: Path, req: dict, session_id: str) -> Path | None:
+    """Locate a request's transcript, or None when it is genuinely gone.
+
+    Requests store the ABSOLUTE path recorded at enqueue time. The store root
+    moved (~/.claude/memory -> ~/.llm-memory), so every request enqueued before
+    that move carries a path that no longer resolves. Treating a dangling path
+    as "transcript gone" would unlink the request -- and for a session coverage
+    cannot see, that request is the only pointer to the work. Look under the
+    current root by session id before concluding anything is missing.
+    """
+    recorded = req.get("transcript_path") or ""
+    # Path("") is Path("."), which exists; an empty field is missing, not a dir.
+    if recorded:
+        candidate = Path(recorded)
+        if candidate.is_file():
+            return candidate
+    rebased = home / "transcripts" / f"{session_id}.jsonl"
+    if rebased.is_file():
+        return rebased
+    return None
 
 
 def _merged_session_ids(home: Path, project: str) -> set[str]:
@@ -180,6 +215,7 @@ def _merged_session_ids(home: Path, project: str) -> set[str]:
         return set()
     session_cap = float(os.environ.get("LLM_MEMORY_EXTRACT_SESSION_CAP_USD", "0.50"))
     retirable: set[str] = set()
+    held: set[str] = set()
     for session in state.get("sessions", []):
         sid = session.get("session_id")
         if not sid:
@@ -188,9 +224,14 @@ def _merged_session_ids(home: Path, project: str) -> set[str]:
         if isinstance(prior, dict):
             cost = _nonnegative_number(prior.get("cost_usd"))
             if prior.get("cost_source") == "unknown" or (cost is not None and cost >= session_cap):
+                # The hold must be STICKY. sessions[] can carry more than one
+                # row for a session id, and a single under-cap row alongside a
+                # cap-reserved one would otherwise make it retirable and erase
+                # the record of the blocked retry.
+                held.add(sid)
                 continue
         retirable.add(sid)
-    return retirable
+    return retirable - held
 
 
 def _coverage(project: str) -> dict:
@@ -561,12 +602,17 @@ def _process_project(home: Path, project: str) -> bool:
                             _retire_request(path, sid, "already merged into project state")
                             handled.add(sid)
                             continue
-                        if not Path(req.get("transcript_path", "")).exists():
-                            _retire_request(path, sid, "transcript no longer on disk")
+                        located = _transcript_for(home, req, sid)
+                        if located is None:
+                            _retire_request(path, sid, "transcript not found under the recorded path or the current root")
                             handled.add(sid)
                             continue
-                        if _request_expired(req):
-                            _retire_request(path, sid, f"expired: enqueued {req.get('enqueued_at')}")
+                        # Repair the record rather than re-deriving it every pass.
+                        if str(located) != req.get("transcript_path"):
+                            req["transcript_path"] = str(located)
+                            atomic_json(path, req)
+                        if _request_orphaned(home, project, req):
+                            _retire_request(path, sid, f"project state gone; enqueued {req.get('enqueued_at')}")
                             handled.add(sid)
                             continue
                         last_attempt = iso()

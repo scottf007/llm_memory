@@ -82,8 +82,11 @@ def main() -> None:
     # field, so the adapter should follow the file's shape while the label is
     # read from the record.  Splitting that touches hooks, process_transcripts
     # and backfill_conversations, so this guard only stops the data loss.
+    # turns is None when the field is absent or unparseable -- which a wrong
+    # adapter can also produce. Treat "no countable turns" the same as zero, so
+    # the guard does not depend on the stub happening to render an exact 0.
     turns = _rendered_turns(result)
-    if turns == 0 and args.jsonl_path.stat().st_size > 0:
+    if (turns is None or turns == 0) and args.jsonl_path.stat().st_size > 0:
         print(
             f"Error: extraction produced 0 turns from a non-empty transcript "
             f"({args.jsonl_path}) using --client {args.client}. Refusing to write.\n"
