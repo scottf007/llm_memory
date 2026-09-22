@@ -106,21 +106,54 @@ hook_configs = {
     ]
 }
 
+# Which registrations this installer owns, keyed by script basename and derived
+# from hook_configs so the two can never drift apart.
+#
+# Identify our own entries by basename, NOT by a path substring. The previous
+# predicate matched '/memory/lib/hooks/', which is true of the retired
+# ~/.claude/memory root but false of the current ~/.llm-memory one -- the
+# character before "memory" is '-', not '/'. So the root rename silently broke
+# the predicate for the exact path the installer had started writing: each run
+# stripped the old location and appended a fresh copy of its own entry without
+# ever removing the copy it wrote last time.
+#
+# Measured on three machines on 2026-09-22 at 1->2, 2->3 and 3->4 groups per
+# event per run: linear and unbounded in the number of installs.
+#
+# This is not cosmetic duplication. session_end.sh ENQUEUES an extraction
+# request, so N registrations enqueue N requests -- upstream of systemd, which
+# is why "systemd will not run a oneshot twice" does not contain it. On a
+# machine where extraction is armed that is multiplied spend, not multiplied
+# logging: sessions that ended while a machine carried duplicate hooks left two
+# queued requests each.
+#
+# Matching by basename also makes the installer self-healing: it collapses
+# whatever duplicates a machine has already accumulated, from any previous
+# install location, on the next run.
+owned_scripts = {
+    str(hook.get('command', '')).rsplit('/', 1)[-1]
+    for entries in hook_configs.values()
+    for entry in entries
+    for hook in entry.get('hooks', [])
+}
+
+
+def _is_owned(group):
+    """True if this registration group is one of ours, wherever it points."""
+    for hook in group.get('hooks', []) or []:
+        command = str(hook.get('command', ''))
+        if command.rsplit('/', 1)[-1] in owned_scripts:
+            return True
+        if 'llm_memory_last_save' in command:
+            return True
+    return False
+
+
 for event, entries in hook_configs.items():
-    existing = settings['hooks'].get(event, [])
-    # Remove any old llm_memory hooks (from previous install locations)
-    existing = [
-        h for h in existing
-        if not any(
-            '/memory/lib/hooks/' in str(hook.get('command', ''))
-            or 'llm_memory_last_save' in str(hook.get('command', ''))
-            for hook in h.get('hooks', [])
-        )
-    ]
-    # Add new hooks
-    for entry in entries:
-        existing.append(entry)
-    settings['hooks'][event] = existing
+    # Replace our own registrations; never append beside them. Foreign hooks on
+    # the same event are preserved in their original order.
+    existing = [h for h in settings['hooks'].get(event, []) if not _is_owned(h)]
+    settings['hooks'][event] = existing + list(entries)
 
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
