@@ -184,6 +184,112 @@ that had nothing to say.
 
 ### 2c. For each main-session transcript, in order
 
+0. **Re-check that this session is still unprocessed**, immediately before
+   spending anything on it. The coverage snapshot from Step 1 ages: a run over
+   several projects can be tens of minutes old by the time it reaches the last
+   one, and nothing in this skill holds a lock across that gap (the extract
+   step cannot run under the project lock, by design — see the note above the
+   `flock` recipe).
+
+   Substitute **all three** placeholders — `PROJECT_NAME`, `SESSION_ID` and
+   `CATEGORY`. A literal `PROJECT_NAME` left in place is merely a missing file,
+   which answers `still_unprocessed` and tells you nothing.
+   `CATEGORY` is the literal word `stale` for
+   a session from the `stale` list, or `fresh` for one from
+   `unprocessed_sorted` — it is not optional and there is no default, because a
+   stale session guessed as fresh is reported `already_merged` and silently
+   loses its `--rerun`. `SESSION_ID` must be the `session_id` exactly as Step 1
+   produced it; a shortened display prefix matches nothing and is
+   indistinguishable from a session that was never merged.
+
+   ```bash
+   MEMORY_ROOT="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
+   python3 - "$MEMORY_ROOT/projects/PROJECT_NAME.json" SESSION_ID CATEGORY <<'PY'
+   import json, sys
+   if len(sys.argv) != 4 or sys.argv[3] not in ("stale", "fresh"):
+       # Never guess a category. Guessing "fresh" for a stale session answers
+       # already_merged with full confidence and drops its --rerun.
+       print("bad_invocation")
+       raise SystemExit
+   state_path, sid, category = sys.argv[1], sys.argv[2], sys.argv[3]
+   try:
+       with open(state_path) as fh:
+           sessions = json.load(fh).get("sessions")
+       if sessions is None or sessions == []:
+           merged = set()                  # nothing merged yet; proceed
+       elif not isinstance(sessions, list):
+           raise TypeError("sessions is not a list")
+       else:
+           # Count a row only on a non-empty string id. Anything else -- a
+           # non-dict, a missing or null id, a blank one, or an unhashable one
+           # such as a list -- falls out of the set rather than aborting the
+           # project, so one bad row cannot hide every valid id beside it.
+           merged = {s["session_id"] for s in sessions
+                     if isinstance(s, dict)
+                     and isinstance(s.get("session_id"), str)
+                     and s["session_id"]}
+           # But a non-empty list that yielded no id at all is not an empty
+           # membership set -- it is a file we failed to understand.
+           if not merged:
+               raise TypeError("sessions has no readable session_id")
+   except FileNotFoundError:
+       # A project that has never merged has no state file. Skipping here would
+       # drop its first run entirely, so absence must mean "proceed".
+       print("still_unprocessed")
+   except (OSError, ValueError, TypeError, AttributeError):
+       # Torn, unreadable or unexpectedly shaped state is not evidence either
+       # way, and must not be answered with a confident token.
+       print("state_unreadable")
+   else:
+       # A stale session IS in sessions[] -- that is what its earlier merge
+       # recorded. Membership therefore cannot decide it, and it is exactly the
+       # case that must be re-extracted and merged with --rerun.
+       print("still_unprocessed" if category == "stale"
+             else ("already_merged" if sid in merged else "still_unprocessed"))
+   PY
+   ```
+
+   The printed token is the whole decision; do not re-apply the reasoning above
+   it by hand:
+
+   - `still_unprocessed` → proceed to step 1.
+   - `already_merged` → **skip this session entirely.** Another run merged it
+     after your snapshot. Do not extract, do not merge, and say so in the Step
+     3 summary.
+   - `state_unreadable` → **stop processing this project** and report it in the
+     Step 3 summary. Do not extract against a state file you could not read.
+   - `bad_invocation` → you substituted the placeholders wrongly. Fix the call;
+     do not proceed and do not guess a category.
+
+   Why this is step 0 and not a later guard: `merger.py` already refuses a
+   delta whose session is in `sessions[]`, but it refuses *after* the extractor
+   has been paid for. Checking the merge verb (step 3) makes that loss visible;
+   only checking first makes it free.
+
+   **What this closes, and what it does not.** For a `fresh` session it closes
+   the window where the other run has already merged by the time you reach this
+   one — the common shape in a multi-project run, whose Step 1 snapshot can be
+   tens of minutes old by the last project. It does **not** close two runs
+   aligned on the same session: if both read `sessions[]` before either merges,
+   both see `still_unprocessed` and both pay. Extraction is the slow part, so
+   that is the likely interleaving for two runs started together.
+
+   It closes nothing at all for a `stale` session. That branch never reads
+   membership — it cannot, since membership is what being stale implies — so it
+   cannot tell that another run has already finished the `--rerun`. Two runs
+   re-merging the same stale session both pay, whatever their timing.
+
+   Membership is not a lease. Nothing between this read and the merge records
+   "I am extracting this session," and the extract step cannot sit inside the
+   project lock. Closing the aligned case needs a claim written under the lock,
+   released before the extractor runs, and cleared at merge. That does not
+   exist today; this check is not a substitute for it.
+
+   Observed 2026-09-22: two `/narrative` runs on one machine both took a
+   coverage snapshot, both saw utilityswitch `a09a564e` as unprocessed, and
+   both extracted it. One delta was refused at merge with `already in
+   sessions[] -- delta NOT applied`, after the spend.
+
 1. **Check the delta cache** before spawning an agent:
 
    ```bash
