@@ -401,8 +401,23 @@ def _age_file(path, days):
     os.utime(path, (ts, ts))
 
 
-def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None):
-    """Archive transcript that clears claude's min_user_turns=5 + content gate."""
+def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None,
+                                  project="testproj"):
+    """Archive transcript that clears claude's min_user_turns=5 + content gate.
+
+    Records carry `cwd`, as real Claude transcripts do, because that is the
+    only thing `project:` is rendered from. Without it the transcript extracts
+    as unattributed, and session_start.sh runs process_transcripts on every
+    invocation: whenever this jsonl lands with an mtime strictly newer than the
+    stub conversation.md written by _register_session, ensure_conversation_md
+    re-extracts and the stub's `project:` disappears. The session then drops
+    out of the project's registry and the hook reports zero new sessions.
+
+    That is a real ordering race, not a theoretical one -- consecutive writes
+    shared an mtime in 195 of 200 pairs at rest, but this helper builds ten
+    JSON records between the two writes, so a loaded suite made the jsonl
+    newer often enough to fail about one full run in three.
+    """
     records = []
     base = datetime.now(timezone.utc) if last_ts is None else last_ts
     for i in range(n_user_turns):
@@ -411,6 +426,7 @@ def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None
             "timestamp": (base - timedelta(hours=n_user_turns - i)).strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             ),
+            **({"cwd": f"/home/user/projects/{project}"} if project else {}),
             "message": {"role": "user", "content": f"turn {i}: please continue the work"},
         })
         records.append({
@@ -419,6 +435,7 @@ def _write_substantive_transcript(home, session_id, n_user_turns=5, last_ts=None
                 base if i == n_user_turns - 1
                 else base - timedelta(hours=n_user_turns - i)
             ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            **({"cwd": f"/home/user/projects/{project}"} if project else {}),
             "message": {"role": "assistant", "content": SUBSTANTIVE_ASSISTANT},
         })
     path = home / ".llm-memory" / "transcripts" / f"{session_id}.jsonl"
@@ -521,6 +538,44 @@ class TestNarrativeLivenessAgeSignal:
             f"dormant old narrative must not false-alarm. Output:\n{stdout}"
         )
         assert "AGE:" not in stdout
+
+    def test_reextract_must_not_unstamp_the_project(self, tmp_path):
+        """The 1-in-3 flake, made deterministic.
+
+        session_start.sh runs process_transcripts on every invocation, and
+        ensure_conversation_md re-extracts whenever the jsonl is strictly newer
+        than the conversation.md. Forcing that ordering used to drop the stub's
+        `project:` -- the transcript records carry the cwd it is rendered from,
+        and without the frontmatter line the session leaves the project's
+        registry entirely, so the hook reports zero new sessions.
+        """
+        home, conn, _ = _setup_test_home(tmp_path)
+        _write_narrative(home, "testproj", "# fresh narrative")
+        _write_project_state(home, "testproj", merged_session_ids=[])
+        stub = _register_session(home, "today-1", "testproj")
+        # project=None => records carry NO cwd, so the re-extract renders no
+        # `project:` of its own. That is what forces _keep_project to be the
+        # thing preserving the attribution; with a cwd present this test would
+        # pass even with the hardening removed.
+        jsonl = _write_substantive_transcript(home, "today-1", project=None)
+        conn.close()
+        assert "cwd" not in jsonl.read_text(), "fixture must not stamp cwd here"
+
+        # Force the losing side of the race every time.
+        newer = jsonl.stat().st_mtime + 2
+        os.utime(stub, (newer - 4, newer - 4))
+        os.utime(jsonl, (newer, newer))
+        assert stub.stat().st_mtime < jsonl.stat().st_mtime
+
+        stdout, stderr, rc = _run_session_start(home, source="startup",
+                                                cwd="/home/user/projects/testproj")
+        assert rc == 0, stderr
+        assert "project: testproj" in stub.read_text(), (
+            "re-extraction dropped the project attribution:\n" + stub.read_text()
+        )
+        assert "AUTOMATIC TASK: 1 new session(s) since last narrative" in stdout, (
+            f"session fell out of its project registry. Output:\n{stdout}"
+        )
 
     def test_recent_narrative_with_new_sessions_has_no_age_line(self, tmp_path):
         """Count-based check #2 still fires for a fresh backlog; the age

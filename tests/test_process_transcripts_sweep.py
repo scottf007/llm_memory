@@ -275,3 +275,71 @@ def test_grok_harness_skip_is_indexed_before_active_archive(sandbox, tmp_path, m
     assert entry["reason"] == "grok_pong_healthcheck"
     assert entry["client"] == "grok"
     assert entry["source_version"]["path"] == str(source.resolve())
+
+
+class TestKeepProjectOnReextract:
+    """A re-extract refreshes turns; it must never revise attribution.
+
+    `project:` renders only from a transcript's cwd, so a jsonl whose records
+    carry none extracts as unattributed. Overwriting an attributed conversation
+    with that silently removes the session from its project's coverage, from
+    the SessionStart new-session count, and from /narrative's work list.
+    """
+
+    def test_previous_project_is_restored_when_reextract_drops_it(self):
+        rendered = "---\nsession_id: s1\nclient: claude\nturns: 5\n---\n\nbody\n"
+        out = pt._keep_project(rendered, "testproj")
+        assert "project: testproj" in out
+        assert out.index("project: testproj") > out.index("session_id: s1")
+        assert out.endswith("body\n")
+
+    def test_reextracts_own_project_wins(self):
+        rendered = "---\nsession_id: s1\nproject: fresh\nclient: claude\n---\n\nbody\n"
+        assert pt._keep_project(rendered, "stale") == rendered
+
+    def test_no_previous_project_is_a_noop(self):
+        rendered = "---\nsession_id: s1\nclient: claude\n---\n\nbody\n"
+        assert pt._keep_project(rendered, "") == rendered
+
+    def test_no_frontmatter_is_never_invented(self):
+        rendered = "body only, no frontmatter\n"
+        assert pt._keep_project(rendered, "testproj") == rendered
+
+    def test_project_is_not_inserted_past_the_frontmatter_terminator(self):
+        """A body line starting with session_id must not attract the insert."""
+        rendered = "---\nclient: claude\n---\n\nsession_id: not-frontmatter\n"
+        out = pt._keep_project(rendered, "testproj")
+        assert out.split("---")[1].strip().splitlines() == [
+            "client: claude", "project: testproj",
+        ]
+        assert out.endswith("session_id: not-frontmatter\n")
+
+    def test_body_line_starting_project_is_prose_not_attribution(self):
+        """iter_sessions reads frontmatter only, so prose must not look
+        authoritative -- otherwise the session still leaves its project."""
+        rendered = "---\nsession_id: s1\nclient: claude\n---\n\nproject: prose\n"
+        out = pt._keep_project(rendered, "testproj")
+        assert "project: testproj" in out.split("---")[1]
+        assert "project: prose" in out
+
+    def test_unterminated_frontmatter_is_left_alone(self):
+        rendered = "---\nsession_id: s1\nclient: claude\n\nno terminator ever\n"
+        assert pt._keep_project(rendered, "testproj") == rendered
+
+    def test_crlf_insert_keeps_the_line_ending(self):
+        rendered = "---\r\nsession_id: s1\r\nclient: claude\r\n---\r\n\r\nbody\r\n"
+        out = pt._keep_project(rendered, "testproj")
+        assert "project: testproj\r\n" in out
+        # An LF-only insert would leave this bare sequence behind.
+        assert "\nproject: testproj\n" not in out
+
+    def test_missing_session_id_still_keeps_the_project(self):
+        """A renderer naming its key differently must not lose attribution."""
+        rendered = "---\nclient: claude\nturns: 5\n---\n\nbody\n"
+        out = pt._keep_project(rendered, "testproj")
+        assert "project: testproj" in out.split("---")[1]
+
+    def test_multiline_previous_value_is_refused(self):
+        """A newline in the value would terminate the frontmatter early."""
+        rendered = "---\nsession_id: s1\n---\n\nbody\n"
+        assert pt._keep_project(rendered, "bad\nvalue") == rendered

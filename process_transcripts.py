@@ -23,6 +23,7 @@ import shutil
 from pathlib import Path
 
 import adapters
+import conversations
 from tools.memory_config import memory_root
 from transcript_skips import (
     applicable_skip,
@@ -141,8 +142,69 @@ def ensure_conversation_md(jsonl_path: Path, session_id: str,
     dest = CONVERSATIONS_DIR / f"{session_id}.md"
     if dest.exists() and dest.stat().st_mtime >= jsonl_path.stat().st_mtime:
         return dest
-    dest.write_text(adapters.extract_session(jsonl_path, client))
+    previous_project = ""
+    if dest.exists():
+        try:
+            previous_project = conversations._parse_frontmatter(
+                dest.read_text(errors="ignore")
+            ).get("project", "")
+        except Exception:
+            # This runs inside a sweep over every archived session. One
+            # unreadable or oddly shaped file must degrade to "attribution
+            # unknown" for that file, never abort the whole run.
+            previous_project = ""
+    dest.write_text(_keep_project(
+        adapters.extract_session(jsonl_path, client), previous_project
+    ))
     return dest
+
+
+def _keep_project(rendered: str, previous_project: str) -> str:
+    """Re-attach a project attribution the re-extract would otherwise drop.
+
+    `project:` is rendered only from a transcript's `cwd`, so a jsonl whose
+    records carry none extracts as unattributed. Overwriting an attributed
+    conversation with that is silent data loss with a wide blast radius: the
+    frontmatter is how `iter_sessions` assigns a session to a project, so an
+    unstamped file drops out of its project's coverage, out of the new-session
+    count the SessionStart hook reports, and out of `/narrative`'s work list --
+    without any error, and while the transcript itself still sits on disk.
+
+    Re-extraction is meant to refresh turns, not to revise attribution, so a
+    project that was known stays known. A re-extract that produces its OWN
+    project line is authoritative and is left alone.
+    """
+    if not previous_project or "\n" in previous_project or "\r" in previous_project:
+        # A multi-line value would terminate the frontmatter early and corrupt
+        # every field after it. Refuse rather than write a broken header.
+        return rendered
+    lines = rendered.split("\n")
+
+    def bare(line: str) -> str:
+        return line.rstrip("\r").strip()
+
+    if not lines or bare(lines[0]) != "---":
+        return rendered          # no frontmatter to extend; never invent one
+    close = next((i for i in range(1, len(lines)) if bare(lines[i]) == "---"), None)
+    if close is None:
+        return rendered          # unterminated frontmatter; nothing safe to do
+    block = lines[1:close]
+    if any(line.rstrip("\r").startswith("project: ") for line in block):
+        # Scan the FRONTMATTER only. A body line beginning "project: " is prose,
+        # and iter_sessions never reads it, so treating it as an attribution
+        # would drop the session from its project exactly as before.
+        return rendered
+    suffix = "\r" if lines[0].endswith("\r") else ""
+    # Sit directly under session_id when there is one, else immediately above
+    # the terminator, so a renderer that names its key differently still keeps
+    # the attribution rather than silently losing it.
+    insert_at = next(
+        (i + 1 for i in range(1, close)
+         if lines[i].rstrip("\r").startswith("session_id: ")),
+        close,
+    )
+    lines.insert(insert_at, f"project: {previous_project}{suffix}")
+    return "\n".join(lines)
 
 
 def _foreign_skip_reason(adapter, meta, turns) -> str | None:
