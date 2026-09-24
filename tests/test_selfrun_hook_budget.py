@@ -62,6 +62,7 @@ def test_session_end_p95_under_1s_over_20_runs(tmp_path):
 
 def test_session_start_with_failed_status_p95_under_100ms_over_20_runs(tmp_path):
     home, memory_home = H.make_home(tmp_path)
+    H.install_worker_unit(home)
     H.write_project_state(memory_home, "selfrunproj")
     status_path = memory_home / "projects" / "selfrunproj.extraction-status.json"
     status_path.write_text(json.dumps({

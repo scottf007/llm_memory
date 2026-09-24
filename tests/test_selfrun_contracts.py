@@ -416,6 +416,7 @@ def test_worker_status_counts_match_an_independently_computed_real_coverage_call
 
 def test_session_start_degraded_status_still_injects_narrative_and_normal_body(tmp_path):
     home, memory_home = H.make_home(tmp_path)
+    H.install_worker_unit(home)
     H.write_project_state(memory_home, "selfrunproj")
     (memory_home / "projects" / "selfrunproj.narrative.md").write_text(
         "SELFRUN-NARRATIVE-MARKER: the living story of selfrunproj.\n"

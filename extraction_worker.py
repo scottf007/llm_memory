@@ -66,6 +66,23 @@ def request_files(home: Path, project: str | None = None) -> list[Path]:
     return result
 
 
+def _blocking_requests(home: Path, project: str) -> list[Path]:
+    """Request files that keep *project* from reporting idle.
+
+    A record that cannot be parsed has no attributable project, so it blocks
+    every project until an operator repairs or removes it.
+    """
+    blocking = []
+    for path in sorted(request_dir(home).glob("*.json")) if request_dir(home).exists() else []:
+        try:
+            owner = json.loads(path.read_text()).get("project")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            owner = None
+        if owner is None or owner == project:
+            blocking.append(path)
+    return blocking
+
+
 def status_path(home: Path, project: str) -> Path:
     return home / "projects" / f"{project}.extraction-status.json"
 
@@ -93,7 +110,10 @@ def save_status(home: Path, project: str, **updates) -> dict:
     # Physical request files, not merely parseable/project-attributable ones,
     # block the all-clear.  A malformed wake record is still unresolved work
     # and must remain visible until an operator repairs or removes it.
-    if data.get("state") == "idle" and any(request_dir(home).glob("*.json")):
+    #
+    # Only THIS project's requests block it.  The check used to be global, so
+    # one stuck request anywhere pinned every project at "waiting".
+    if data.get("state") == "idle" and _blocking_requests(home, project):
         data["state"] = "waiting"
         data["error_summary"] = "extraction request(s) remain pending"
     data["write_seq"] = int(data.get("write_seq", 0)) + 1
@@ -776,6 +796,64 @@ def prune(home: Path) -> None:
             artifact.unlink(missing_ok=True); ack.unlink(missing_ok=True)
 
 
+def refresh_status(home: Path, project: str, *, last_success: str | None = None) -> dict:
+    """Rebuild *project*'s status from the ledger and queue, without the worker.
+
+    The status sidecar used to be written only by the worker, so a /narrative
+    merge -- or the worker being uninstalled -- left it frozen: projects whose
+    ledgers were current kept reporting "failed, never succeeded" forever.
+    """
+    try:
+        unprocessed, stale = _pending_counts(_coverage(project))
+    except Exception:
+        current = status(home, project)
+        unprocessed, stale = int(current.get("unprocessed", 0)), int(current.get("stale", 0))
+    remaining = request_files(home, project)
+    updates = {"state": "waiting" if remaining or unprocessed or stale else "idle",
+               "unprocessed": unprocessed, "stale": stale,
+               "request_ids": [json.loads(p.read_text()).get("request_id") for p in remaining],
+               "error_summary": None}
+    if last_success:
+        updates["last_success"] = last_success
+    return save_status(home, project, **updates)
+
+
+def record_merge(home: Path, project: str, session_id: str) -> None:
+    """A session was merged outside the worker (e.g. /narrative): retire its
+    requests and bring the status sidecar up to date."""
+    for path in request_files(home, project):
+        try:
+            if json.loads(path.read_text()).get("session_id") == session_id:
+                _retire_request(path, session_id, "merged by /narrative")
+        except (OSError, json.JSONDecodeError):
+            continue
+    if status_path(home, project).exists():
+        refresh_status(home, project, last_success=iso())
+
+
+def reconcile(home: Path) -> None:
+    """One-off repair of every status sidecar against its ledger."""
+    for path in sorted((home / "projects").glob("*.extraction-status.json")):
+        project = path.name[: -len(".extraction-status.json")]
+        merged = _merged_session_ids(home, project)
+        for req_path in request_files(home, project):
+            try:
+                sid = json.loads(req_path.read_text()).get("session_id")
+            except (OSError, json.JSONDecodeError):
+                continue
+            if sid in merged:
+                _retire_request(req_path, sid, "already merged into project state")
+        last_success = status(home, project).get("last_success")
+        if not last_success:
+            try:
+                last_success = json.loads((home / "projects" / f"{project}.json").read_text()).get("last_rebuilt_at")
+            except (OSError, json.JSONDecodeError):
+                last_success = None
+        data = refresh_status(home, project, last_success=last_success)
+        print(f"{project}: {data['state']} (unprocessed={data['unprocessed']}, stale={data['stale']}, "
+              f"queued={len(data['request_ids'])}, last_success={data.get('last_success')})")
+
+
 def mark_failed(home: Path, message: str) -> None:
     """Surface a unit-level failure for every project that still has work."""
     projects: set[str] = set()
@@ -808,6 +886,7 @@ def main(argv: list[str] | None = None) -> int:
     a = sub.add_parser("acknowledge"); a.add_argument("--project", required=True); a.add_argument("--session-id", required=True)
     f = sub.add_parser("mark-failed"); f.add_argument("--message", default="systemd extraction worker failed")
     sub.add_parser("prune")
+    sub.add_parser("reconcile")
     args = parser.parse_args(argv); home = memory_root()
     if args.command == "enqueue": enqueue(home, args.project, args.session_id, args.transcript, args.source)
     elif args.command == "status": print(json.dumps(status(home, args.project)))
@@ -823,6 +902,8 @@ def main(argv: list[str] | None = None) -> int:
             atomic_json(p.with_suffix(p.suffix + ".ack"), {"acknowledged_at": iso()})
     elif args.command == "mark-failed":
         mark_failed(home, args.message)
+    elif args.command == "reconcile":
+        reconcile(home)
     else: prune(home)
     return 0
 

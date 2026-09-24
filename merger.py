@@ -747,6 +747,8 @@ def _main_locked(project_path: Path, delta_path: Path, items_root_override: Path
 
     fanned = fan_out_items(state, project, items_root)
     _rebuild_items_index(db_path, items_root)
+    if not sandboxed:
+        _record_merge(project, session_id)
 
     if skipped:
         # The fan-out below still runs and still rewrites the file, so this
@@ -760,6 +762,20 @@ def _main_locked(project_path: Path, delta_path: Path, items_root_override: Path
 
     print(f"{'Re-merged' if already_merged else 'Merged'} {session_id} into "
           f"{project_path} ({inbox} inbox, {fanned} fanned out)")
+
+
+def _record_merge(project: str, session_id: str) -> None:
+    """Tell the extraction status sidecar this session is merged.
+
+    Without this, only the worker ever wrote the sidecar, so sessions merged
+    by /narrative left the startup banner reporting "never succeeded".
+    Best-effort: a status refresh must never fail a merge that already landed.
+    """
+    try:
+        from extraction_worker import record_merge
+        record_merge(memory_root(), project, session_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"merger.py: warning — extraction status not refreshed: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

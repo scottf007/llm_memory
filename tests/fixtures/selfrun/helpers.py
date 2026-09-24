@@ -57,6 +57,9 @@ def base_env(home: Path, memory_home: Path, *, extra: dict | None = None) -> dic
     env = os.environ.copy()
     env["HOME"] = str(home)
     env["LLM_MEMORY_HOME"] = str(memory_home)
+    # The hooks look for the worker unit under $XDG_CONFIG_HOME; the real one
+    # must not decide whether a fake tree "has" the worker installed.
+    env.pop("XDG_CONFIG_HOME", None)
     env["PATH"] = (
         str(FIXTURES_DIR) + os.pathsep
         + str(Path(sys.executable).parent) + os.pathsep
@@ -84,6 +87,14 @@ def run_hook(hook_name: str, home: Path, memory_home: Path, input_json: str,
     )
     wall = time.monotonic() - t0
     return result.stdout, result.stderr, result.returncode, wall
+
+
+def install_worker_unit(home: Path) -> Path:
+    """Make the fake HOME look like the opt-in extraction worker is installed."""
+    unit = home / ".config" / "systemd" / "user" / "llm-memory-extract.service"
+    unit.parent.mkdir(parents=True, exist_ok=True)
+    unit.write_text("[Service]\n")
+    return unit
 
 
 def write_project_state(memory_home: Path, project: str, state: dict | None = None) -> Path:

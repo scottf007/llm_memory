@@ -28,8 +28,17 @@ if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
                 (.last_success // "never")] | @tsv' "$FAST_STATUS" 2>/dev/null
     )
     FAST_WAITING=$(( ${FAST_UNPROCESSED:-0} + ${FAST_STALE:-0} ))
+    # The worker is opt-in (28c9ed3).  When its unit is not installed, a
+    # "failed" sidecar is a leftover from before it was removed, not an
+    # outage: say where the backlog goes instead of reporting a failure.
+    FAST_WORKER_INSTALLED=false
+    [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/llm-memory-extract.service" ] && FAST_WORKER_INSTALLED=true
     if { [ "$FAST_STATE" = "waiting" ] || [ "$FAST_STATE" = "failed" ]; } && [ "$FAST_WAITING" -gt 0 ] 2>/dev/null; then
-        echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
+        if [ "$FAST_WORKER_INSTALLED" = true ]; then
+            echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
+        else
+            echo "LLM_MEMORY_NOTE: automatic extraction is off (opt-in); $FAST_WAITING session(s) for $FAST_PROJECT await /narrative"
+        fi
         EXTRACTION_DEGRADED=true
     fi
 
@@ -42,12 +51,19 @@ if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
     #
     # Count the directory rather than trusting .request_ids: that field is
     # written BY the worker, so a worker that never runs reports a stale and
-    # flattering number.  Globbing is pure bash and adds no subprocess.
+    # flattering number.  The total is a pure-bash glob; the per-project count
+    # costs one grep, only when the queue is non-empty.
     FAST_QUEUE_DIR="$MEMORY_DIR/runtime/extraction-requests"
     FAST_QUEUED=0
+    FAST_PROJECT_QUEUED=0
     if [ -d "$FAST_QUEUE_DIR" ]; then
         FAST_QUEUE_FILES=("$FAST_QUEUE_DIR"/*.json)
-        [ -e "${FAST_QUEUE_FILES[0]}" ] && FAST_QUEUED=${#FAST_QUEUE_FILES[@]}
+        if [ -e "${FAST_QUEUE_FILES[0]}" ]; then
+            FAST_QUEUED=${#FAST_QUEUE_FILES[@]}
+            # One grep, not one jq per file: the per-project count is what a
+            # per-project line may report.
+            FAST_PROJECT_QUEUED=$(grep -lF "\"project\": \"$FAST_PROJECT\"" "${FAST_QUEUE_FILES[@]}" 2>/dev/null | wc -l)
+        fi
     fi
     # Reported, but deliberately NOT setting EXTRACTION_DEGRADED: a deep queue is
     # a backlog, not a reason to drop the caller into the reduced startup path.
@@ -59,9 +75,10 @@ if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
     fi
     # An empty FAST_STATE means jq failed, not that extraction never ran, so it
     # must not be reported as a never-succeeded worker.
-    if [ -n "$FAST_STATE" ] && [ "$FAST_STATE" != "idle" ] \
+    # Only meaningful while the worker exists; the count is this project's own.
+    if [ "$FAST_WORKER_INSTALLED" = true ] && [ -n "$FAST_STATE" ] && [ "$FAST_STATE" != "idle" ] \
        && { [ -z "$FAST_LAST_OK" ] || [ "$FAST_LAST_OK" = "never" ] || [ "$FAST_LAST_OK" = "null" ]; }; then
-        echo "LLM_MEMORY_WARN: extraction for $FAST_PROJECT has NEVER succeeded (state=$FAST_STATE, $FAST_QUEUED queued)"
+        echo "LLM_MEMORY_WARN: extraction for $FAST_PROJECT has NEVER succeeded (state=$FAST_STATE, $FAST_PROJECT_QUEUED queued for this project)"
     fi
 fi
 
@@ -81,7 +98,11 @@ if [ "$EXTRACTION_DEGRADED" = true ]; then
         echo "$FAST_NARRATIVE"
     fi
     echo ""
-    echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting (queue: ${FAST_QUEUED:-0} request(s); last success: ${FAST_LAST_OK:-never}). Do not ask the user for permission."
+    if [ "$FAST_WORKER_INSTALLED" = true ]; then
+        echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting (queue: ${FAST_PROJECT_QUEUED:-0} request(s); last success: ${FAST_LAST_OK:-never}). Do not ask the user for permission."
+    else
+        echo "AUTOMATIC TASK: $FAST_WAITING new session(s) since last narrative update for project '$FAST_PROJECT'."
+    fi
     echo "Use project_lookup for drill-down into the project JSON. Use resume(project) to pick up prior work."
     echo "=== END LOADED MEMORIES ==="
     exit 0

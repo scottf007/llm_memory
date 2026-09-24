@@ -90,6 +90,7 @@ def test_control_no_status_file_identical_to_today(tmp_path):
 
 def test_session_start_prints_warn_for_failed_status_no_coverage_or_model_subprocess(tmp_path):
     home, memory_home = H.make_home(tmp_path)
+    H.install_worker_unit(home)
     H.write_project_state(memory_home, "selfrunproj")
     _write_status(
         memory_home, "selfrunproj",
@@ -121,6 +122,44 @@ def test_session_start_prints_warn_for_failed_status_no_coverage_or_model_subpro
     assert not claude_logs.exists() or list(claude_logs.glob("call-*.argv")) == [], (
         "SessionStart must never invoke a model backend"
     )
+
+
+def _start(home, memory_home, sid):
+    input_json = json.dumps({
+        "source": "startup", "trigger": "startup",
+        "cwd": "/home/user/projects/selfrunproj", "session_id": sid,
+    })
+    stdout, stderr, rc, _ = H.run_hook("session_start.sh", home, memory_home, input_json)
+    assert rc == 0, f"stderr:\n{stderr}"
+    return stdout
+
+
+def test_uninstalled_worker_failed_status_is_a_note_not_a_failure(tmp_path):
+    """The worker is opt-in. A "failed" sidecar left behind when its unit was
+    removed must not be narrated as a live outage, nor as never-succeeded."""
+    home, memory_home = H.make_home(tmp_path)
+    H.write_project_state(memory_home, "selfrunproj")
+    _write_status(memory_home, "selfrunproj", state="failed", unprocessed=2,
+                  last_attempt="2026-09-06T00:00:00Z")
+    stdout = _start(home, memory_home, "selfrun-optin-sess")
+    assert "LLM_MEMORY_WARN" not in stdout, stdout
+    assert "NEVER succeeded" not in stdout, stdout
+    assert "extraction is off (opt-in); 2 session(s) for selfrunproj await /narrative" in stdout
+    assert "AUTOMATIC TASK: 2 new session(s) since last narrative update for project 'selfrunproj'." in stdout
+
+
+def test_never_succeeded_counts_only_this_projects_requests(tmp_path):
+    home, memory_home = H.make_home(tmp_path)
+    H.install_worker_unit(home)
+    H.write_project_state(memory_home, "selfrunproj")
+    _write_status(memory_home, "selfrunproj", state="failed", unprocessed=0)
+    queue = memory_home / "runtime" / "extraction-requests"
+    queue.mkdir(parents=True)
+    for i, project in enumerate(["selfrunproj", "other", "other", "other"]):
+        (queue / f"r{i}.json").write_text(json.dumps(
+            {"project": project, "session_id": f"s{i}", "request_id": f"id{i}"}, indent=2))
+    stdout = _start(home, memory_home, "selfrun-count-sess")
+    assert "has NEVER succeeded (state=failed, 1 queued for this project)" in stdout, stdout
 
 
 def test_control_idle_extraction_status_no_warn_on_session_start(tmp_path):
