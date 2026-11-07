@@ -188,12 +188,9 @@ class TestPostCompactNarrativeStaleness:
         # Narrative file exists but {project}.json has no merged sessions yet.
         _write_narrative(home, "testproj", "# Old narrative")
         _write_project_state(home, "testproj", merged_session_ids=[])
-        # 3 sessions have happened that haven't been merged.  Each has its
-        # transcript: the waiting count is coverage truth (U1a), and a stub
-        # conversation.md with nothing on disk is nothing /narrative can process.
+        # 3 sessions have happened (conversation.md stubs) that haven't been merged
         for i in range(3):
             _register_session(home, f"sess-{i}", "testproj")
-            _write_substantive_transcript(home, f"sess-{i}")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="compact",
@@ -245,8 +242,6 @@ class TestStaleNarrativeMandatory:
         _write_project_state(home, "testproj", merged_session_ids=[])
         for i in range(5):
             _register_session(home, f"sess-{i}", "testproj")
-            # Coverage truth (U1a) counts sessions with a transcript on disk.
-            _write_substantive_transcript(home, f"sess-{i}")
         conn.close()
 
         stdout, _, rc = _run_session_start(home, source="startup",
@@ -296,8 +291,6 @@ class TestStaleNarrativeAutomaticTask:
         _write_narrative(home, "testproj", "# Old narrative")
         _write_project_state(home, "testproj", merged_session_ids=[])
         _register_session(home, "new-sess", "testproj")
-        # Coverage truth (U1a) counts sessions with a transcript on disk.
-        _write_substantive_transcript(home, "new-sess")
         conn.commit()
         conn.close()
 

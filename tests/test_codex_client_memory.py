@@ -544,9 +544,6 @@ class TestT5SessionStartHook:
         (memhome / "projects" / "testproj2.json").write_text(json.dumps(
             {"schema_version": "0.1", "project": "testproj2", "sessions": []}
         ))
-        # The count is coverage truth (U1a): the session needs its transcript.
-        from tests.test_codex_hook_parity import write_session_transcript
-        write_session_transcript(memhome, "codex-unmerged-1", "testproj2")
         result = self._run(home, memhome, "startup", "/home/user/projects/testproj2")
         assert result.returncode == 0, result.stderr
         assert "AUTOMATIC TASK" in result.stdout, result.stdout
