@@ -23,6 +23,29 @@ def _write_conversation(root: Path, session_id: str, project: str) -> None:
     )
 
 
+def write_session_transcript(root: Path, session_id: str, project: str) -> None:
+    """The archived transcript a real session has on disk.  Both hooks print
+    coverage truth (U1a), and coverage counts only transcripts that clear its
+    filters: five substantive user turns plus real assistant content.  The
+    records carry cwd, as real ones do, so re-extraction keeps the project."""
+    from datetime import datetime, timedelta, timezone
+    base = datetime.now(timezone.utc)
+    records = []
+    for i in range(5):
+        ts = (base - timedelta(hours=5 - i)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        cwd = f"/tmp/projects/{project}"
+        records.append({"type": "user", "timestamp": ts, "cwd": cwd,
+                        "message": {"role": "user", "content": f"turn {i}: please continue the work"}})
+        records.append({"type": "assistant", "timestamp": ts, "cwd": cwd,
+                        "message": {"role": "assistant", "content": (
+                            "Agreed on eventual consistency for this path. One addition: the "
+                            "reconciliation pass needs to be idempotent, because a crash mid-pass "
+                            "and a retry must not double-apply a write. I'll add a version check.")}})
+    (root / "transcripts").mkdir(parents=True, exist_ok=True)
+    (root / "transcripts" / f"{session_id}.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in records))
+
+
 def _home_and_memory(tmp_path, project="parity"):
     home = tmp_path / "home"
     memory = tmp_path / "memory"
@@ -57,6 +80,7 @@ def test_codex_and_claude_count_only_main_conversations(tmp_path):
     (memory / "projects" / "parity.json").write_text(json.dumps({"sessions": []}))
     for session_id in ("codex-plain-1", "agent-helper-9", "audit-thing-3"):
         _write_conversation(memory, session_id, "parity")
+        write_session_transcript(memory, session_id, "parity")
 
     claude = _run("session_start.sh", home, memory)
     codex = _run("codex_session_start.sh", home, memory)
@@ -85,6 +109,7 @@ def test_codex_plain_single_conversation_still_requests_narrative(tmp_path):
     home, memory = _home_and_memory(tmp_path)
     (memory / "projects" / "parity.json").write_text(json.dumps({"sessions": []}))
     _write_conversation(memory, "codex-plain-1", "parity")
+    write_session_transcript(memory, "codex-plain-1", "parity")
 
     result = _run("codex_session_start.sh", home, memory)
 

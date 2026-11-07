@@ -7,6 +7,16 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // .trigger // empty')
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 
+# LLM_MEMORY_NARRATIVE is internal plumbing, not a user-facing option (scott,
+# 8 Nov 2026: "We do not want flags").  AM sets it per seat role.  Only the
+# exact value "off" changes anything: that seat gets no memory injection at
+# all and the hook touches nothing.  "full", "head" (until a later unit
+# implements it), unset, empty and any other value all fail open to the
+# ordinary injection below, never to silence.
+if [ "${LLM_MEMORY_NARRATIVE:-on}" = "off" ]; then
+    exit 0
+fi
+
 MEMORY_DIR="${LLM_MEMORY_HOME:-$HOME/.llm-memory}"
 export LLM_MEMORY_HOME="$MEMORY_DIR"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,17 +38,17 @@ if [ -n "$FAST_PROJECT" ] && [ -f "$FAST_STATUS" ]; then
                 (.last_success // "never")] | @tsv' "$FAST_STATUS" 2>/dev/null
     )
     FAST_WAITING=$(( ${FAST_UNPROCESSED:-0} + ${FAST_STALE:-0} ))
-    # The worker is opt-in (28c9ed3).  When its unit is not installed, a
-    # "failed" sidecar is a leftover from before it was removed, not an
-    # outage: say where the backlog goes instead of reporting a failure.
+    # The worker is opt-in (28c9ed3).  Only the worker writes this sidecar, so
+    # its counts are evidence only while the worker unit is installed.  On
+    # 8 Nov 2026 the unit was absent, the sidecar still said "1" from its last
+    # write, and this path printed 1 where coverage said 26.  Without the
+    # worker, ignore the sidecar's counts and fall through: the ordinary path
+    # below computes coverage and prints that.
     FAST_WORKER_INSTALLED=false
     [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/llm-memory-extract.service" ] && FAST_WORKER_INSTALLED=true
-    if { [ "$FAST_STATE" = "waiting" ] || [ "$FAST_STATE" = "failed" ]; } && [ "$FAST_WAITING" -gt 0 ] 2>/dev/null; then
-        if [ "$FAST_WORKER_INSTALLED" = true ]; then
-            echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
-        else
-            echo "LLM_MEMORY_NOTE: automatic extraction is off (opt-in); $FAST_WAITING session(s) for $FAST_PROJECT await /narrative"
-        fi
+    if [ "$FAST_WORKER_INSTALLED" = true ] \
+       && { [ "$FAST_STATE" = "waiting" ] || [ "$FAST_STATE" = "failed" ]; } && [ "$FAST_WAITING" -gt 0 ] 2>/dev/null; then
+        echo "LLM_MEMORY_WARN: extraction: $FAST_WAITING session(s) waiting for $FAST_PROJECT ($FAST_STATE since $FAST_SINCE)"
         EXTRACTION_DEGRADED=true
     fi
 
@@ -98,11 +108,8 @@ if [ "$EXTRACTION_DEGRADED" = true ]; then
         echo "$FAST_NARRATIVE"
     fi
     echo ""
-    if [ "$FAST_WORKER_INSTALLED" = true ]; then
-        echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting (queue: ${FAST_PROJECT_QUEUED:-0} request(s); last success: ${FAST_LAST_OK:-never}). Do not ask the user for permission."
-    else
-        echo "AUTOMATIC TASK: $FAST_WAITING new session(s) since last narrative update for project '$FAST_PROJECT'."
-    fi
+    # Reached only with the worker installed (see above).
+    echo "AUTOMATIC TASK: extraction is $FAST_STATE for project '$FAST_PROJECT'; $FAST_WAITING session(s) remain waiting (queue: ${FAST_PROJECT_QUEUED:-0} request(s); last success: ${FAST_LAST_OK:-never}). Do not ask the user for permission."
     echo "Use project_lookup for drill-down into the project JSON. Use resume(project) to pick up prior work."
     echo "=== END LOADED MEMORIES ==="
     exit 0
@@ -306,8 +313,11 @@ if [ "$SOURCE" = "compact" ]; then
         else
             NARRATIVE=""
         fi
-        # Staleness: session_logs for this project minus sessions already merged into {project}.json
-        if [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
+        # Staleness: coverage truth (lib_session_common.sh); the registry
+        # count only if coverage fails.
+        if coverage_new_sessions "$PROJECT" "$SCRIPT_DIR" "$MEMORY_DIR"; then
+            COMPACT_NEW_SESSIONS="$COVERAGE_NEW_SESSIONS"
+        elif [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
             COMPACT_NEW_SESSIONS="$NEW_SESSION_COUNT"
         else
             COMPACT_NEW_SESSIONS=""
@@ -333,6 +343,12 @@ if [ "$SOURCE" = "compact" ]; then
     fi
 else
     # Fresh startup or resume
+    # Age-based liveness (Roadmap #4). File age is not the measure — a dormant
+    # project's old narrative is correct. Compose with narrative_coverage's
+    # filtered-count + _stale_session rather than duplicating them here.
+    # Contained on failure: an empty result means "not aging", and the
+    # registry count below stands in for the waiting count.
+    coverage_new_sessions "$PROJECT" "$SCRIPT_DIR" "$MEMORY_DIR"
     if [ -n "$PROJECT" ]; then
         # Narrative source of truth is the rendered .narrative.md file.
         NARRATIVE_FILE="$MEMORY_DIR/projects/$PROJECT.narrative.md"
@@ -341,8 +357,11 @@ else
         else
             NARRATIVE=""
         fi
-        # Staleness: count sessions that haven't been merged into {project}.json.sessions[]
-        if [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
+        # Staleness: coverage truth (lib_session_common.sh); the registry
+        # count only if coverage fails.
+        if [ -n "$COVERAGE_NEW_SESSIONS" ]; then
+            NEW_SESSIONS="$COVERAGE_NEW_SESSIONS"
+        elif [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
             NEW_SESSIONS="$NEW_SESSION_COUNT"
         else
             NEW_SESSIONS=""
@@ -353,27 +372,6 @@ else
         NEW_SESSIONS="0"
     fi
 
-    # Age-based liveness (Roadmap #4). File age is not the measure — a dormant
-    # project's old narrative is correct. Compose with narrative_coverage's
-    # filtered-count + _stale_session rather than duplicating them here.
-    # Contained on failure: an empty result means "not aging"; existing
-    # count-based checks still run.
-    LIVENESS=""
-    if [ -n "$PROJECT" ]; then
-        LIVENESS_PY="$MEMORY_DIR/lib/.venv/bin/python3"
-        if [ ! -x "$LIVENESS_PY" ]; then
-            LIVENESS_PY="$SCRIPT_DIR/.venv/bin/python3"
-        fi
-        if [ ! -x "$LIVENESS_PY" ]; then
-            LIVENESS_PY="python3"
-        fi
-        LIVENESS=$("$LIVENESS_PY" -c "
-import json, sys
-sys.path.insert(0, '$SCRIPT_DIR')
-from server import compute_narrative_coverage, narrative_liveness
-print(json.dumps(narrative_liveness(compute_narrative_coverage('$PROJECT')), separators=(',', ':')))
-" 2>/dev/null)
-    fi
     if [ -n "$LIVENESS" ]; then
         LIVENESS_AGING=$(printf '%s\n' "$LIVENESS" | jq -r '.aging // false' 2>/dev/null || echo false)
         LIVENESS_DAYS=$(printf '%s\n' "$LIVENESS" | jq -r '.signal_days // .narrative_age_days // empty' 2>/dev/null || true)
