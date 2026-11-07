@@ -237,28 +237,6 @@ for _mod in (extract_conversation, adapters, adapters.base, merger, renderer):
     fi
 fi
 
-# Sweep: collect transcripts not yet captured by hooks.
-# Only look at JSONL files modified since the last sweep (sentinel mtime).
-# This keeps startup fast on machines with thousands of accumulated transcripts.
-if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ]; then
-    TRANSCRIPT_DIR="$MEMORY_DIR/transcripts"
-    SENTINEL="$TRANSCRIPT_DIR/.last_sweep"
-    mkdir -p "$TRANSCRIPT_DIR"
-    if [ -f "$SENTINEL" ]; then
-        # Incremental: only files newer than the sentinel.
-        FIND_ARGS=(-newer "$SENTINEL")
-    else
-        # First run: full sweep.
-        FIND_ARGS=()
-    fi
-    while IFS= read -r src; do
-        [ -n "$src" ] || continue
-        base="${src##*/}"
-        [ -f "$TRANSCRIPT_DIR/$base" ] || cp "$src" "$TRANSCRIPT_DIR/$base" 2>/dev/null
-    done < <(find "$HOME/.claude/projects" -maxdepth 2 -name '*.jsonl' -type f "${FIND_ARGS[@]}" 2>/dev/null)
-    touch "$SENTINEL"
-fi
-
 DB="$MEMORY_DIR/memory.db"
 if [ ! -f "$DB" ]; then
     exit 0
@@ -297,11 +275,25 @@ if [ -n "$CLAUDE_ENV_FILE" ] && [ -n "$SESSION_ID" ]; then
     echo "export LLM_MEMORY_SESSION_ID='$SESSION_ID'" >> "$CLAUDE_ENV_FILE"
 fi
 
-# Auto-process all unprocessed transcripts (including synced ones)
 COUNT_PYTHON=$(resolve_hook_python "$SCRIPT_DIR" 2>/dev/null || true)
 
+# The transcript sweep (archive + extract) never runs inline: on 8 Nov 2026
+# it took 359 s on one startup against the 15 s hook timeout.  It is
+# launched detached, at the lowest CPU/IO priority, and returns at once.
+# process_transcripts.py --startup-sweep is single-flight (a kernel lock held
+# by the sweep itself) and rate-limited; see run_startup_sweep.  The counts
+# printed below do not wait for it.  Live Claude sessions are counted from
+# ~/.claude/projects directly.  A session recovered by this sweep (missed
+# SessionEnd, synced from another machine) appears on the next startup
+# instead of this one.
 if [ "$SOURCE" != "compact" ] && [ "$EXTRACTION_DEGRADED" != true ]; then
-    "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/process_transcripts.py" --quiet 2>/dev/null
+    SWEEP_PY="$SCRIPT_DIR/.venv/bin/python3"
+    [ -x "$SWEEP_PY" ] || SWEEP_PY="python3"
+    SWEEP_CMD=(nice -n 19)
+    command -v ionice >/dev/null 2>&1 && SWEEP_CMD+=(ionice -c 3)
+    command -v setsid >/dev/null 2>&1 && SWEEP_CMD=(setsid "${SWEEP_CMD[@]}")
+    "${SWEEP_CMD[@]}" "$SWEEP_PY" "$SCRIPT_DIR/process_transcripts.py" --startup-sweep --quiet \
+        </dev/null >/dev/null 2>&1 &
 fi
 
 if [ "$SOURCE" = "compact" ]; then
