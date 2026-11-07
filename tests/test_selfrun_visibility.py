@@ -29,11 +29,16 @@ FOOTER_MARK = "Narrative pipeline:"
 WARN_MARK = "LLM_MEMORY_WARN: extraction"
 
 
-def _render(memory_home, project):
+def _render(memory_home, project, home=None):
     state_path = memory_home / "projects" / f"{project}.json"
     out_path = memory_home / "projects" / f"{project}.narrative.md"
     env = os.environ.copy()
     env["LLM_MEMORY_HOME"] = str(memory_home)
+    if home is not None:
+        # The footer is gated on the worker unit (U1a); look for it in the
+        # fake HOME, never on the machine running the suite.
+        env["HOME"] = str(home)
+        env.pop("XDG_CONFIG_HOME", None)
     result = subprocess.run(
         [sys.executable, str(H.REPO_DIR / "renderer.py"), str(state_path), str(out_path)],
         capture_output=True, text=True, env=env, timeout=30,
@@ -56,12 +61,15 @@ def _write_status(memory_home, project, **fields):
 
 def test_renderer_emits_waiting_footer_from_status_sidecar(tmp_path):
     home, memory_home = H.make_home(tmp_path)
+    # U1a: the footer reports the worker's sidecar, so it is baked only while
+    # the worker unit is installed (sanctioned amendment, llm-pm-1108).
+    H.install_worker_unit(home)
     H.write_project_state(memory_home, "selfrunproj")
     status_path = _write_status(
         memory_home, "selfrunproj",
         state="waiting", unprocessed=3, oldest_waiting="2026-09-01T00:00:00Z",
     )
-    result, out_path = _render(memory_home, "selfrunproj")
+    result, out_path = _render(memory_home, "selfrunproj", home=home)
     assert result.returncode in (0, 2), f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     md = out_path.read_text()
     assert FOOTER_MARK in md, f"expected the pipeline-waiting footer in rendered output:\n{md[-500:]}"
@@ -136,16 +144,31 @@ def _start(home, memory_home, sid):
 
 def test_uninstalled_worker_failed_status_is_a_note_not_a_failure(tmp_path):
     """The worker is opt-in. A "failed" sidecar left behind when its unit was
-    removed must not be narrated as a live outage, nor as never-succeeded."""
+    removed must not be narrated as a live outage, nor as never-succeeded.
+
+    Amended by U1a (sanctioned by llm-pm-1108, 8 Nov 2026).  The original
+    fixture had no transcripts and asserted the sidecar's own "2", which pinned
+    the defect: without the worker, nobody keeps that number current.  The
+    count printed now is coverage truth (3 here, deliberately not the
+    sidecar's 2), and the opt-in NOTE is gone.  The AUTOMATIC TASK line that
+    carries the truth count is the signal."""
+    from tests.test_codex_hook_parity import write_session_transcript
     home, memory_home = H.make_home(tmp_path)
     H.write_project_state(memory_home, "selfrunproj")
+    (memory_home / "projects" / "selfrunproj.narrative.md").write_text("# selfrunproj\n")
+    for i in range(3):
+        sid = f"selfrun-optin-{i}"
+        (memory_home / "conversations" / f"{sid}.md").write_text(
+            f"---\nsession_id: {sid}\nproject: selfrunproj\n---\n\n=== user ===\nhi\n")
+        write_session_transcript(memory_home, sid, "selfrunproj")
     _write_status(memory_home, "selfrunproj", state="failed", unprocessed=2,
                   last_attempt="2026-09-06T00:00:00Z")
     stdout = _start(home, memory_home, "selfrun-optin-sess")
     assert "LLM_MEMORY_WARN" not in stdout, stdout
     assert "NEVER succeeded" not in stdout, stdout
-    assert "extraction is off (opt-in); 2 session(s) for selfrunproj await /narrative" in stdout
-    assert "AUTOMATIC TASK: 2 new session(s) since last narrative update for project 'selfrunproj'." in stdout
+    assert "LLM_MEMORY_NOTE" not in stdout, stdout
+    assert "2 session(s)" not in stdout, stdout
+    assert "AUTOMATIC TASK: 3 new session(s) since last narrative update for project 'selfrunproj'." in stdout
 
 
 def test_never_succeeded_counts_only_this_projects_requests(tmp_path):

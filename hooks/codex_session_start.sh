@@ -21,8 +21,12 @@ esac
 NARRATIVE="$MEMORY_DIR/projects/$PROJECT.narrative.md"
 [ -f "$NARRATIVE" ] && cat "$NARRATIVE"
 
+# Same count source as session_start.sh: coverage truth, with the registry
+# count only as the fallback when coverage fails (lib_session_common.sh).
 COUNT_PYTHON=$(resolve_hook_python "$SCRIPT_DIR" 2>/dev/null || true)
-if [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
+if coverage_new_sessions "$PROJECT" "$SCRIPT_DIR" "$MEMORY_DIR"; then
+    NEW_SESSIONS="$COVERAGE_NEW_SESSIONS"
+elif [ -n "$COUNT_PYTHON" ] && count_new_sessions "$PROJECT" "$SCRIPT_DIR" "$COUNT_PYTHON"; then
     NEW_SESSIONS="$NEW_SESSION_COUNT"
 else
     NEW_SESSIONS=""

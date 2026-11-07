@@ -66,3 +66,46 @@ print(len(logged - merged))
     NEW_SESSION_COUNT_ERROR=""
     return 0
 }
+
+# The "N new session(s)" count a SessionStart hook prints is coverage truth:
+# unprocessed_count from compute_narrative_coverage, the list /narrative works
+# from.  The session registry minus merged sessions (count_new_sessions above)
+# is NOT that number.  On 8 Nov 2026 it said 637 where coverage said 26,
+# because it counts sessions that coverage filters out.  Callers fall back to
+# count_new_sessions only when this fails.  Merged sessions that grew after
+# the merge (stale_count) are not "new".  They stay on the age-gated liveness
+# lines, which print their own coverage count from LIVENESS.
+#
+# Sets LIVENESS (narrative_liveness JSON) and COVERAGE_NEW_SESSIONS; both are
+# empty on failure.  An unparseable ledger is a failure, not an empty ledger:
+# compute_narrative_coverage would treat it as "nothing merged" and print an
+# inflated count, where the caller must warn instead.
+coverage_new_sessions() {
+    local project="$1"
+    local script_dir="$2"
+    local memory_dir="$3"
+    LIVENESS=""
+    COVERAGE_NEW_SESSIONS=""
+    [ -n "$project" ] || return 1
+    local py="$memory_dir/lib/.venv/bin/python3"
+    [ -x "$py" ] || py="$script_dir/.venv/bin/python3"
+    [ -x "$py" ] || py="python3"
+    LIVENESS=$("$py" -c "
+import json, sys
+sys.path.insert(0, '$script_dir')
+from tools.memory_config import memory_root
+ledger = memory_root() / 'projects' / ('$project' + '.json')
+if ledger.exists():
+    json.loads(ledger.read_text())
+from server import compute_narrative_coverage, narrative_liveness
+print(json.dumps(narrative_liveness(compute_narrative_coverage('$project')), separators=(',', ':')))
+" 2>/dev/null)
+    [ -n "$LIVENESS" ] || return 1
+    COVERAGE_NEW_SESSIONS=$(printf '%s\n' "$LIVENESS" | jq -r '.unprocessed_count // empty' 2>/dev/null)
+    if ! [[ "$COVERAGE_NEW_SESSIONS" =~ ^[0-9]+$ ]]; then
+        LIVENESS=""
+        COVERAGE_NEW_SESSIONS=""
+        return 1
+    fi
+    return 0
+}

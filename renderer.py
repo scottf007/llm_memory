@@ -742,7 +742,19 @@ def render_with_report(state: dict, now: datetime | None = None) -> tuple[str, d
     except (OSError, json.JSONDecodeError):
         extraction_status = {}
     waiting = int(extraction_status.get("unprocessed", 0)) + int(extraction_status.get("stale", 0))
-    if extraction_status.get("state") in ("waiting", "failed") and waiting:
+    # Only the opt-in worker writes the sidecar, so its counts are evidence
+    # only while the worker unit is installed (the same rule
+    # hooks/session_start.sh applies).  Without the unit, the sidecar is
+    # whatever the worker wrote last.  On 8 Nov 2026 that baked "1 session(s)
+    # waiting" into a narrative while coverage said 26.  Don't bake a count
+    # here at all; SessionStart prints coverage truth when the narrative is read.
+    import os  # local: this edit stays inside this block (llm-u2 rebases onto renderer.py)
+    worker_unit = (
+        Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        / "systemd" / "user" / "llm-memory-extract.service"
+    )
+    if (extraction_status.get("state") in ("waiting", "failed") and waiting
+            and worker_unit.is_file()):
         md += f"\n> ⚠ Narrative pipeline: {waiting} session(s) waiting — see {status_path}\n"
     report = {
         "project": state.get("project"),

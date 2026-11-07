@@ -120,3 +120,12 @@ def real_names_file():
     if not names:
         pytest.skip("tests/.real-names exists but is empty")
     return REAL_NAMES_FILE, names
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_narrative_mode(monkeypatch):
+    """LLM_MEMORY_NARRATIVE is internal plumbing that AM sets per seat role.
+    hooks/session_start.sh exits silently when it is "off", and the hook tests
+    pass os.environ through to the hook.  Without this, a seat launched with
+    "off" that runs this suite would see empty stdout from every hook test."""
+    monkeypatch.delenv("LLM_MEMORY_NARRATIVE", raising=False)
